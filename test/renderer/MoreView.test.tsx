@@ -94,6 +94,18 @@ describe('MoreView', () => {
     expect(handlers.onUpdateWorkflowsEarlyAccess).not.toHaveBeenCalled();
   });
 
+  it('dismisses the Workflows confirmation with Escape', async () => {
+    const user = userEvent.setup();
+    const handlers = renderMoreView({ workflowsEnabled: true });
+
+    await user.click(within(workflowsCard()).getByRole('switch', { name: t.more.workflowsEnabled }));
+    expect(screen.getByRole('dialog', { name: t.more.workflowsDisableTitle })).toBeVisible();
+    await user.keyboard('{Escape}');
+
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+    expect(handlers.onUpdateWorkflowsEarlyAccess).not.toHaveBeenCalled();
+  });
+
   it('disables Workflows only after the person confirms', async () => {
     const user = userEvent.setup();
     const handlers = renderMoreView({ workflowsEnabled: true });

@@ -20,10 +20,7 @@ const notionFetch = async (
   init: RequestInit = {},
 ): Promise<unknown> => {
   const normalizedHeaders = new Headers(init.headers);
-  const headers: Record<string, string> = {};
-  normalizedHeaders.forEach((value, key) => {
-    headers[key] = value;
-  });
+  const headers = Object.fromEntries(normalizedHeaders.entries());
   headers.Authorization = `Bearer ${token}`;
   headers['Notion-Version'] = NOTION_VERSION;
   headers.Accept = 'application/json';
@@ -71,6 +68,20 @@ export const notionToolModule: InternalToolModule = createTokenConnectorModule({
   description: 'Busca, lee y actualiza paginas y bases de Notion usando un token de integracion guardado localmente.',
   version: '0.1.0',
   connectionStatusActionId: 'notion.connection.status',
+  connectionStatusAction: {
+    name: 'Estado de conexion',
+    description: 'Revisa si el token de Notion esta conectado.',
+    risk: 'low',
+    outputSchema: {
+      type: 'object',
+      properties: {
+        connected: { type: 'boolean' },
+        username: { type: 'string' },
+        subject: { type: 'string' },
+      },
+      required: ['connected'],
+    },
+  },
   secrets: [
     {
       name: NOTION_INTEGRATION_TOKEN_SECRET,
@@ -103,22 +114,6 @@ export const notionToolModule: InternalToolModule = createTokenConnectorModule({
     }
   },
   actions: [
-    {
-      id: 'notion.connection.status',
-      name: 'Estado de conexion',
-      description: 'Revisa si el token de Notion esta conectado.',
-      risk: 'low',
-      outputSchema: {
-        type: 'object',
-        properties: {
-          connected: { type: 'boolean' },
-          username: { type: 'string' },
-          subject: { type: 'string' },
-        },
-        required: ['connected'],
-      },
-      run: async () => ({ success: true, data: { connected: true } }),
-    },
     {
       id: 'notion.search',
       name: 'Buscar',

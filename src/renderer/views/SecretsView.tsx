@@ -58,11 +58,9 @@ export function SecretsView({
   };
 
   const handleUpdate = async () => {
-    if (!editingSecret) {
-      return;
-    }
+    const secret = editingSecret!;
     await onUpdateSecret({
-      id: editingSecret.id,
+      id: secret.id,
       name: editSecretName,
       ...(editSecretValue ? { value: editSecretValue } : {}),
     });
@@ -186,6 +184,7 @@ export function SecretsView({
                       size="small"
                       color="error"
                       disabled={busy}
+                      aria-label={t.secrets.delete}
                       onClick={() => {
                         if (window.confirm(t.secrets.deleteConfirm(secret.name))) {
                           void onDeleteSecret(secret.id);

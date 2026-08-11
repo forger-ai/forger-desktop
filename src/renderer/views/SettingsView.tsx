@@ -216,6 +216,31 @@ interface TextToSpeechConfigDraft {
   defaultVoice: string;
 }
 
+const DEFAULT_SPEECH_CONFIG_DRAFT: SpeechConfigDraft = {
+  model: 'base',
+  maxConcurrentJobs: '',
+  maxRealtimeSessions: '',
+  autoStart: false,
+};
+
+const DEFAULT_WAKE_WORD_CONFIG_DRAFT: WakeWordConfigDraft = {
+  enabled: false,
+  deviceId: '',
+  modelId: 'hey jarvis',
+  threshold: '0.5',
+  patience: '2',
+  cooldownMs: '2500',
+};
+
+const DEFAULT_TTS_CONFIG_DRAFT: TextToSpeechConfigDraft = {
+  autoStart: false,
+  maxTextCharacters: '',
+  maxConcurrentJobs: '',
+  enabledVoices: [],
+  defaultModel: 'kokoro',
+  defaultVoice: '',
+};
+
 type SpeechNumberDraftKey = 'maxConcurrentJobs' | 'maxRealtimeSessions';
 type WakeWordNumberDraftKey = 'threshold' | 'patience' | 'cooldownMs';
 type TextToSpeechNumberDraftKey = 'maxTextCharacters' | 'maxConcurrentJobs';
@@ -372,7 +397,7 @@ const SettingsSubviewHeader = ({
   onBack,
 }: {
   title: string;
-  description?: string;
+  description: string;
   backLabel: string;
   onBack: () => void;
 }) => (
@@ -382,7 +407,7 @@ const SettingsSubviewHeader = ({
     </Button>
     <Stack spacing={0.5}>
       <Typography variant="h4">{title}</Typography>
-      {description ? <Typography color="text.secondary">{description}</Typography> : null}
+      <Typography color="text.secondary">{description}</Typography>
     </Stack>
   </Stack>
 );
@@ -422,7 +447,6 @@ export function SettingsView({
   llmProviderProfiles,
   activeProviderProfiles,
   onAgentDefaultsChange,
-  onActiveProviderProfileChange,
   onProviderProfileDefaultsChange,
   developerMode,
   onDeveloperModeChange,
@@ -467,7 +491,7 @@ export function SettingsView({
 
   const [settingsSubview, setSettingsSubview] = useState<SettingsSubview>('main');
   const [speechState, setSpeechState] = useState<SpeechToTextState | null>(null);
-  const [speechConfigDraft, setSpeechConfigDraft] = useState<SpeechConfigDraft | null>(null);
+  const [speechConfigDraft, setSpeechConfigDraft] = useState<SpeechConfigDraft>(DEFAULT_SPEECH_CONFIG_DRAFT);
   const [speechConfigDirty, setSpeechConfigDirty] = useState(false);
   const [speechBusy, setSpeechBusy] = useState(false);
   const [speechError, setSpeechError] = useState('');
@@ -475,14 +499,14 @@ export function SettingsView({
   const [speechRecorder, setSpeechRecorder] = useState<MediaRecorder | null>(null);
   const speechChunksRef = useRef<Blob[]>([]);
   const [wakeWordState, setWakeWordState] = useState<WakeWordState | null>(null);
-  const [wakeWordConfigDraft, setWakeWordConfigDraft] = useState<WakeWordConfigDraft | null>(null);
+  const [wakeWordConfigDraft, setWakeWordConfigDraft] = useState<WakeWordConfigDraft>(DEFAULT_WAKE_WORD_CONFIG_DRAFT);
   const [wakeWordConfigDirty, setWakeWordConfigDirty] = useState(false);
   const [wakeWordBusy, setWakeWordBusy] = useState(false);
   const [wakeWordError, setWakeWordError] = useState('');
   const [wakeWordAdvancedOpen, setWakeWordAdvancedOpen] = useState(false);
   const [wakeWordDevices, setWakeWordDevices] = useState<Array<{ id: string; label: string; default?: boolean }>>([]);
   const [ttsState, setTtsState] = useState<TextToSpeechState | null>(null);
-  const [ttsConfigDraft, setTtsConfigDraft] = useState<TextToSpeechConfigDraft | null>(null);
+  const [ttsConfigDraft, setTtsConfigDraft] = useState<TextToSpeechConfigDraft>(DEFAULT_TTS_CONFIG_DRAFT);
   const [ttsConfigDirty, setTtsConfigDirty] = useState(false);
   const [ttsBusy, setTtsBusy] = useState(false);
   const [ttsError, setTtsError] = useState('');
@@ -635,9 +659,7 @@ export function SettingsView({
   };
   const addDeveloperPathDraft = (entry: string) => {
     const current = developerPathDraft.split('\n').map((value) => value.trim()).filter(Boolean);
-    if (!current.includes(entry)) {
-      setDeveloperPathDraft([...current, entry].join('\n'));
-    }
+    setDeveloperPathDraft([...current, entry].join('\n'));
   };
   const appNames = useMemo(
     () => new Map(installedApps.map((appEntry) => [appEntry.id, appEntry.name])),
@@ -656,7 +678,6 @@ export function SettingsView({
   const memoryFormInvalid = !memoryForm.body.trim() || memoryFormAppRequired;
   const resetMemoryForm = () => setMemoryForm(EMPTY_MEMORY_FORM);
   const submitMemoryForm = () => {
-    if (memoryFormInvalid) return;
     const payload = {
       scope: memoryForm.scope,
       appId: memoryForm.scope === 'app' ? memoryForm.appId : undefined,
@@ -758,25 +779,19 @@ export function SettingsView({
   const updateSpeechDraft = (input: Partial<SpeechConfigDraft>) => {
     setSpeechConfigDirty(true);
     setSpeechConfigDraft((current) => ({
-      ...(current ?? (speechState ? speechConfigToDraft(speechState.config) : {
-        model: 'base',
-        maxConcurrentJobs: '',
-        maxRealtimeSessions: '',
-        autoStart: false,
-      })),
+      ...current,
       ...input,
     }));
   };
 
   const commitSpeechNumber = (key: SpeechNumberDraftKey) => {
-    setSpeechConfigDraft((current) => current ? ({
+    setSpeechConfigDraft((current) => ({
       ...current,
       [key]: String(parseSpeechDraftNumber(current[key])),
-    }) : current);
+    }));
   };
 
   const saveSpeechConfig = () => {
-    if (!speechConfigDraft) return;
     void runSpeechAction(() => window.forger.speechToTextUpdateConfig({
       model: speechConfigDraft.model,
       maxConcurrentJobs: parseSpeechDraftNumber(speechConfigDraft.maxConcurrentJobs),
@@ -805,35 +820,20 @@ export function SettingsView({
   const updateWakeWordDraft = (input: Partial<WakeWordConfigDraft>) => {
     setWakeWordConfigDirty(true);
     setWakeWordConfigDraft((current) => ({
-      ...(current ?? (wakeWordState ? wakeWordConfigToDraft(wakeWordState.config) : {
-        enabled: false,
-        deviceId: '',
-        modelId: 'hey jarvis',
-        threshold: '0.5',
-        patience: '2',
-        cooldownMs: '2500',
-      })),
+      ...current,
       ...input,
     }));
   };
 
   const commitWakeWordNumber = (key: WakeWordNumberDraftKey) => {
-    setWakeWordConfigDraft((current) => current ? ({
+    setWakeWordConfigDraft((current) => ({
       ...current,
       [key]: String(parseWakeWordDraftNumber(current[key])),
-    }) : current);
+    }));
   };
 
   const saveWakeWordConfig = async (input?: Partial<WakeWordConfigDraft>) => {
-    const baseDraft: WakeWordConfigDraft = wakeWordConfigDraft ?? (wakeWordState ? wakeWordConfigToDraft(wakeWordState.config) : {
-      enabled: false,
-      deviceId: '',
-      modelId: 'hey jarvis',
-      threshold: '0.5',
-      patience: '2',
-      cooldownMs: '2500',
-    });
-    const draft: WakeWordConfigDraft = { ...baseDraft, ...(input ?? {}) };
+    const draft: WakeWordConfigDraft = { ...wakeWordConfigDraft, ...(input ?? {}) };
     await runWakeWordAction(() => window.forger.wakeWordUpdateConfig({
       enabled: draft.enabled,
       deviceId: draft.deviceId,
@@ -847,27 +847,19 @@ export function SettingsView({
   const updateTtsDraft = (input: Partial<TextToSpeechConfigDraft>) => {
     setTtsConfigDirty(true);
     setTtsConfigDraft((current) => ({
-      ...(current ?? (ttsState ? textToSpeechConfigToDraft(ttsState.config) : {
-        autoStart: false,
-        maxTextCharacters: '',
-        maxConcurrentJobs: '',
-        enabledVoices: [],
-        defaultModel: 'kokoro',
-        defaultVoice: '',
-      })),
+      ...current,
       ...input,
     }));
   };
 
   const commitTtsNumber = (key: TextToSpeechNumberDraftKey) => {
-    setTtsConfigDraft((current) => current ? ({
+    setTtsConfigDraft((current) => ({
       ...current,
       [key]: String(parseSpeechDraftNumber(current[key])),
-    }) : current);
+    }));
   };
 
   const saveTtsConfig = () => {
-    if (!ttsConfigDraft) return;
     void runTtsAction(() => window.forger.textToSpeechUpdateConfig({
       autoStart: ttsConfigDraft.autoStart,
       maxTextCharacters: parseSpeechDraftNumber(ttsConfigDraft.maxTextCharacters),
@@ -904,14 +896,7 @@ export function SettingsView({
       return;
     }
 
-    let stream: MediaStream | null = null;
-    try {
-      stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-    } catch (error) {
-      stream?.getTracks().forEach((track) => track.stop());
-      throw error;
-    }
-    const mediaStream = stream;
+    const mediaStream = await navigator.mediaDevices.getUserMedia({ audio: true });
 
     const audioTracks = mediaStream.getAudioTracks();
     if (audioTracks.length === 0) {
@@ -969,8 +954,8 @@ export function SettingsView({
     setSpeechRecorder(recorder);
   };
 
-  const stopSpeechRecording = () => {
-    speechRecorder?.stop();
+  const stopSpeechRecording = (recorder: MediaRecorder) => {
+    recorder.stop();
     setSpeechRecorder(null);
   };
 
@@ -1222,6 +1207,7 @@ export function SettingsView({
   const renderSpeechToText = () => {
     const state = speechState;
     const draft = speechConfigDraft;
+    const selectedModel = state?.modelOptions.some((option) => option.id === draft.model) ? draft.model : '';
     const activeQueue = state?.queue.filter((job) => job.status !== 'completed') ?? [];
     const configLocked = state?.running === true;
     return (
@@ -1269,10 +1255,11 @@ export function SettingsView({
               ) : null}
               <Stack direction={{ xs: 'column', md: 'row' }} spacing={1}>
                 <FormControl size="small" fullWidth disabled={configLocked}>
-                  <InputLabel>{t.settings.speechModel}</InputLabel>
+                  <InputLabel id="speech-config-model-label">{t.settings.speechModel}</InputLabel>
                   <Select
+                    labelId="speech-config-model-label"
                     label={t.settings.speechModel}
-                    value={draft?.model ?? ''}
+                    value={selectedModel}
                     onChange={(event) => updateSpeechDraft({ model: event.target.value })}
                   >
                     {(state?.modelOptions ?? []).map((option) => (
@@ -1284,14 +1271,14 @@ export function SettingsView({
                 </FormControl>
                 <EditableNumberField
                   label={t.settings.speechConcurrency}
-                  value={draft?.maxConcurrentJobs ?? ''}
+                  value={draft.maxConcurrentJobs}
                   onChange={(value) => updateSpeechDraft({ maxConcurrentJobs: value })}
                   onCommit={() => commitSpeechNumber('maxConcurrentJobs')}
                   disabled={configLocked}
                 />
                 <EditableNumberField
                   label={t.settings.speechRealtimeSessions}
-                  value={draft?.maxRealtimeSessions ?? ''}
+                  value={draft.maxRealtimeSessions}
                   onChange={(value) => updateSpeechDraft({ maxRealtimeSessions: value })}
                   onCommit={() => commitSpeechNumber('maxRealtimeSessions')}
                   disabled={configLocked}
@@ -1300,14 +1287,14 @@ export function SettingsView({
               <FormControlLabel
                 control={
                   <Switch
-                    checked={draft?.autoStart ?? false}
+                    checked={draft.autoStart}
                     onChange={(event) => updateSpeechDraft({ autoStart: event.target.checked })}
                     disabled={configLocked}
                   />
                 }
                 label={t.settings.speechAutoStart}
               />
-              <Button variant="outlined" size="small" disabled={speechBusy || configLocked || !state || !draft} onClick={saveSpeechConfig} sx={{ alignSelf: 'flex-start' }}>
+              <Button variant="outlined" size="small" disabled={speechBusy || configLocked || !state} onClick={saveSpeechConfig} sx={{ alignSelf: 'flex-start' }}>
                 {t.settings.memorySave}
               </Button>
             </Stack>
@@ -1342,7 +1329,7 @@ export function SettingsView({
                   {t.settings.speechPickAudio}
                 </Button>
                 {speechRecorder ? (
-                  <Button variant="contained" color="warning" size="small" startIcon={<StopRounded />} onClick={stopSpeechRecording}>
+                  <Button variant="contained" color="warning" size="small" startIcon={<StopRounded />} onClick={() => stopSpeechRecording(speechRecorder)}>
                     {t.settings.speechStopRecording}
                   </Button>
                 ) : (
@@ -1402,10 +1389,13 @@ export function SettingsView({
 
   const renderWakeWord = () => {
     const state = wakeWordState;
-    const draft = wakeWordConfigDraft ?? (state ? wakeWordConfigToDraft(state.config) : null);
+    const draft = wakeWordConfigDraft;
     const installed = state?.installed === true && state?.repairRequired !== true;
-    const selectedModel = state?.models.some((model) => model.id === draft?.modelId) ? draft?.modelId ?? '' : state?.models[0]?.id ?? 'hey jarvis';
-    const selectedDevice = draft?.deviceId || wakeWordDevices.find((device) => device.default)?.id || wakeWordDevices[0]?.id || 'default';
+    const selectedModel = state?.models.some((model) => model.id === draft.modelId) ? draft.modelId : state?.models[0]?.id ?? '';
+    const selectedDevice = wakeWordDevices.some((device) => device.id === draft.deviceId)
+      ? draft.deviceId
+      : wakeWordDevices.find((device) => device.default)?.id ?? wakeWordDevices[0]?.id ?? '';
+    const wakeWordModelsAvailable = Boolean(state?.models.length);
     const statusLabel = state ? t.settings.wakeWordStatuses[state.status] : t.settings.speechLoading;
     const runtimeLabel = state?.runtime
       ? state.runtime.state === 'unavailable' && state.runtime.technicalCode
@@ -1474,7 +1464,7 @@ export function SettingsView({
                   </Typography>
                 </Stack>
                 <FormControlLabel
-                  control={<Switch checked={draft?.enabled ?? false} disabled={!installed || wakeWordBusy} onChange={(event) => {
+                  control={<Switch checked={draft.enabled} disabled={!installed || wakeWordBusy} onChange={(event) => {
                     const enabled = event.target.checked;
                     updateWakeWordDraft({ enabled });
                     void saveWakeWordConfig({ enabled });
@@ -1484,9 +1474,10 @@ export function SettingsView({
                 />
               </Stack>
               <Stack direction={{ xs: 'column', md: 'row' }} spacing={1}>
-                <FormControl size="small" fullWidth disabled={!installed || wakeWordBusy || (state?.models.length ?? 0) === 0}>
-                  <InputLabel>{t.settings.wakeWordModel}</InputLabel>
+                <FormControl size="small" fullWidth disabled={!installed || wakeWordBusy || !wakeWordModelsAvailable}>
+                  <InputLabel id="wake-word-model-label">{t.settings.wakeWordModel}</InputLabel>
                   <Select
+                    labelId="wake-word-model-label"
                     label={t.settings.wakeWordModel}
                     value={selectedModel}
                     onChange={(event) => {
@@ -1501,8 +1492,9 @@ export function SettingsView({
                   </Select>
                 </FormControl>
                 <FormControl size="small" fullWidth disabled={!installed || wakeWordBusy}>
-                  <InputLabel>{t.settings.wakeWordDevice}</InputLabel>
+                  <InputLabel id="wake-word-device-label">{t.settings.wakeWordDevice}</InputLabel>
                   <Select
+                    labelId="wake-word-device-label"
                     label={t.settings.wakeWordDevice}
                     value={selectedDevice}
                     onChange={(event) => {
@@ -1529,9 +1521,9 @@ export function SettingsView({
               <Collapse in={wakeWordAdvancedOpen} timeout="auto" unmountOnExit>
                 <Stack spacing={1.5}>
                   <Stack direction={{ xs: 'column', md: 'row' }} spacing={1}>
-                    <EditableNumberField label={t.settings.wakeWordThreshold} value={draft?.threshold ?? ''} onChange={(value) => updateWakeWordDraft({ threshold: value })} onCommit={() => commitWakeWordNumber('threshold')} disabled={wakeWordBusy} />
-                    <EditableNumberField label={t.settings.wakeWordPatience} value={draft?.patience ?? ''} onChange={(value) => updateWakeWordDraft({ patience: value })} onCommit={() => commitWakeWordNumber('patience')} disabled={wakeWordBusy} />
-                    <EditableNumberField label={t.settings.wakeWordCooldown} value={draft?.cooldownMs ?? ''} onChange={(value) => updateWakeWordDraft({ cooldownMs: value })} onCommit={() => commitWakeWordNumber('cooldownMs')} disabled={wakeWordBusy} />
+                    <EditableNumberField label={t.settings.wakeWordThreshold} value={draft.threshold} onChange={(value) => updateWakeWordDraft({ threshold: value })} onCommit={() => commitWakeWordNumber('threshold')} disabled={wakeWordBusy} />
+                    <EditableNumberField label={t.settings.wakeWordPatience} value={draft.patience} onChange={(value) => updateWakeWordDraft({ patience: value })} onCommit={() => commitWakeWordNumber('patience')} disabled={wakeWordBusy} />
+                    <EditableNumberField label={t.settings.wakeWordCooldown} value={draft.cooldownMs} onChange={(value) => updateWakeWordDraft({ cooldownMs: value })} onCommit={() => commitWakeWordNumber('cooldownMs')} disabled={wakeWordBusy} />
                   </Stack>
                   <Button variant="outlined" size="small" disabled={wakeWordBusy || !wakeWordConfigDirty} onClick={() => void saveWakeWordConfig()} sx={{ alignSelf: 'flex-start' }}>
                     {t.settings.memorySave}
@@ -1562,9 +1554,14 @@ export function SettingsView({
   const renderTextToSpeech = () => {
     const state = ttsState;
     const draft = ttsConfigDraft;
-    const enabledVoiceSet = new Set(draft?.enabledVoices ?? []);
-    const loadedVoices = (state?.voices ?? []).filter((voice) => voice.enabled);
-    const selectedVoices = state?.voices.filter((voice) => voice.model === ttsModel && voice.enabled) ?? [];
+    const enabledVoiceSet = new Set(draft.enabledVoices);
+    const voices = state?.voices ?? [];
+    const loadedVoices = voices.filter((voice) => voice.enabled);
+    const selectedVoices = voices.filter((voice) => voice.model === ttsModel && voice.enabled);
+    const selectedConfigModel = state?.models.some((model) => model.id === draft.defaultModel) ? draft.defaultModel : '';
+    const selectedDefaultVoice = loadedVoices.some((voice) => voice.id === draft.defaultVoice) ? draft.defaultVoice : '';
+    const selectedTestModel = state?.models.some((model) => model.id === ttsModel) ? ttsModel : '';
+    const selectedTestVoice = selectedVoices.some((voice) => voice.id === ttsVoice) ? ttsVoice : '';
     const activeQueue = state?.queue.filter((job) => job.status === 'queued' || job.status === 'running') ?? [];
     const configLocked = state?.running === true;
     return (
@@ -1613,23 +1610,24 @@ export function SettingsView({
               <Stack direction={{ xs: 'column', md: 'row' }} spacing={1}>
                 <EditableNumberField
                   label={t.settings.ttsMaxText}
-                  value={draft?.maxTextCharacters ?? ''}
+                  value={draft.maxTextCharacters}
                   onChange={(value) => updateTtsDraft({ maxTextCharacters: value })}
                   onCommit={() => commitTtsNumber('maxTextCharacters')}
                   disabled={configLocked}
                 />
                 <EditableNumberField
                   label={t.settings.speechConcurrency}
-                  value={draft?.maxConcurrentJobs ?? ''}
+                  value={draft.maxConcurrentJobs}
                   onChange={(value) => updateTtsDraft({ maxConcurrentJobs: value })}
                   onCommit={() => commitTtsNumber('maxConcurrentJobs')}
                   disabled={configLocked}
                 />
                 <FormControl size="small" fullWidth disabled={configLocked}>
-                  <InputLabel>{t.settings.speechModel}</InputLabel>
+                  <InputLabel id="tts-config-model-label">{t.settings.speechModel}</InputLabel>
                   <Select
+                    labelId="tts-config-model-label"
                     label={t.settings.speechModel}
-                    value={draft?.defaultModel ?? 'kokoro'}
+                    value={selectedConfigModel}
                     onChange={(event) => updateTtsDraft({ defaultModel: event.target.value })}
                   >
                     {(state?.models ?? []).map((model) => (
@@ -1638,10 +1636,11 @@ export function SettingsView({
                   </Select>
                 </FormControl>
                 <FormControl size="small" fullWidth disabled={configLocked}>
-                  <InputLabel>{t.settings.ttsDefaultVoice}</InputLabel>
+                  <InputLabel id="tts-default-voice-label">{t.settings.ttsDefaultVoice}</InputLabel>
                   <Select
+                    labelId="tts-default-voice-label"
                     label={t.settings.ttsDefaultVoice}
-                    value={draft?.defaultVoice ?? ''}
+                    value={selectedDefaultVoice}
                     onChange={(event) => updateTtsDraft({ defaultVoice: event.target.value })}
                   >
                     {loadedVoices.map((voice) => (
@@ -1651,7 +1650,7 @@ export function SettingsView({
                 </FormControl>
               </Stack>
               <FormControlLabel
-                control={<Switch checked={draft?.autoStart ?? false} disabled={configLocked} onChange={(event) => updateTtsDraft({ autoStart: event.target.checked })} />}
+                control={<Switch checked={draft.autoStart} disabled={configLocked} onChange={(event) => updateTtsDraft({ autoStart: event.target.checked })} />}
                 label={t.settings.speechAutoStart}
               />
               <Stack spacing={0.75}>
@@ -1671,7 +1670,7 @@ export function SettingsView({
                   ))}
                 </Stack>
               </Stack>
-              <Button variant="outlined" size="small" disabled={ttsBusy || configLocked || !state || !draft} onClick={saveTtsConfig} sx={{ alignSelf: 'flex-start' }}>
+              <Button variant="outlined" size="small" disabled={ttsBusy || configLocked || !state} onClick={saveTtsConfig} sx={{ alignSelf: 'flex-start' }}>
                 {t.settings.memorySave}
               </Button>
             </Stack>
@@ -1684,10 +1683,10 @@ export function SettingsView({
               <TextField size="small" multiline minRows={3} value={ttsText} onChange={(event) => setTtsText(event.target.value)} label={t.settings.ttsText} />
               <Stack direction={{ xs: 'column', md: 'row' }} spacing={1}>
                 <FormControl size="small" fullWidth>
-                  <InputLabel>{t.settings.speechModel}</InputLabel>
-                  <Select label={t.settings.speechModel} value={ttsModel} onChange={(event) => {
+                  <InputLabel id="tts-test-model-label">{t.settings.speechModel}</InputLabel>
+                  <Select labelId="tts-test-model-label" label={t.settings.speechModel} value={selectedTestModel} onChange={(event) => {
                     const nextModel = event.target.value;
-                    const nextVoices = (state?.voices ?? []).filter((voice) => voice.model === nextModel && voice.enabled);
+                    const nextVoices = voices.filter((voice) => voice.model === nextModel && voice.enabled);
                     setTtsModel(nextModel);
                     setTtsVoice((currentVoice) => nextVoices.some((voice) => voice.id === currentVoice) ? currentVoice : nextVoices[0]?.id ?? '');
                   }}>
@@ -1695,8 +1694,8 @@ export function SettingsView({
                   </Select>
                 </FormControl>
                 <FormControl size="small" fullWidth>
-                  <InputLabel>{t.settings.ttsVoice}</InputLabel>
-                  <Select label={t.settings.ttsVoice} value={ttsVoice} onChange={(event) => setTtsVoice(event.target.value)}>
+                  <InputLabel id="tts-test-voice-label">{t.settings.ttsVoice}</InputLabel>
+                  <Select labelId="tts-test-voice-label" label={t.settings.ttsVoice} value={selectedTestVoice} onChange={(event) => setTtsVoice(event.target.value)}>
                     {selectedVoices.map((voice) => <MenuItem value={voice.id} key={voice.id}>{voice.label} · {voice.language}</MenuItem>)}
                   </Select>
                 </FormControl>
@@ -1748,12 +1747,9 @@ export function SettingsView({
       installed: boolean;
       authenticated: boolean;
       busy: boolean;
-      profiles: LlmProviderProfileMetadata[];
-      activeProfileId?: string;
       onInstall: () => void;
       onSignIn: () => void;
       onDisconnect: () => void;
-      onProfileChange: (profileId: string) => void;
       modelLabel: string;
       modelValue: string;
       modelOptions: Array<{ displayModelName: string; realModelName: string }>;
@@ -1815,12 +1811,9 @@ export function SettingsView({
         installed: codexAuthStatus.installed,
         authenticated: Boolean(providerConnections.codex) && codexAuthStatus.authenticated,
         busy: codexAuthBusy,
-        profiles: providerProfiles('codex'),
-        activeProfileId: activeProviderProfiles.codex,
         onInstall: onReinstallCodex,
         onSignIn: onOpenCodexConfig,
         onDisconnect: onDisconnectCodex,
-        onProfileChange: (profileId) => onActiveProviderProfileChange({ provider: 'codex', profileId }),
         modelLabel: t.settings.providerDefaultModelLabel,
         modelValue: codexDefaultModel,
         modelOptions,
@@ -1861,12 +1854,9 @@ export function SettingsView({
         installed: claudeAuthStatus.installed,
         authenticated: Boolean(providerConnections.claude) && claudeAuthStatus.authenticated,
         busy: claudeAuthBusy,
-        profiles: providerProfiles('claude'),
-        activeProfileId: activeProviderProfiles.claude,
         onInstall: onReinstallClaude,
         onSignIn: onOpenClaudeConfig,
         onDisconnect: onDisconnectClaude,
-        onProfileChange: (profileId) => onActiveProviderProfileChange({ provider: 'claude', profileId }),
         modelLabel: t.settings.providerDefaultModelLabel,
         modelValue: claudeDefaultModel,
         modelOptions: claudeModelOptions,
@@ -1907,12 +1897,9 @@ export function SettingsView({
         installed: antigravityAuthStatus.installed,
         authenticated: Boolean(providerConnections.antigravity) && antigravityAuthStatus.authenticated,
         busy: antigravityAuthBusy,
-        profiles: providerProfiles('antigravity'),
-        activeProfileId: activeProviderProfiles.antigravity,
         onInstall: onReinstallAntigravity,
         onSignIn: onOpenAntigravityConfig,
         onDisconnect: onDisconnectAntigravity,
-        onProfileChange: (profileId) => onActiveProviderProfileChange({ provider: 'antigravity', profileId }),
         modelLabel: t.settings.providerDefaultModelLabel,
         modelValue: antigravityDefaultModel,
         modelOptions: antigravityModelOptions,
@@ -2014,8 +2001,9 @@ export function SettingsView({
                 {status === 'authenticated' ? (
                   <Stack spacing={1}>
                     <FormControl size="small" fullWidth>
-                      <InputLabel>{provider.modelLabel}</InputLabel>
+                      <InputLabel id={`${provider.provider}-default-model-label`}>{provider.modelLabel}</InputLabel>
                       <Select
+                        labelId={`${provider.provider}-default-model-label`}
                         label={provider.modelLabel}
                         value={provider.modelValue}
                         onChange={(event) => provider.onModelChange(event.target.value)}
@@ -2028,8 +2016,9 @@ export function SettingsView({
                       </Select>
                     </FormControl>
                     <FormControl size="small" fullWidth>
-                      <InputLabel>{provider.effortLabel}</InputLabel>
+                      <InputLabel id={`${provider.provider}-default-effort-label`}>{provider.effortLabel}</InputLabel>
                       <Select
+                        labelId={`${provider.provider}-default-effort-label`}
                         label={provider.effortLabel}
                         value={provider.effortValue}
                         disabled={provider.effortOptions.length <= 1}
@@ -2043,8 +2032,9 @@ export function SettingsView({
                       </Select>
                     </FormControl>
                     <FormControl size="small" fullWidth>
-                      <InputLabel>{t.settings.providerInactivityTimeoutLabel}</InputLabel>
+                      <InputLabel id={`${provider.provider}-inactivity-timeout-label`}>{t.settings.providerInactivityTimeoutLabel}</InputLabel>
                       <Select
+                        labelId={`${provider.provider}-inactivity-timeout-label`}
                         label={t.settings.providerInactivityTimeoutLabel}
                         value={provider.timeoutMinutes}
                         onChange={(event) => provider.onTimeoutChange(Number(event.target.value))}
@@ -2174,8 +2164,9 @@ export function SettingsView({
               </Stack>
               <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1}>
                 <FormControl size="small" fullWidth>
-                  <InputLabel>{t.settings.agentDefaultProvider}</InputLabel>
+                  <InputLabel id="agent-default-provider-label">{t.settings.agentDefaultProvider}</InputLabel>
                   <Select
+                    labelId="agent-default-provider-label"
                     label={t.settings.agentDefaultProvider}
                     value={defaultAgentProvider}
                     onChange={(event) =>
@@ -2192,8 +2183,9 @@ export function SettingsView({
                   </Select>
                 </FormControl>
                 <FormControl size="small" fullWidth>
-                  <InputLabel>{t.settings.agentDefaultChatPermissions}</InputLabel>
+                  <InputLabel id="agent-default-chat-permissions-label">{t.settings.agentDefaultChatPermissions}</InputLabel>
                   <Select
+                    labelId="agent-default-chat-permissions-label"
                     label={t.settings.agentDefaultChatPermissions}
                     value={defaultChatPermissionMode}
                     onChange={(event) =>
@@ -2208,8 +2200,9 @@ export function SettingsView({
                   </Select>
                 </FormControl>
                 <FormControl size="small" fullWidth>
-                  <InputLabel>{t.settings.agentDefaultChatNetwork}</InputLabel>
+                  <InputLabel id="agent-default-chat-network-label">{t.settings.agentDefaultChatNetwork}</InputLabel>
                   <Select
+                    labelId="agent-default-chat-network-label"
                     label={t.settings.agentDefaultChatNetwork}
                     value={defaultChatNetworkAccess ? 'enabled' : 'disabled'}
                     onChange={(event) =>
@@ -2307,7 +2300,7 @@ export function SettingsView({
               <Typography variant="h6">{t.settings.usageAnalyticsTitle}</Typography>
               <Typography variant="body2" color="text.secondary">{t.settings.usageAnalyticsDescription}</Typography>
             </Stack>
-            <Tooltip title={t.settings.usageAnalyticsHelp} placement="top">
+            <Tooltip title={t.settings.usageAnalyticsHelp} placement="top" describeChild>
               <FormControlLabel
                 control={
                   <Switch
@@ -2475,8 +2468,9 @@ export function SettingsView({
             </Stack>
             <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1.5}>
               <FormControl fullWidth size="small">
-                <InputLabel>{t.settings.memoryScope}</InputLabel>
+                <InputLabel id="memory-scope-label">{t.settings.memoryScope}</InputLabel>
                 <Select
+                  labelId="memory-scope-label"
                   label={t.settings.memoryScope}
                   value={memoryForm.scope}
                   onChange={(event) => setMemoryForm((current) => ({
@@ -2490,8 +2484,9 @@ export function SettingsView({
                 </Select>
               </FormControl>
               <FormControl fullWidth size="small" disabled={memoryForm.scope !== 'app'}>
-                <InputLabel>{t.settings.memoryApp}</InputLabel>
+                <InputLabel id="memory-app-label">{t.settings.memoryApp}</InputLabel>
                 <Select
+                  labelId="memory-app-label"
                   label={t.settings.memoryApp}
                   value={memoryForm.appId}
                   onChange={(event) => setMemoryForm((current) => ({
@@ -2505,8 +2500,9 @@ export function SettingsView({
                 </Select>
               </FormControl>
               <FormControl fullWidth size="small">
-                <InputLabel>{t.settings.memoryKind}</InputLabel>
+                <InputLabel id="memory-kind-label">{t.settings.memoryKind}</InputLabel>
                 <Select
+                  labelId="memory-kind-label"
                   label={t.settings.memoryKind}
                   value={memoryForm.kind}
                   onChange={(event) => setMemoryForm((current) => ({
@@ -2520,8 +2516,9 @@ export function SettingsView({
                 </Select>
               </FormControl>
               <FormControl fullWidth size="small">
-                <InputLabel>{t.settings.memoryStatus}</InputLabel>
+                <InputLabel id="memory-status-label">{t.settings.memoryStatus}</InputLabel>
                 <Select
+                  labelId="memory-status-label"
                   label={t.settings.memoryStatus}
                   value={memoryForm.status}
                   onChange={(event) => setMemoryForm((current) => ({
@@ -2689,7 +2686,7 @@ export function SettingsView({
     },
   ];
 
-  const subviewContent: Record<Exclude<SettingsSubview, 'main'>, { title: string; description?: string; content: ReactNode }> = {
+  const subviewContent: Record<Exclude<SettingsSubview, 'main'>, { title: string; description: string; content: ReactNode }> = {
     llmProvider: {
       title: t.settings.llmProviderTitle,
       description: t.settings.llmProviderDescription,

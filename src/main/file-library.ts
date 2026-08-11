@@ -206,7 +206,7 @@ export class FileLibrary {
     const categories = [...byPath.values()]
       .map((category) => ({
         ...category,
-        name: category.path.split('/').filter(Boolean).join(' / ') || category.name,
+        name: category.path.split('/').filter(Boolean).join(' / '),
         parentPath: '',
       }))
       .sort((a, b) => a.path.localeCompare(b.path));
@@ -265,7 +265,7 @@ export class FileLibrary {
           ...category,
           path: updatePath(category.path),
           parentPath: updatePath(category.parentPath),
-          name: updatePath(category.path).split('/').pop() ?? category.name,
+          name: updatePath(category.path).split('/').pop()!,
         }))
         .filter((category, indexPosition, categories) => category.path && categories.findIndex((item) => item.path === category.path) === indexPosition),
     });
@@ -587,7 +587,7 @@ export class FileLibrary {
       if (!entry.isDirectory()) {
         continue;
       }
-      const categoryPath = normalizeCategoryPath(parentPath ? `${parentPath}/${entry.name}` : entry.name);
+      const categoryPath = normalizeCategoryPath(entry.name);
       const stat = await fs.stat(path.join(root, entry.name)).catch(() => null);
       categories.push({
         path: categoryPath,

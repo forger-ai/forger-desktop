@@ -102,17 +102,14 @@ export function SidekickVoiceSettings({
   // whatever the user has selected in this render". Keeping those baselines
   // separate is what lets the first non-default selection become dirty and
   // enables Save.
-  const effectiveRemoteModel = models.some((entry) => entry.id === remote.model)
-    ? remote.model ?? defaultModel
-    : defaultModel;
+  const effectiveRemoteModel = models.find((entry) => entry.id === remote.model)?.id ?? defaultModel;
   const effectiveRemoteVoices = (ttsState?.voices ?? []).filter(
     (entry) => entry.installed && entry.enabled && entry.model === effectiveRemoteModel,
   );
-  const effectiveRemoteVoice = effectiveRemoteVoices.some((entry) => entry.id === remote.voice)
-    ? remote.voice ?? ''
-    : effectiveRemoteVoices.find((entry) => entry.id === ttsState?.config.defaultVoice)?.id
-      ?? effectiveRemoteVoices[0]?.id
-      ?? '';
+  const effectiveRemoteVoice = effectiveRemoteVoices.find((entry) => entry.id === remote.voice)?.id
+    ?? effectiveRemoteVoices.find((entry) => entry.id === ttsState?.config.defaultVoice)?.id
+    ?? effectiveRemoteVoices[0]?.id
+    ?? '';
   const effectiveRemoteLocale = remote.locale
     ?? effectiveRemoteVoices.find((entry) => entry.id === effectiveRemoteVoice)?.locale
     ?? '';

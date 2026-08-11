@@ -152,7 +152,7 @@ const moveFlattenChild = async (source: string, target: string): Promise<void> =
         await fs.rm(target, { recursive: true, force: true });
         await fs.cp(source, target, { recursive: true });
         await fs.rm(source, { recursive: true, force: true });
-        return;
+        break;
       }
     }
   }
@@ -194,12 +194,9 @@ const isRuntimeReadyMetadataCurrent = (
   archiveSha256: string,
 ): boolean => {
   const runtimeRevision = runtimeRevisionFor(type, platformAlias);
-  if (!runtimeRevision) {
-    return true;
-  }
   return Boolean(
     metadata &&
-    metadata.runtimeRevision === runtimeRevision &&
+    metadata.runtimeRevision === runtimeRevision! &&
     metadata.archiveSha256 === archiveSha256,
   );
 };
@@ -227,7 +224,7 @@ interface OptionalDependencyDeclaration {
 
 const commandErrorOutput = (error: unknown): string => {
   if (!error || typeof error !== 'object') {
-    return error instanceof Error ? error.message : String(error ?? '');
+    return String(error ?? '');
   }
   const candidate = error as { message?: unknown; stderr?: unknown; stdout?: unknown };
   return [candidate.message, candidate.stderr, candidate.stdout]
@@ -271,13 +268,8 @@ const findOptionalDependencyDeclaration = async (
   dependencyName: string,
 ): Promise<OptionalDependencyDeclaration | null> => {
   const pending = [path.join(frontendDir, 'node_modules')];
-  const visited = new Set<string>();
   while (pending.length > 0) {
     const nodeModulesDir = pending.shift() as string;
-    if (visited.has(nodeModulesDir)) {
-      continue;
-    }
-    visited.add(nodeModulesDir);
     for (const packageDir of await packageDirectories(nodeModulesDir)) {
       pending.push(path.join(packageDir, 'node_modules'));
       try {

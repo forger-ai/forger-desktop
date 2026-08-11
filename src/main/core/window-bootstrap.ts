@@ -56,18 +56,14 @@ interface WindowBootstrapDeps {
 }
 
 const isAllowedMainWindowUrl = (window: BrowserWindow, targetUrl: string): boolean => {
-  try {
-    const currentUrl = window.webContents.getURL();
-    if (!currentUrl) return false;
-    const current = new URL(currentUrl);
-    const target = new URL(targetUrl);
-    if (current.protocol === 'file:' || target.protocol === 'file:') {
-      return current.protocol === 'file:' && target.protocol === 'file:' && current.pathname === target.pathname;
-    }
-    return current.origin === target.origin;
-  } catch {
-    return false;
+  const currentUrl = window.webContents.getURL();
+  if (!currentUrl || !URL.canParse(currentUrl) || !URL.canParse(targetUrl)) return false;
+  const current = new URL(currentUrl);
+  const target = new URL(targetUrl);
+  if (current.protocol === 'file:' || target.protocol === 'file:') {
+    return current.protocol === 'file:' && target.protocol === 'file:' && current.pathname === target.pathname;
   }
+  return current.origin === target.origin;
 };
 
 const openOutsideMainWindow = (targetUrl: string, shell: WindowBootstrapShell): void => {
@@ -98,6 +94,9 @@ const registerMainWindowNavigationGuards = (window: BrowserWindow, shell: Window
     }
     openOutsideMainWindow(url, shell);
     return { action: 'deny' };
+  });
+  window.webContents.on('did-create-window', (childWindow) => {
+    if (!childWindow.isDestroyed()) childWindow.close();
   });
 };
 

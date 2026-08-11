@@ -74,15 +74,10 @@ export function CodexConfigModal({
       <DialogContent>
         <Stack spacing={2}>
           <Stack direction="row" spacing={1} alignItems="center">
-            <Chip
-              color={status.authenticated ? 'success' : 'default'}
-              label={status.authenticated ? t.settings.codexConnected : t.settings.codexDisconnected}
-            />
-            {status.authenticated ? (
-              <Typography variant="body2" color="text.secondary">
-                {t.codexSetup.ready}
-              </Typography>
-            ) : null}
+            <Chip color="success" label={t.settings.codexConnected} />
+            <Typography variant="body2" color="text.secondary">
+              {t.codexSetup.ready}
+            </Typography>
           </Stack>
           <Alert severity="success" icon={<CheckCircleRounded />}>
             <Stack spacing={1}>
@@ -90,7 +85,7 @@ export function CodexConfigModal({
               <Typography variant="body2">{t.codexSetup.successBody}</Typography>
             </Stack>
           </Alert>
-          {status.authenticated && usageBucket ? (
+          {usageBucket ? (
             <CodexUsagePanel bucket={usageBucket} t={t} />
           ) : null}
           <Accordion disableGutters>

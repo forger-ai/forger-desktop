@@ -18,9 +18,6 @@ export const resolveLlmProviderAuthContext = async (
   }
   const profile = await resolveAuthProfile(provider, authProfileId);
   assertValidAuthProfile(provider, authProfileId, profile);
-  if (!profile) {
-    return null;
-  }
   const environment: Record<string, string> = {};
   if (provider === 'codex' && profile.runtimeAuthMode === 'materialized' && profile.codexHome) {
     environment.CODEX_HOME = profile.codexHome;
@@ -41,11 +38,11 @@ export const resolveLlmProviderAuthContext = async (
   };
 };
 
-const assertValidAuthProfile = (
+function assertValidAuthProfile(
   provider: AgentProvider,
   authProfileId: string,
   profile: LlmProviderResolvedAuthProfile | null | undefined,
-): void => {
+): asserts profile is LlmProviderResolvedAuthProfile {
   if (!profile) {
     throw new Error('provider_auth_profile_not_found');
   }
@@ -62,4 +59,4 @@ const assertValidAuthProfile = (
   if (provider === 'antigravity' && profile.runtimeAuthMode !== 'externalActiveOnly') {
     throw new Error('provider_auth_profile_unsupported');
   }
-};
+}

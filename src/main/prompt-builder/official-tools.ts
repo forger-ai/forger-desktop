@@ -182,7 +182,7 @@ const displayNameForConnection = (
 
 const promptConnectionDefinitions = (input: ForgerOfficialToolsPromptInput): ConnectionTypeDefinition[] => {
   if ((input.connectionTypes?.length ?? 0) > 0) {
-    return input.connectionTypes ?? [];
+    return input.connectionTypes!;
   }
   const definitions: ConnectionTypeDefinition[] = [];
   if (typeof input.gmailReady === 'boolean') {
@@ -239,7 +239,7 @@ const promptConnectionDefinitions = (input: ForgerOfficialToolsPromptInput): Con
 
 const promptConnectionInstances = (input: ForgerOfficialToolsPromptInput): ConnectionInstance[] => {
   if ((input.connectionInstances?.length ?? 0) > 0) {
-    return input.connectionInstances ?? [];
+    return input.connectionInstances!;
   }
   const now = new Date(0).toISOString();
   const instances: ConnectionInstance[] = [];

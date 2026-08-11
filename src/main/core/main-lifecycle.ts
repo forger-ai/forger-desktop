@@ -703,9 +703,7 @@ export const registerMainLifecycle = (deps: MainLifecycleDeps) => {
         const agentId = event.agent_id ?? event.agentId;
         const close = sessionId
           ? stopRemoteAgentSessionSession(sessionId)
-          : agentId
-            ? stopRemoteAgentSession(agentId)
-            : Promise.resolve(undefined);
+          : stopRemoteAgentSession(agentId!);
         await close.catch((error) => {
           void appendInstallLog('agent_access:cloud_disconnect_failed', {
             agentId,

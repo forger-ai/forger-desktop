@@ -957,7 +957,7 @@ export class WorkflowManager {
       renderedPrompt: renderTemplateString(config.prompt, context),
       inputContext,
     };
-    try {
+    const execute = async (): Promise<WorkflowNodeState> => {
       const memoryContext = await (this.options.buildMemoryContext?.(config.appIds) ?? Promise.resolve(''));
       const basePrompt = this.buildNodePrompt(workflow, node, config, context, inputContext);
       const prompt = [memoryContext, config.instructions, basePrompt].filter(Boolean).join('\n\n');
@@ -1086,28 +1086,38 @@ export class WorkflowManager {
         output: { text: lastMessage },
         summary: lastMessage.slice(0, 2_000),
       };
-    } catch (error) {
-      emitActivity(finalizeAgentRunActivity(
-        activity,
-        'failed',
-        new Date().toISOString(),
-        error instanceof Error ? error.message : 'workflow_agent_exec_failed',
-      ));
-      return {
-        status: 'failed',
-        input: nodeRunInput,
-        error: error instanceof Error ? error.message : 'workflow_agent_exec_failed',
-      };
-    } finally {
-      this.nodeContexts.delete(nodeRunKey);
-      this.nodeCompletions.delete(nodeRunKey);
-      if (forgerMcpSession) {
-        this.options.releaseForgerMcpSession?.(forgerMcpSession.token);
-      }
-      if (appMcpListening) {
-        this.options.releaseAppMcps?.(nodeRunKey);
-      }
+    };
+    const settled = await execute()
+      .catch((error: unknown): WorkflowNodeState => {
+        emitActivity(finalizeAgentRunActivity(
+          activity,
+          'failed',
+          new Date().toISOString(),
+          error instanceof Error ? error.message : 'workflow_agent_exec_failed',
+        ));
+        return {
+          status: 'failed',
+          input: nodeRunInput,
+          error: error instanceof Error ? error.message : 'workflow_agent_exec_failed',
+        };
+      })
+      .then(
+        (value) => ({ success: true as const, value }),
+        (error: unknown) => ({ success: false as const, error }),
+      );
+    this.nodeContexts.delete(nodeRunKey);
+    this.nodeCompletions.delete(nodeRunKey);
+    const sessionToRelease = forgerMcpSession as { url: string; token: string } | null;
+    if (sessionToRelease) {
+      this.options.releaseForgerMcpSession?.(sessionToRelease.token);
     }
+    if (appMcpListening) {
+      this.options.releaseAppMcps?.(nodeRunKey);
+    }
+    if (!settled.success) {
+      throw settled.error;
+    }
+    return settled.value;
   }
 
   private async listenRequiredAppMcps(

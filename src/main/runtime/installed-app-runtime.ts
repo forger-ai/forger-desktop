@@ -222,14 +222,15 @@ const proxyWebSocketUpgrade = (
   head: Buffer,
   pathPrefix: string,
 ): void => {
-  const incomingUrl = new URL(incoming.url ?? '/', 'http://127.0.0.1');
+  const requestUrl = incoming.url ?? '/';
+  const incomingUrl = new URL(requestUrl, 'http://127.0.0.1');
   if (!hasPathPrefix(incomingUrl.pathname, pathPrefix)) {
     socket.write('HTTP/1.1 404 Not Found\r\nConnection: close\r\n\r\n');
     socket.destroy();
     return;
   }
 
-  const targetUrl = new URL(incoming.url ?? '/', targetBaseUrl);
+  const targetUrl = new URL(requestUrl, targetBaseUrl);
   targetUrl.pathname = targetUrl.pathname.slice(pathPrefix.length) || '/';
   const targetPort = Number(targetUrl.port || (targetUrl.protocol === 'https:' ? 443 : 80));
   const targetSocket = net.connect(targetPort, targetUrl.hostname);

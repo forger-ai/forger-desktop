@@ -35,13 +35,16 @@ const activeRunStatuses = new Set<LlmRunStatus>(['queued', 'running', 'needs_per
 
 const isActive = (status: LlmRunStatus) => activeRunStatuses.has(status);
 
-const statusColor = (status: LlmRunStatus): 'default' | 'success' | 'error' | 'warning' | 'info' => {
-  if (status === 'completed') return 'success';
-  if (status === 'failed') return 'error';
-  if (status === 'canceled') return 'warning';
-  if (isActive(status)) return 'info';
-  return 'default';
+const statusColors: Record<LlmRunStatus, 'success' | 'error' | 'warning' | 'info'> = {
+  queued: 'info',
+  running: 'info',
+  needs_permission: 'info',
+  completed: 'success',
+  failed: 'error',
+  canceled: 'warning',
 };
+
+const statusColor = (status: LlmRunStatus) => statusColors[status];
 
 const statusIcon = (status: LlmRunStatus) => {
   if (status === 'completed') return <CheckCircleRounded color="success" fontSize="small" />;
@@ -102,35 +105,41 @@ export function LlmRunsDrawer({ t }: LlmRunsDrawerProps) {
             </Box>
           ) : (
             <List disablePadding sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
-              {items.map((item) => (
-                <Box key={item.id} sx={{ border: '1px solid', borderColor: 'divider', borderRadius: 1, px: 1.5, py: 1.25 }}>
-                  <Stack direction="row" alignItems="flex-start">
-                    <Box sx={{ pt: 0.25, pr: 1.25 }}>{statusIcon(item.status)}</Box>
-                    <ListItemText
-                      primary={
-                        <Stack direction="row" spacing={1} alignItems="center" justifyContent="space-between" sx={{ minWidth: 0 }}>
-                          <Typography fontWeight={700} noWrap sx={{ minWidth: 0 }}>{item.title}</Typography>
-                          <Chip size="small" color={statusColor(item.status)} label={t.llmRuns.statuses[item.status]} sx={{ height: 22, flexShrink: 0, '& .MuiChip-label': { px: 0.75, fontSize: 11 } }} />
-                        </Stack>
-                      }
-                      secondary={
-                        <Stack spacing={0.25} sx={{ mt: 0.5 }}>
-                          <Typography variant="caption" color="text.secondary">
-                            {item.appName} · {kindLabel(item.kind, t)}
-                          </Typography>
-                          <Typography variant="body2" color="text.secondary">{item.progress || item.error || t.llmRuns.noProgress}</Typography>
-                          <Typography variant="caption" color="text.secondary">{formatBackgroundTaskDateTime(item.updatedAt)}</Typography>
-                        </Stack>
-                      }
-                    />
-                  </Stack>
-                  {item.activity || item.progress || item.error ? (
-                    <Box sx={{ mt: 1 }}>
-                      <AgentRunActivityReceipt t={t} activity={item.activity ?? fallbackActivityForItem(item, t)} />
-                    </Box>
-                  ) : null}
-                </Box>
-              ))}
+              {items.map((item) => {
+                const fallbackMessage = item.progress ?? item.error;
+                const receiptActivity = item.activity
+                  ?? (fallbackMessage ? fallbackActivityForItem(item, t, fallbackMessage) : undefined);
+                return (
+                  <Box key={item.id} sx={{ border: '1px solid', borderColor: 'divider', borderRadius: 1, px: 1.5, py: 1.25 }}>
+                    <Stack direction="row" alignItems="flex-start">
+                      <Box sx={{ pt: 0.25, pr: 1.25 }}>{statusIcon(item.status)}</Box>
+                      <ListItemText
+                        disableTypography
+                        primary={
+                          <Stack direction="row" spacing={1} alignItems="center" justifyContent="space-between" sx={{ minWidth: 0 }}>
+                            <Typography fontWeight={700} noWrap sx={{ minWidth: 0 }}>{item.title}</Typography>
+                            <Chip size="small" color={statusColor(item.status)} label={t.llmRuns.statuses[item.status]} sx={{ height: 22, flexShrink: 0, '& .MuiChip-label': { px: 0.75, fontSize: 11 } }} />
+                          </Stack>
+                        }
+                        secondary={
+                          <Stack spacing={0.25} sx={{ mt: 0.5 }}>
+                            <Typography variant="caption" color="text.secondary">
+                              {item.appName} · {kindLabel(item.kind, t)}
+                            </Typography>
+                            <Typography variant="body2" color="text.secondary">{item.progress || item.error || t.llmRuns.noProgress}</Typography>
+                            <Typography variant="caption" color="text.secondary">{formatBackgroundTaskDateTime(item.updatedAt)}</Typography>
+                          </Stack>
+                        }
+                      />
+                    </Stack>
+                    {receiptActivity ? (
+                      <Box sx={{ mt: 1 }}>
+                        <AgentRunActivityReceipt t={t} activity={receiptActivity} />
+                      </Box>
+                    ) : null}
+                  </Box>
+                );
+              })}
             </List>
           )}
         </Stack>
@@ -147,25 +156,25 @@ const kindLabel = (kind: LlmRunKind, t: AppDictionary): string => {
   return t.llmRuns.kinds.appPromptTask;
 };
 
-const fallbackActivityForItem = (item: LlmRunSnapshotItem, t: AppDictionary) => ({
-  title: t.agentRunActivityReceipt.activityTitle(item.progress || item.error ? 1 : 0),
-  summary: item.progress || item.error || t.llmRuns.noProgress,
-  status: item.status,
-  kind: item.kind,
-  appName: item.appName,
-  startedAt: item.startedAt,
-  updatedAt: item.updatedAt,
-  completedAt: isActive(item.status) ? undefined : item.updatedAt,
-  sections: item.progress || item.error
-    ? [{
-        id: 'notes',
-        title: item.error ? t.agentRunActivityReceipt.sections.errors : t.agentRunActivityReceipt.sections.notes,
-        items: [{
-          id: `${item.id}:fallback`,
-          label: item.progress || item.error || t.llmRuns.noProgress,
-          value: item.status,
-          tone: item.error ? 'error' as const : 'default' as const,
-        }],
-      }]
-    : [],
-});
+const fallbackActivityForItem = (item: LlmRunSnapshotItem, t: AppDictionary, message: string) => {
+  return {
+    title: t.agentRunActivityReceipt.activityTitle(1),
+    summary: message,
+    status: item.status,
+    kind: item.kind,
+    appName: item.appName,
+    startedAt: item.startedAt,
+    updatedAt: item.updatedAt,
+    completedAt: isActive(item.status) ? undefined : item.updatedAt,
+    sections: [{
+      id: 'notes',
+      title: item.error ? t.agentRunActivityReceipt.sections.errors : t.agentRunActivityReceipt.sections.notes,
+      items: [{
+        id: `${item.id}:fallback`,
+        label: message,
+        value: item.status,
+        tone: item.error ? 'error' as const : 'default' as const,
+      }],
+    }],
+  };
+};

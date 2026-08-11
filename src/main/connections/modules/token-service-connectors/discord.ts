@@ -51,7 +51,10 @@ const actions: TokenConnectorActionDefinition[] = [
       const channel = req(input, 'channelId', 'discord_channel_required'); const name = req(input, 'name', 'discord_name_required');
       if (typeof channel !== 'string') return channel; if (typeof name !== 'string') return name;
       const msg = clean(input.messageId);
-      const path = msg ? `/channels/${channel}/messages/${msg}/threads` : `/channels/${channel}/threads`;
+      const encodedChannel = encodeURIComponent(channel);
+      const path = msg
+        ? `/channels/${encodedChannel}/messages/${encodeURIComponent(msg)}/threads`
+        : `/channels/${encodedChannel}/threads`;
       return { success: true, data: { thread: await api(secrets.bot_token, path, { method: 'POST', body: JSON.stringify({ name, auto_archive_duration: 1440 }) }) } };
     },
   },
@@ -62,7 +65,7 @@ const actions: TokenConnectorActionDefinition[] = [
     run: async ({ input, secrets }) => {
       const channel = req(input, 'channelId', 'discord_channel_required'); const msg = req(input, 'messageId', 'discord_message_required'); const emoji = req(input, 'emoji', 'discord_emoji_required');
       if (typeof channel !== 'string') return channel; if (typeof msg !== 'string') return msg; if (typeof emoji !== 'string') return emoji;
-      await api(secrets.bot_token, `/channels/${channel}/messages/${msg}/reactions/${encodeURIComponent(emoji)}/@me`, { method: 'PUT' });
+      await api(secrets.bot_token, `/channels/${encodeURIComponent(channel)}/messages/${encodeURIComponent(msg)}/reactions/${encodeURIComponent(emoji)}/@me`, { method: 'PUT' });
       return { success: true, data: { reacted: true } };
     },
   },
@@ -72,7 +75,7 @@ const actions: TokenConnectorActionDefinition[] = [
     run: async ({ input, secrets }) => {
       const channel = req(input, 'channelId', 'discord_channel_required'); const msg = req(input, 'messageId', 'discord_message_required');
       if (typeof channel !== 'string') return channel; if (typeof msg !== 'string') return msg;
-      await api(secrets.bot_token, `/channels/${channel}/messages/${msg}`, { method: 'DELETE' });
+      await api(secrets.bot_token, `/channels/${encodeURIComponent(channel)}/messages/${encodeURIComponent(msg)}`, { method: 'DELETE' });
       return { success: true, data: { deleted: true } };
     },
   },

@@ -205,7 +205,7 @@ const createToolBackedConnectionModule = (
   const type = module.definition.id;
   const actions = toolActionsToConnectionActions(module.definition.actions);
   const secretsSchema = toolSecretsToConnectionSecrets(module.definition.secrets);
-  const statusActionId = actions.find((action) => action.id.endsWith('.connection.status'))?.id ?? `${type}.connection.status`;
+  const statusActionId = `${type}.connection.status`;
   const definition = {
     type,
     displayName: module.definition.name,

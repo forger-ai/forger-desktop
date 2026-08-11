@@ -264,13 +264,13 @@ export class WakeWordClientRunner {
       activeSocket.onclose = () => {
         clearReadyTimeout();
         this.recordDiagnostic('socket_close', generation, sessionDeviceId, wakeSignature, { socketState: String(activeSocket.readyState) });
-        if (!this.isCurrent(generation) || this.activeSession?.generation !== generation) {
+        const current = this.activeSession;
+        if (!this.isCurrent(generation) || current?.generation !== generation) {
           this.recordDiagnostic('stale_generation_ignored', generation, sessionDeviceId, wakeSignature, { technicalCode: 'socket_close' });
           return;
         }
-        const current = this.activeSession;
         this.activeSession = null;
-        if (current) this.closeSession(current, false);
+        this.closeSession(current, false);
       };
 
       processor.onaudioprocess = (event) => {
@@ -310,11 +310,6 @@ export class WakeWordClientRunner {
       if (this.pendingStart?.wakeSignature === wakeSignature) {
         this.pendingStart = null;
       }
-      if (!transferred && this.activeSession?.generation === generation) {
-        const current = this.activeSession;
-        this.activeSession = null;
-        this.closeSession(current, true);
-      }
       if (!transferred && createdSession) {
         this.closeSession(createdSession, true);
       }
@@ -345,12 +340,8 @@ export class WakeWordClientRunner {
   ): void {
     let modelId = input.modelId;
     if (!modelId) {
-      try {
-        const parsed = JSON.parse(wakeSignature) as { modelId?: string };
-        modelId = parsed.modelId;
-      } catch {
-        modelId = undefined;
-      }
+      const parsed = JSON.parse(wakeSignature) as { modelId?: string };
+      modelId = parsed.modelId;
     }
     void this.api.wakeWordRecordDiagnostic({
       event,

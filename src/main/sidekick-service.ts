@@ -57,7 +57,6 @@ import {
   encryptSidekickPayload,
   isEncryptedEnvelope,
   isNetworkHelloPayload,
-  isPathInside,
   isStoredSidekickRecord,
   normalizeCapabilities,
   normalizeSidekickBattery,
@@ -188,7 +187,7 @@ export class SidekickService {
   async getState(): Promise<SidekickState> {
     await this.load();
     await this.microphone.load();
-    if ((this.stored?.records.length ?? 0) > 0) {
+    if (this.stored!.records.length > 0) {
       await this.ensureNetworkService().catch((error: unknown) => {
         void this.log('sidekick:network_service_start_failed', { error: String(error) });
       });
@@ -206,7 +205,7 @@ export class SidekickService {
   async scanUsb(): Promise<SidekickState> {
     await this.load();
     await this.microphone.load();
-    if ((this.stored?.records.length ?? 0) > 0) {
+    if (this.stored!.records.length > 0) {
       await this.ensureNetworkService().catch((error: unknown) => {
         void this.log('sidekick:network_service_start_failed', { error: String(error) });
       });
@@ -227,7 +226,7 @@ export class SidekickService {
     }
     await this.load();
     await this.microphone.load();
-    if ((this.stored?.records.length ?? 0) === 0) {
+    if (this.stored!.records.length === 0) {
       return;
     }
     await this.ensureNetworkService();
@@ -487,6 +486,7 @@ export class SidekickService {
     if (manageScreen) {
       await this.sendScreen({ sidekickId: input.sidekickId, template: 'state', icon: 'speaking' }).catch(() => undefined);
     }
+    let result: SidekickSpeakerPlaybackResult;
     try {
       const synthesized = await raceSidekickOperationWithSignal(this.options.synthesizeSpeech({
         text,
@@ -496,29 +496,31 @@ export class SidekickService {
         format: 'wav',
       }), options.signal);
       if (!synthesized.success || !synthesized.audioDataBase64) {
-        return {
+        result = {
           success: false,
           userMessage: synthesized.userMessage ?? 'No pude preparar la voz.',
           technicalCode: synthesized.technicalCode ?? 'sidekick_tts_failed',
         };
+      } else {
+        const wav = Buffer.from(synthesized.audioDataBase64, 'base64');
+        const pcm = wavToSidekickPcm(wav);
+        result = await this.playSpeakerPcm({ sidekickId: input.sidekickId, samples: pcm.samples }, { signal: options.signal });
       }
-      const wav = Buffer.from(synthesized.audioDataBase64, 'base64');
-      const pcm = wavToSidekickPcm(wav);
-      return await this.playSpeakerPcm({ sidekickId: input.sidekickId, samples: pcm.samples }, { signal: options.signal });
     } catch (error) {
       if (options.signal?.aborted) {
-        return { success: false, userMessage: 'La reproducción fue interrumpida.', technicalCode: 'sidekick_speaker_playback_cancelled' };
-      }
-      return {
-        success: false,
-        userMessage: 'No pude preparar la voz para el Sidekick.',
-        technicalCode: error instanceof Error ? error.message : 'sidekick_tts_failed',
-      };
-    } finally {
-      if (manageScreen) {
-        await this.sendScreen({ sidekickId: input.sidekickId, template: 'idle' }).catch(() => undefined);
+        result = { success: false, userMessage: 'La reproducción fue interrumpida.', technicalCode: 'sidekick_speaker_playback_cancelled' };
+      } else {
+        result = {
+          success: false,
+          userMessage: 'No pude preparar la voz para el Sidekick.',
+          technicalCode: error instanceof Error ? error.message : 'sidekick_tts_failed',
+        };
       }
     }
+    if (manageScreen) {
+      await this.sendScreen({ sidekickId: input.sidekickId, template: 'idle' }).catch(() => undefined);
+    }
+    return result;
   }
 
   async startMicrophoneRecording(input: SidekickMicrophoneRecordingInput): Promise<SidekickMutationResult> {
@@ -737,7 +739,7 @@ export class SidekickService {
       screens.push(screen);
     }
     const rotateSeconds = Number.isFinite(config?.rotateSeconds)
-      ? Math.min(3600, Math.max(5, Math.round(config?.rotateSeconds ?? SIDEKICK_DEFAULT_IDLE_CONFIG.rotateSeconds)))
+      ? Math.min(3600, Math.max(5, Math.round(config!.rotateSeconds!)))
       : SIDEKICK_DEFAULT_IDLE_CONFIG.rotateSeconds;
     return {
       screens: screens.length > 0 ? screens : [...SIDEKICK_DEFAULT_IDLE_CONFIG.screens],
@@ -749,8 +751,7 @@ export class SidekickService {
     if (!/^[A-Za-z0-9_-]{1,64}$/.test(sidekickId)) {
       return null;
     }
-    const filePath = path.join(this.idleImagesDir, `${sidekickId}.rgb565`);
-    return isPathInside(this.idleImagesDir, filePath) ? filePath : null;
+    return path.join(this.idleImagesDir, `${sidekickId}.rgb565`);
   }
 
   async setIdleConfig(input: SidekickIdleConfigInput): Promise<SidekickMutationResult> {
@@ -912,8 +913,8 @@ export class SidekickService {
   async forget(sidekickId: string): Promise<SidekickMutationResult> {
     await this.load();
     await this.microphone.load();
-    const before = this.stored?.records.length ?? 0;
-    const registered = this.stored?.records.some((record) => record.sidekickId === sidekickId) ?? false;
+    const before = this.stored!.records.length;
+    const registered = this.stored!.records.some((record) => record.sidekickId === sidekickId);
     const runtime = this.runtimes.get(sidekickId);
     if (runtime) {
       await this.microphone.cleanupActive(runtime, 'sidekick_forgotten');
@@ -928,7 +929,7 @@ export class SidekickService {
     }
     runtime?.socket?.close();
     this.runtimes.delete(sidekickId);
-    if (before !== (this.stored?.records.length ?? 0)) {
+    if (before !== this.stored!.records.length) {
       await this.microphone.forget(sidekickId);
       const idleImage = this.idleImagePath(sidekickId);
       if (idleImage) {
@@ -1005,19 +1006,27 @@ export class SidekickService {
         });
       });
     });
-    await new Promise<void>((resolve, reject) => {
-      this.httpServer?.once('error', reject);
-      this.httpServer?.listen(0, '0.0.0.0', () => {
-        this.httpServer?.off('error', reject);
-        const address = this.httpServer?.address();
-        if (!address || typeof address === 'string') {
-          reject(new Error('sidekick_ws_address_unavailable'));
-          return;
-        }
-        this.servicePort = address.port;
-        resolve();
+    try {
+      await new Promise<void>((resolve, reject) => {
+        this.httpServer?.once('error', reject);
+        this.httpServer?.listen(0, '0.0.0.0', () => {
+          this.httpServer?.off('error', reject);
+          const address = this.httpServer?.address();
+          if (!address || typeof address === 'string') {
+            reject(new Error('sidekick_ws_address_unavailable'));
+            return;
+          }
+          this.servicePort = address.port;
+          resolve();
+        });
       });
-    });
+    } catch (error) {
+      this.wsServer.close();
+      this.wsServer = null;
+      this.httpServer.close();
+      this.httpServer = null;
+      throw error;
+    }
     this.publishBonjour();
     this.startOfflineSweep();
   }
@@ -1269,7 +1278,7 @@ export class SidekickService {
         handleWakeBeepResult(runtime, payload, {
           emit: () => this.emit(),
           log: async (event, context) => await this.log(event, context),
-          rejectSpeaker: (error) => this.speakerReceipts.reject(runtime, error),
+          rejectSpeaker: this.speakerReceipts.reject.bind(this.speakerReceipts, runtime),
         });
         return;
       }

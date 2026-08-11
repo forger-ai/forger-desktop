@@ -113,13 +113,14 @@ export const uniqueFilename = (safeName: string, usedNames: Set<string>): string
     return safeName;
   }
   const parsed = path.parse(safeName);
-  for (let index = 2; ; index += 1) {
-    const candidate = `${parsed.name}-${index}${parsed.ext}`;
-    if (!usedNames.has(candidate)) {
-      usedNames.add(candidate);
-      return candidate;
-    }
+  let index = 2;
+  let candidate = `${parsed.name}-${index}${parsed.ext}`;
+  while (usedNames.has(candidate)) {
+    index += 1;
+    candidate = `${parsed.name}-${index}${parsed.ext}`;
   }
+  usedNames.add(candidate);
+  return candidate;
 };
 
 const normalizeMimeType = (value: string | undefined): string =>

@@ -92,6 +92,6 @@ const extractUnsupportedModel = (text: string): string => {
   }
   return text.match(/The\s+['"`]([^'"`\n]+)['"`]\s+model\s+is\s+not\s+supported/i)?.[1]?.trim()
     ?? text.match(/model\s+['"`]([^'"`\n]+)['"`]\s+is\s+not\s+supported/i)?.[1]?.trim()
-    ?? text.match(/model\s+([A-Za-z0-9._:-]+)\s+(?:is\s+)?(?:not\s+supported|unsupported)/i)?.[1]?.trim()
+    ?? text.match(/model\s+(?!is\b)([A-Za-z0-9._:-]+)\s+(?:is\s+)?(?:not\s+supported|unsupported)/i)?.[1]?.trim()
     ?? '';
 };

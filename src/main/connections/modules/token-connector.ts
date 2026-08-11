@@ -43,6 +43,11 @@ export interface TokenConnectorActionDefinition {
   run: (args: TokenConnectorActionArgs) => Promise<CallOfficialToolResult>;
 }
 
+export type TokenConnectorConnectionStatusDefinition = Omit<
+  TokenConnectorActionDefinition,
+  'id' | 'run'
+>;
+
 export interface TokenConnectorValidationResult {
   ok: boolean;
   userMessage?: string;
@@ -58,6 +63,8 @@ export interface TokenConnectorDefinition {
   secrets: TokenConnectorSecretDefinition[];
   /** Id of the read-only action that reports connection state. */
   connectionStatusActionId: string;
+  /** Metadata for status actions executed directly by the connector factory. */
+  connectionStatusAction?: TokenConnectorConnectionStatusDefinition;
   actions: TokenConnectorActionDefinition[];
   /** Validates stored secrets against the remote service. */
   validate: (secrets: Record<string, string>, context: InternalToolContext) => Promise<TokenConnectorValidationResult>;
@@ -88,6 +95,12 @@ const readStoredSecrets = async (
 };
 
 export const createTokenConnectorModule = (definition: TokenConnectorDefinition): InternalToolModule => {
+  const declaredActions = [
+    ...(definition.connectionStatusAction
+      ? [{ id: definition.connectionStatusActionId, ...definition.connectionStatusAction }]
+      : []),
+    ...definition.actions,
+  ];
   const toolDefinition: OfficialToolDefinition = {
     id: definition.id,
     name: definition.name,
@@ -96,7 +109,7 @@ export const createTokenConnectorModule = (definition: TokenConnectorDefinition)
     runtime: 'builtin',
     official: true,
     secrets: definition.secrets.map((secret) => ({ ...secret, manual: true })),
-    actions: definition.actions.map((action) => ({
+    actions: declaredActions.map((action) => ({
       id: action.id,
       name: action.name,
       description: action.description,

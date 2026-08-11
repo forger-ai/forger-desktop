@@ -69,38 +69,11 @@ const toGmailOAuthError = (error: unknown, fallbackMessage: string, fallbackCode
 
 const exchangeCode = async (input: {
   clientId: string;
-  clientSecret?: string;
   code: string;
   codeVerifier: string;
   redirectUri: string;
   context: InternalToolContext;
 }): Promise<GoogleTokenResponse> => {
-  if (input.clientSecret) {
-    const body = new URLSearchParams({
-      client_id: input.clientId,
-      client_secret: input.clientSecret,
-      code: input.code,
-      code_verifier: input.codeVerifier,
-      redirect_uri: input.redirectUri,
-      grant_type: 'authorization_code',
-    });
-    const response = await fetch(TOKEN_URL, {
-      method: 'POST',
-      headers: { 'content-type': 'application/x-www-form-urlencoded' },
-      body,
-    }).catch((error) => {
-      throw toGmailOAuthError(error, 'Google no respondio durante OAuth.', 'gmail_oauth_google_exchange_failed');
-    });
-    const token = await response.json().catch(() => ({})) as GoogleTokenResponse;
-    if (!response.ok || token.error) {
-      throw new GmailOAuthError(
-        token.error_description || token.error || 'Google no pudo completar OAuth.',
-        'gmail_oauth_google_exchange_failed',
-      );
-    }
-    return token;
-  }
-
   if (!input.context.isForgerAccountAuthenticated()) {
     throw new GmailOAuthError(
       getSharedCopy(input.context.locale).tools.gmailForgerAccountRequired,
@@ -319,12 +292,12 @@ export const runGmailOAuthFlow = async (
   let server: Server | null = null;
   let listeningResolve: ((port: number) => void) | null = null;
   let listeningReject: ((error: Error) => void) | null = null;
-  let redirectUri = '';
+  let redirectUri = 'http://127.0.0.1';
 
   const callbackPromise = new Promise<void>((resolve, reject) => {
     server = http.createServer((request, response) => {
       void (async () => {
-        const requestUrl = new URL(request.url ?? '/', redirectUri || 'http://127.0.0.1');
+        const requestUrl = new URL(String(request.url), redirectUri);
         if (requestUrl.pathname !== CALLBACK_PATH) {
           sendHtml(response, 404, 'Forger', copy.notFoundBody);
           return;
@@ -357,7 +330,6 @@ export const runGmailOAuthFlow = async (
 
         const token = await exchangeCode({
           clientId,
-          ...(clientSecret ? { clientSecret } : {}),
           code,
           codeVerifier: pkce.verifier,
           redirectUri,
@@ -376,11 +348,6 @@ export const runGmailOAuthFlow = async (
           const technicalCode = saved.technicalCode ?? 'gmail_oauth_secret_save_failed';
           sendHtml(response, 500, copy.errorTitle, message);
           throw new GmailOAuthError(message, technicalCode);
-        }
-
-        if (clientSecret) {
-          await context.secretsStore.setToolSecret(GMAIL_TOOL_ID, GMAIL_SELF_OAUTH_CLIENT_ID_SECRET, clientId);
-          await context.secretsStore.setToolSecret(GMAIL_TOOL_ID, GMAIL_SELF_OAUTH_CLIENT_SECRET_SECRET, clientSecret);
         }
 
         appendOAuthLog(context, 'refresh_token_saved');

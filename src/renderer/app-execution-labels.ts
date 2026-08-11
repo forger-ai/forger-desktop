@@ -15,21 +15,12 @@ export const appExecutionTooltip = (
     return t.actions.error;
   }
 
-  const key = `${state.phase}_${state.mode}`;
-  switch (key) {
-    case 'starting_forger':
-      return t.appExecution.startingForger;
-    case 'starting_local_network':
-      return t.appExecution.startingLocalNetwork;
-    case 'starting_remote_tunnel':
-      return t.appExecution.startingRemoteTunnel;
-    case 'running_forger':
-      return t.appExecution.runningForger;
-    case 'running_local_network':
-      return t.appExecution.runningLocalNetwork;
-    case 'running_remote_tunnel':
-      return t.appExecution.runningRemoteTunnel;
-    default:
-      return undefined;
-  }
+  const labels = {
+    starting_forger: t.appExecution.startingForger,
+    starting_remote_tunnel: t.appExecution.startingRemoteTunnel,
+    running_forger: t.appExecution.runningForger,
+    running_local_network: t.appExecution.runningLocalNetwork,
+    running_remote_tunnel: t.appExecution.runningRemoteTunnel,
+  } as const;
+  return labels[`${state.phase}_${state.mode}` as keyof typeof labels];
 };

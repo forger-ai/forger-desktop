@@ -239,7 +239,9 @@ export function ConnectionsView({
     : null;
   const isReconnectSetup = setupInstance?.status === 'needs_reconnect' || setupInstance?.status === 'error';
   const setupGuideCopy = useMemo(() => getSetupGuideUiCopy(t.locale), [t.locale]);
-  const showSetupGuide = Boolean(setupDefinition?.setupGuide)
+  const setupGuide = setupDefinition?.setupGuide;
+  const setupCallbackUrl = setupDefinition?.oauth?.callbackUrl;
+  const showSetupGuide = Boolean(setupGuide)
     && (setupDefinition?.type !== 'gmail' || gmailMode === 'self');
 
   const usage = useMemo(() => {
@@ -266,8 +268,8 @@ export function ConnectionsView({
   );
 
   const openSetup = (type?: string, connectionId?: string) => {
-    const instance = connectionId ? state.instances.find((candidate) => candidate.id === connectionId) ?? null : null;
-    setSetupType(type ?? instance?.type ?? orderedTypes[0]?.type ?? '');
+    const instance = connectionId ? state.instances.find((candidate) => candidate.id === connectionId) : undefined;
+    setSetupType(type ?? orderedTypes[0]?.type ?? '');
     setSetupConnectionId(instance?.id ?? null);
     setLabel(instance?.label ?? '');
     setSecrets({});
@@ -302,23 +304,22 @@ export function ConnectionsView({
     }
   };
 
-  const configure = async () => {
-    if (!setupDefinition) return;
-    const inputSecrets = setupDefinition.type === 'gmail' && gmailMode === 'self'
+  const configure = async (definition: ConnectionTypeDefinition) => {
+    const inputSecrets = definition.type === 'gmail' && gmailMode === 'self'
       ? {
-          [GMAIL_SELF_OAUTH_CLIENT_ID_SECRET]: secrets[GMAIL_SELF_OAUTH_CLIENT_ID_SECRET] ?? '',
-          [GMAIL_SELF_OAUTH_CLIENT_SECRET_SECRET]: secrets[GMAIL_SELF_OAUTH_CLIENT_SECRET_SECRET] ?? '',
+          [GMAIL_SELF_OAUTH_CLIENT_ID_SECRET]: secrets[GMAIL_SELF_OAUTH_CLIENT_ID_SECRET],
+          [GMAIL_SELF_OAUTH_CLIENT_SECRET_SECRET]: secrets[GMAIL_SELF_OAUTH_CLIENT_SECRET_SECRET],
         }
       : secrets;
     const input: ConfigureConnectionInput = {
-      type: setupDefinition.type,
+      type: definition.type,
       ...(setupConnectionId ? { connectionId: setupConnectionId } : {}),
       ...(label.trim() ? { label: label.trim() } : {}),
       ...(Object.keys(inputSecrets).length > 0 ? { secrets: inputSecrets } : {}),
     };
-    const result = await runMutation(`configure:${setupDefinition.type}`, () => window.forger.connectionsConfigure(input));
+    const result = await runMutation(`configure:${definition.type}`, () => window.forger.connectionsConfigure(input));
     if (!result?.success || !result.instance) return;
-    if (setupDefinition.type !== 'whatsapp') {
+    if (definition.type !== 'whatsapp') {
       onOpenConnection(result.instance.id);
       setSetupOpen(false);
       setSetupGuideOpen(false);
@@ -363,7 +364,7 @@ export function ConnectionsView({
       connectionId: instance.id,
     }));
     if (view === 'detail' && result.success) {
-      onNotice?.({ severity: result.success ? 'success' : 'error', message: result.userMessage });
+      onNotice?.({ severity: 'success', message: result.userMessage });
       onBack?.();
     }
   };
@@ -564,7 +565,7 @@ export function ConnectionsView({
                           <Box sx={{ flex: 1, minWidth: 0 }}>
                             <Typography fontWeight={700}>{action.name}</Typography>
                             <Typography variant="body2" color="text.secondary">{action.description}</Typography>
-                            <Chip size="small" variant="outlined" sx={{ mt: 0.75 }} label={`${copy.riskLabel}: ${copy.risk[action.risk] ?? action.risk}`} />
+                            <Chip size="small" variant="outlined" sx={{ mt: 0.75 }} label={`${copy.riskLabel}: ${copy.risk[action.risk]}`} />
                           </Box>
                           <Stack direction="row" spacing={1} alignItems="center" sx={{ flexShrink: 0 }}>
                             <Chip
@@ -576,7 +577,7 @@ export function ConnectionsView({
                               checked={approvalEnabled}
                               disabled={busyToolId === toolId}
                               onChange={(event) => onApprovalChange(toolId, event.target.checked)}
-                              inputProps={{ 'aria-label': copy.approvalToggleLabel }}
+                              slotProps={{ input: { 'aria-label': copy.approvalToggleLabel } }}
                             />
                           </Stack>
                         </Stack>
@@ -651,8 +652,8 @@ export function ConnectionsView({
                 setPairingConnectionId(null);
                 setSetupGuideOpen(false);
               }}
-              renderOption={(props, definition) => (
-                <Box component="li" {...props}>
+              renderOption={({ key, ...props }, definition) => (
+                <Box component="li" key={key} {...props}>
                   <Stack direction="row" spacing={1} alignItems="center">
                     {connectionIcon(definition.type)}
                     <Box>
@@ -697,12 +698,12 @@ export function ConnectionsView({
                 {gmailMode === 'self' ? (
                   <Stack spacing={1}>
                     <Alert severity="info" variant="outlined">{copy.gmailSelfOAuthHelp}</Alert>
-                    {setupDefinition.oauth?.callbackUrl ? (
+                    {setupCallbackUrl ? (
                       <Stack spacing={1}>
                         <Stack direction="row" spacing={1} alignItems="flex-start">
                           <TextField
                             label={copy.oauthCallbackUrl}
-                            value={setupDefinition.oauth.callbackUrl}
+                            value={setupCallbackUrl}
                             disabled
                             helperText={copy.oauthCallbackHelp}
                             sx={{ flex: 1 }}
@@ -712,14 +713,14 @@ export function ConnectionsView({
                               <IconButton
                                 sx={{ mt: 1 }}
                                 aria-label={copy.copyCallbackUrl}
-                                onClick={() => void copyCallbackUrl(setupDefinition.oauth?.callbackUrl ?? '')}
+                                onClick={() => void copyCallbackUrl(setupCallbackUrl)}
                               >
                                 <ContentCopyRounded fontSize="small" />
                               </IconButton>
                             </span>
                           </Tooltip>
                         </Stack>
-                        {setupDefinition.oauth.callbackPortChanged ? (
+                        {setupDefinition.oauth?.callbackPortChanged ? (
                           <Alert severity="warning" variant="outlined">{copy.oauthCallbackRotated}</Alert>
                         ) : null}
                       </Stack>
@@ -745,12 +746,12 @@ export function ConnectionsView({
             {setupDefinition?.setupKind === 'oauth' && setupDefinition.type !== 'gmail' ? (
               <Stack spacing={1}>
                 <Alert severity="info" variant="outlined">{copy.selfOAuthHelp}</Alert>
-                {setupDefinition.oauth?.callbackUrl ? (
+                {setupCallbackUrl ? (
                   <Stack spacing={1}>
                     <Stack direction="row" spacing={1} alignItems="flex-start">
                       <TextField
                         label={copy.oauthCallbackUrl}
-                        value={setupDefinition.oauth.callbackUrl}
+                        value={setupCallbackUrl}
                         disabled
                         helperText={copy.oauthCallbackHelp}
                         sx={{ flex: 1 }}
@@ -760,14 +761,14 @@ export function ConnectionsView({
                           <IconButton
                             sx={{ mt: 1 }}
                             aria-label={copy.copyCallbackUrl}
-                            onClick={() => void copyCallbackUrl(setupDefinition.oauth?.callbackUrl ?? '')}
+                            onClick={() => void copyCallbackUrl(setupCallbackUrl)}
                           >
                             <ContentCopyRounded fontSize="small" />
                           </IconButton>
                         </span>
                       </Tooltip>
                     </Stack>
-                    {setupDefinition.oauth.callbackPortChanged ? (
+                    {setupDefinition.oauth?.callbackPortChanged ? (
                       <Alert severity="warning" variant="outlined">{copy.oauthCallbackRotated}</Alert>
                     ) : null}
                   </Stack>
@@ -807,7 +808,7 @@ export function ConnectionsView({
             ) : null}
 
             {pairingPresentation.kind === 'error' ? (
-              <Alert severity="error">{pairingPresentation.message || copy.statusCheckFailed}</Alert>
+              <Alert severity="error">{pairingPresentation.message}</Alert>
             ) : null}
             {pairingPresentation.kind === 'qr' ? (
               <Stack spacing={1} alignItems="flex-start">
@@ -843,13 +844,17 @@ export function ConnectionsView({
             setSetupOpen(false);
             setSetupGuideOpen(false);
           }}>{pairingConnectionId ? t.actions.close : t.actions.cancel}</Button>
-          <Button variant="contained" disabled={!canSubmitSetup} onClick={() => void configure()}>
+          <Button
+            variant="contained"
+            disabled={!canSubmitSetup}
+            onClick={setupDefinition ? () => void configure(setupDefinition) : undefined}
+          >
             {isReconnectSetup ? copy.reconnect : copy.connect}
           </Button>
         </DialogActions>
       </Dialog>
       <SetupGuideDialog
-        guide={showSetupGuide ? setupDefinition?.setupGuide ?? null : null}
+        guide={showSetupGuide ? setupGuide! : null}
         locale={t.locale}
         onClose={() => setSetupGuideOpen(false)}
         onCopy={(value) => void copyCallbackUrl(value)}

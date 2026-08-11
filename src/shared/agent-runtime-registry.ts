@@ -398,17 +398,14 @@ export function normalizeRuntimeEffortForModel(
   if (supportedEfforts.includes(normalized)) {
     return normalized;
   }
-  if (supportedEfforts.includes(fallbackEffort)) {
-    return fallbackEffort;
-  }
-  return supportedEfforts[0] ?? fallbackEffort;
+  return fallbackEffort;
 }
 
 export const normalizeAntigravityModelAndEffort = (
   model: unknown,
   effort?: unknown,
   fallbackModel = DEFAULT_ANTIGRAVITY_MODEL,
-  fallbackEffort: AntigravityEffort = DEFAULT_ANTIGRAVITY_EFFORT,
+  _fallbackEffort: AntigravityEffort = DEFAULT_ANTIGRAVITY_EFFORT,
 ): { model: string; effort: AntigravityEffort } => {
   const legacyAlias = getAntigravityLegacyModelAlias(model);
   const canonicalFallbackModel = normalizeAntigravityModel(fallbackModel, DEFAULT_ANTIGRAVITY_MODEL);
@@ -417,11 +414,11 @@ export const normalizeAntigravityModelAndEffort = (
   const preferredEffort = legacyAlias && effort === undefined ? legacyAlias.effort : effort;
   const normalizedEffort = normalizeAntigravityEffort(
     preferredEffort,
-    option?.defaultEffort ?? fallbackEffort,
+    option!.defaultEffort,
   );
-  const effortValue = option?.cliModelByEffort[normalizedEffort]
+  const effortValue = option!.cliModelByEffort[normalizedEffort]
     ? normalizedEffort
-    : option?.defaultEffort ?? fallbackEffort;
+    : option!.defaultEffort;
   return {
     model: canonicalModel,
     effort: effortValue,
@@ -430,8 +427,7 @@ export const normalizeAntigravityModelAndEffort = (
 
 export const resolveAntigravityCliModel = (model: unknown, effort: unknown): string => {
   const normalized = normalizeAntigravityModelAndEffort(model, effort);
-  const option = getAntigravityModelOption(normalized.model);
-  return option?.cliModelByEffort[normalized.effort] ?? normalized.model;
+  return getAntigravityModelOption(normalized.model)!.cliModelByEffort[normalized.effort]!;
 };
 
 export const isAgentProvider = (value: unknown): value is AgentProvider =>

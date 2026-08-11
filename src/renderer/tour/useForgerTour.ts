@@ -37,13 +37,7 @@ export type TourStep = {
   completedTool?: keyof typeof TOOLS_TOUR_STORAGE_KEYS;
 };
 
-const readStoredBoolean = (key: string, fallback = false) => {
-  if (typeof window === 'undefined') {
-    return fallback;
-  }
-  const value = window.localStorage.getItem(key);
-  return value === null ? fallback : value === 'true';
-};
+const readStoredBoolean = (key: string) => window.localStorage.getItem(key) === 'true';
 
 interface UseForgerTourInput {
   currentView: View;
@@ -409,19 +403,16 @@ export function useForgerTour({
     setSelectedToolsTool(null);
   };
 
-  const finishModuleTour = (outcome: 'completed' | 'skipped') => {
-    if (!activeModuleTour) {
-      return;
-    }
+  const finishModuleTour = (moduleTour: ModuleTour, outcome: 'completed' | 'skipped') => {
     window.localStorage.setItem(
-      activeModuleTour === 'connections' ? CONNECTIONS_TOUR_MODULE_STORAGE_KEY : WORKFLOWS_TOUR_MODULE_STORAGE_KEY,
+      moduleTour === 'connections' ? CONNECTIONS_TOUR_MODULE_STORAGE_KEY : WORKFLOWS_TOUR_MODULE_STORAGE_KEY,
       'true',
     );
     submitUsageEvent({
       eventName: outcome === 'completed' ? 'onboarding_module_completed' : 'onboarding_module_skipped',
       surface: 'onboarding',
       locale: t.locale,
-      stringParameters: { module: activeModuleTour },
+      stringParameters: { module: moduleTour },
     });
     setActiveModuleTour(null);
     setActiveModuleStepIndex(null);
@@ -433,7 +424,7 @@ export function useForgerTour({
       return;
     }
     if (activeModuleTour) {
-      finishModuleTour('skipped');
+      finishModuleTour(activeModuleTour, 'skipped');
       return;
     }
     if (activeAdvancedTour) {
@@ -477,7 +468,7 @@ export function useForgerTour({
     }
     if (activeModuleTour && activeModuleStepIndex !== null) {
       if (activeModuleStepIndex >= activeModuleSteps.length - 1) {
-        finishModuleTour('completed');
+        finishModuleTour(activeModuleTour, 'completed');
         return;
       }
       setActiveModuleStepIndex((current) => current === null ? null : current + 1);

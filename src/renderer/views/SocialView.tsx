@@ -91,7 +91,6 @@ const fullSocialTabs = (t: AppDictionary): Array<{ value: FullSocialTab; label: 
 ];
 
 const readFullSocialTab = (): FullSocialTab => {
-  if (typeof window === 'undefined') return 'friends';
   const value = window.sessionStorage.getItem(LAST_SOCIAL_TAB_KEY);
   return value === 'forum' || value === 'profile' || value === 'search' ? value : 'friends';
 };
@@ -132,7 +131,7 @@ const SocialAppCard = ({
 }: {
   app: SocialUserApp;
   t: AppDictionary;
-  ownerLabel?: string;
+  ownerLabel: string;
   onOpen: (app: SocialUserApp) => void;
   accountUserId?: number;
   onVisibilityChange?: (app: SocialUserApp, visibility: Exclude<SocialUserAppVisibility, 'restricted'>) => void;
@@ -152,9 +151,7 @@ const SocialAppCard = ({
               <Chip size="small" label={visibilityLabel(app, t, isOwnedByAccount)} variant="outlined" />
               {app.status !== 'published' ? <Chip size="small" label="No publicada" color="warning" variant="outlined" /> : null}
             </Stack>
-            {ownerLabel ? (
-              <Typography variant="caption" color="text.secondary" noWrap>{ownerLabel}</Typography>
-            ) : null}
+            <Typography variant="caption" color="text.secondary" noWrap>{ownerLabel}</Typography>
             <Typography variant="body2" color="text.secondary" noWrap>
               {app.shortDescription || app.description || 'App compartida desde Forger Social'}
             </Typography>
@@ -319,7 +316,6 @@ export function SocialView({
   }, [accountUsername, switchTab]);
 
   const loadFriends = useCallback(async () => {
-    if (!signedIn) return;
     setFriendsLoading(true);
     setFriendsError(null);
     try {
@@ -329,7 +325,7 @@ export function SocialView({
     } finally {
       setFriendsLoading(false);
     }
-  }, [signedIn]);
+  }, []);
 
   const loadMyApps = useCallback(async () => {
     if (!signedIn) return;
@@ -404,7 +400,6 @@ export function SocialView({
   }, [initialProfileUsername, onInitialProfileUsernameConsumed, openProfile]);
 
   const handleOpenChat = async (friendship: CloudFriendship) => {
-    if (openingFriendId !== null) return;
     setOpeningFriendId(friendship.friend.id);
     try {
       const result = await onOpenFriendChat?.(friendship);
@@ -440,7 +435,6 @@ export function SocialView({
   };
 
   const handleSendFriendRequest = async (user: CloudFriendUser) => {
-    if (friendRequestSendingId !== null) return;
     setFriendRequestSendingId(user.id);
     setFriendSearchError(null);
     setFriendSearchMessage(null);
@@ -505,7 +499,6 @@ export function SocialView({
   };
 
   const handleVisibilityChange = async (app: SocialUserApp, visibility: Exclude<SocialUserAppVisibility, 'restricted'>) => {
-    if (visibilityBusyId !== null || app.visibility === visibility) return;
     setVisibilityBusyId(app.id);
     try {
       const updated = await window.forger.updateSocialAppVisibility(app.id, visibility);
@@ -538,8 +531,7 @@ export function SocialView({
 
   const handleEditAppInfoSubmit = async (event?: SyntheticEvent) => {
     event?.preventDefault();
-    const app = editAppDialog.app;
-    if (!app || editAppDialog.busy) return;
+    const app = editAppDialog.app!;
     setEditAppDialog((current) => ({ ...current, busy: true, error: null }));
     try {
       const updated = await window.forger.updateSocialApp({
@@ -563,8 +555,7 @@ export function SocialView({
   };
 
   const handleDeleteSocialApp = async () => {
-    const app = deleteAppDialog.app;
-    if (!app || deleteAppDialog.busy) return;
+    const app = deleteAppDialog.app!;
     setDeleteAppDialog((current) => ({ ...current, busy: true, error: null }));
     try {
       await window.forger.deleteSocialApp(app.id);
@@ -580,22 +571,21 @@ export function SocialView({
   };
 
   const handleOpenProfileInBrowser = async () => {
-    const url = profileUrl || (accountUsername ? await window.forger.getSocialProfileUrl(accountUsername) : '');
+    const url = profileUrl || await window.forger.getSocialProfileUrl(accountUsername);
     if (!url) return;
     await window.forger.openExternalUrl(url);
   };
 
   const handleCopyProfileLink = async () => {
-    const url = profileUrl || (accountUsername ? await window.forger.getSocialProfileUrl(accountUsername) : '');
+    const url = profileUrl || await window.forger.getSocialProfileUrl(accountUsername);
     if (!url) return;
     await navigator.clipboard.writeText(url);
     onNotify?.('Link copiado.', 'success');
   };
 
   const handlePublishSubmit = () => {
-    if (!publishAppId || !onUploadSocial) return;
     setPublishDialogOpen(false);
-    onUploadSocial(publishAppId, publishVisibility, publishCategory);
+    onUploadSocial!(publishAppId, publishVisibility, publishCategory);
   };
 
   const renderSignedOut = () => (
@@ -890,9 +880,9 @@ export function SocialView({
               startIcon={<UploadRounded />}
               disabled={!onUploadSocial || uploadCandidates.length === 0}
               onClick={() => {
-                const firstCandidate = uploadCandidates[0];
-                setPublishAppId(firstCandidate?.id ?? '');
-                setPublishCategory(isAppCategory(firstCandidate?.category) ? firstCandidate.category : 'productivity');
+                const firstCandidate = uploadCandidates[0]!;
+                setPublishAppId(firstCandidate.id);
+                setPublishCategory(firstCandidate.category);
                 setPublishDialogOpen(true);
               }}
             >
@@ -965,9 +955,7 @@ export function SocialView({
 
       <Dialog
         open={Boolean(deleteAppDialog.app)}
-        onClose={() => {
-          if (!deleteAppDialog.busy) setDeleteAppDialog({ app: null, busy: false, error: null });
-        }}
+        onClose={deleteAppDialog.busy ? undefined : () => setDeleteAppDialog({ app: null, busy: false, error: null })}
         maxWidth="xs"
         fullWidth
       >
@@ -1074,9 +1062,9 @@ export function SocialView({
                 value={publishAppId}
                 onChange={(event) => {
                   const nextAppId = event.target.value;
-                  const app = uploadCandidates.find((candidate) => candidate.id === nextAppId);
+                  const app = uploadCandidates.find((candidate) => candidate.id === nextAppId)!;
                   setPublishAppId(nextAppId);
-                  setPublishCategory(isAppCategory(app?.category) ? app.category : 'productivity');
+                  setPublishCategory(app.category);
                 }}
               >
                 {uploadCandidates.map((app) => (
@@ -1140,8 +1128,8 @@ export function SocialView({
             {fullSocialTabs(t).map((tab) => <Tab key={tab.value} value={tab.value} label={tab.label} />)}
           </Tabs>
           <Divider />
-          {activeTab === 'friends' ? (signedIn ? renderFriends() : renderSignedOut()) : null}
-          {activeTab === 'forum' ? (signedIn ? <ForumPanel active onNotify={onNotify} onOpenProfile={openProfile} /> : renderSignedOut()) : null}
+          {activeTab === 'friends' ? renderFriends() : null}
+          {activeTab === 'forum' ? <ForumPanel active onNotify={onNotify} onOpenProfile={openProfile} /> : null}
           {activeTab === 'profile' ? renderProfile() : null}
           {activeTab === 'search' ? renderSearch() : null}
         </>

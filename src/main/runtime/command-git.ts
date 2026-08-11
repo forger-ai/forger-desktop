@@ -656,7 +656,8 @@ const getGitStatusLines = async (cwd: string): Promise<string[]> => {
 
 const normalizeGitStatusPath = (line: string): string => {
   const rawPath = line.slice(3).trim();
-  const renamedPath = rawPath.includes(' -> ') ? rawPath.split(' -> ').pop() ?? rawPath : rawPath;
+  const renameSeparatorIndex = rawPath.lastIndexOf(' -> ');
+  const renamedPath = renameSeparatorIndex >= 0 ? rawPath.slice(renameSeparatorIndex + 4) : rawPath;
   return renamedPath.replace(/\\/g, '/');
 };
 

@@ -439,7 +439,7 @@ const ensureBackendPythonEnvironment = async (
         stdout: truncateForInstallLog(repaired.stdout ?? ''),
         stderr: truncateForInstallLog(repaired.stderr ?? ''),
       });
-      throw new Error(`backend_python_env_unusable_${repaired.detail ?? 'unknown'}`);
+      throw new Error(`backend_python_env_unusable_${repaired.detail}`);
     }
     await appendInstallLog('backend_python_env:repair_ready', { appId, reason, backendDir });
   })();
@@ -686,9 +686,10 @@ const prepareSocialAppReview = async (
     const stagedDir = path.join(quarantineDir, 'staged');
     const zipPath = path.join(quarantineDir, 'source.zip');
     const catalogEntry = catalogApps.find((entry) => entry.socialUserAppId === download.app.id);
+    const catalogName = catalogEntry?.name ?? download.app.name ?? download.app.slug;
     const catalogApp: CatalogApp = {
       id: localAppId,
-      name: catalogEntry?.name ?? download.app.name ?? download.app.slug,
+      name: catalogName,
       shortDescription: catalogEntry?.shortDescription,
       description: catalogEntry?.description ?? `App compartida por @${download.app.ownerUsername} en Forger Social.`,
       longDescription: catalogEntry?.longDescription,
@@ -720,7 +721,7 @@ const prepareSocialAppReview = async (
       ...(input.shareCode ? { shareCode: input.shareCode } : {}),
       localAppId,
       status: 'pending_review',
-      name: catalogApp.name ?? download.app.slug,
+      name: catalogName,
       slug: download.app.slug,
       ownerUsername: download.app.ownerUsername,
       category: catalogApp.category,
@@ -1007,7 +1008,7 @@ const updateAppRuntime = async (appId: string, localeInput?: string): Promise<In
     if (current) {
       await upsertInstalledRecord({
         ...current,
-        status: phase === 'conflict' ? 'conflict' : 'installing',
+        status: 'installing',
         userMessage,
         lastErrorOperation: undefined,
       });
@@ -1433,7 +1434,7 @@ const normalizeLanguageCode = (value?: string): string => {
   if (!normalized) {
     return 'en';
   }
-  return normalized.split('-')[0] || 'en';
+  return normalized.split('-')[0];
 };
 
 const normalizePostinstallText = (value: string): string =>

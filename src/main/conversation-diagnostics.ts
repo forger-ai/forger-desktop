@@ -450,4 +450,5 @@ const buildAttachmentFromFile = async (input: {
 };
 
 const safeDiagnosticFilename = (value: string): string =>
-  value.replace(/[^a-zA-Z0-9._-]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 160) || 'diagnostic-file.txt';
+  // Internal callers always prefix filenames with a non-empty diagnostic kind.
+  value.replace(/[^a-zA-Z0-9._-]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 160);

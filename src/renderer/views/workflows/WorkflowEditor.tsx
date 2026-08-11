@@ -337,7 +337,7 @@ export function WorkflowEditor({ draft, onDraftChange, apps, agents, toolPackage
       setConnectError(null);
       return { ...current, edges: candidateEdges };
     });
-  }, [onDraftChange, copy.forEachJoinNotAllowed]);
+  }, [readOnly, onDraftChange, copy.forEachJoinNotAllowed]);
 
   const selectedNode = draft.nodes.find((node) => node.id === selectedNodeId) ?? null;
   const selectedEdge = draft.edges.find((edge) => edgeKey(edge) === selectedEdgeKey) ?? null;
@@ -400,10 +400,8 @@ export function WorkflowEditor({ draft, onDraftChange, apps, agents, toolPackage
   };
 
   const deleteSelectedNode = () => {
-    if (!selectedNode) {
-      return;
-    }
-    const nodeId = selectedNode.id;
+    // The delete action is only mounted while a node is selected.
+    const nodeId = selectedNode!.id;
     onDraftChange((current) => ({
       ...current,
       nodes: current.nodes.filter((node) => node.id !== nodeId),
@@ -413,10 +411,8 @@ export function WorkflowEditor({ draft, onDraftChange, apps, agents, toolPackage
   };
 
   const deleteSelectedEdge = () => {
-    if (!selectedEdge) {
-      return;
-    }
-    const key = edgeKey(selectedEdge);
+    // The delete action is only mounted while an edge is selected.
+    const key = edgeKey(selectedEdge!);
     onDraftChange((current) => ({
       ...current,
       edges: current.edges.filter((edge) => edgeKey(edge) !== key),
@@ -717,9 +713,7 @@ const NodePanel = ({ node, copy, apps, agents, toolPackages, officialTools, conn
           placeholder={copy.referencePlaceholder}
           triggerGroupLabel={copy.triggerData}
           wholeOutputLabel={copy.wholeOutput}
-          onChange={(nextPrompt) => onChange((current) => current.type === node.type
-            ? { ...current, prompt: nextPrompt } as WorkflowNode
-            : current)}
+          onChange={(nextPrompt) => onChange((current) => ({ ...current, prompt: nextPrompt } as WorkflowNode))}
         />
       ) : null}
 
@@ -729,9 +723,7 @@ const NodePanel = ({ node, copy, apps, agents, toolPackages, officialTools, conn
           size="small"
           label={copy.agent}
           value={node.agentId}
-          onChange={(event) => onChange((current) => current.type === 'forger_agent'
-            ? { ...current, agentId: event.target.value }
-            : current)}
+          onChange={(event) => onChange((current) => ({ ...current, agentId: event.target.value } as WorkflowNode))}
         >
           {agents.map((agent) => (
             <MenuItem key={agent.id} value={agent.id}>{agent.name}</MenuItem>
@@ -747,17 +739,15 @@ const NodePanel = ({ node, copy, apps, agents, toolPackages, officialTools, conn
             label={copy.runtimeProvider}
             value={node.runtime?.provider ?? 'auto'}
             onChange={(event) => onChange((current) => {
-              if (current.type !== 'llm_agent') {
-                return current;
-              }
+              const llmNode = current as Extract<WorkflowNode, { type: 'llm_agent' }>;
               const provider = event.target.value;
               if (provider === 'auto') {
-                const { runtime: _runtime, ...rest } = current;
+                const { runtime: _runtime, ...rest } = llmNode;
                 return rest as WorkflowNode;
               }
               const registry = LLM_PROVIDER_REGISTRY[provider as AgentProvider];
               return {
-                ...current,
+                ...llmNode,
                 runtime: {
                   provider: provider as AgentProvider,
                   model: registry.defaultModel,
@@ -781,12 +771,11 @@ const NodePanel = ({ node, copy, apps, agents, toolPackages, officialTools, conn
                 label={copy.runtimeModel}
                 value={node.runtime.model}
                 onChange={(event) => onChange((current) => {
-                  if (current.type !== 'llm_agent' || !current.runtime) {
-                    return current;
-                  }
+                  const llmNode = current as Extract<WorkflowNode, { type: 'llm_agent' }>;
+                  const runtime = llmNode.runtime!;
                   const model = event.target.value;
-                  const effort = normalizeRuntimeEffortForModel(current.runtime.provider, model, current.runtime.effort);
-                  return { ...current, runtime: { ...current.runtime, model, effort: effort as typeof current.runtime.effort } };
+                  const effort = normalizeRuntimeEffortForModel(runtime.provider, model, runtime.effort);
+                  return { ...llmNode, runtime: { ...runtime, model, effort: effort as typeof runtime.effort } };
                 })}
               >
                 {LLM_PROVIDER_REGISTRY[node.runtime.provider].modelOptions.map((model) => (
@@ -799,9 +788,10 @@ const NodePanel = ({ node, copy, apps, agents, toolPackages, officialTools, conn
                 sx={{ minWidth: 130 }}
                 label={copy.runtimeEffort}
                 value={normalizeRuntimeEffortForModel(node.runtime.provider, node.runtime.model, node.runtime.effort)}
-                onChange={(event) => onChange((current) => current.type === 'llm_agent' && current.runtime
-                  ? { ...current, runtime: { ...current.runtime, effort: event.target.value as typeof current.runtime.effort } }
-                  : current)}
+                onChange={(event) => onChange((current) => {
+                  const llmNode = current as Extract<WorkflowNode, { type: 'llm_agent' }>;
+                  return { ...llmNode, runtime: { ...llmNode.runtime!, effort: event.target.value as AgentEffort } };
+                })}
               >
                 {LLM_PROVIDER_REGISTRY[node.runtime.provider].effortOptions
                   .filter((effort) => getRuntimeSupportedEfforts(node.runtime!.provider, node.runtime!.model).includes(effort.value as AgentEffort))
@@ -817,9 +807,7 @@ const NodePanel = ({ node, copy, apps, agents, toolPackages, officialTools, conn
             options={apps.map((app) => app.id)}
             getOptionLabel={(appId) => apps.find((app) => app.id === appId)?.name ?? appId}
             value={node.appIds}
-            onChange={(_event, value) => onChange((current) => current.type === 'llm_agent'
-              ? { ...current, appIds: value }
-              : current)}
+            onChange={(_event, value) => onChange((current) => ({ ...current, appIds: value } as WorkflowNode))}
             renderInput={(params) => (
               <TextField {...params} label={copy.apps} helperText={copy.appsHelper} />
             )}
@@ -828,16 +816,14 @@ const NodePanel = ({ node, copy, apps, agents, toolPackages, officialTools, conn
             multiple
             size="small"
             options={officialPackages.map((toolPackage) => toolPackage.id)}
-            getOptionLabel={(packageId) => officialPackages.find((toolPackage) => toolPackage.id === packageId)?.name ?? packageId}
+            getOptionLabel={(packageId) => officialPackages.find((toolPackage) => toolPackage.id === packageId)!.name}
             value={selectedPackageIds}
-            onChange={(_event, value) => onChange((current) => current.type === 'llm_agent'
-              ? {
-                  ...current,
-                  toolIds: officialPackages
-                    .filter((toolPackage) => value.includes(toolPackage.id))
-                    .flatMap((toolPackage) => toolPackage.tools.map((tool) => tool.id)),
-                }
-              : current)}
+            onChange={(_event, value) => onChange((current) => ({
+              ...current,
+              toolIds: officialPackages
+                .filter((toolPackage) => value.includes(toolPackage.id))
+                .flatMap((toolPackage) => toolPackage.tools.map((tool) => tool.id)),
+            } as WorkflowNode))}
             renderInput={(params) => <TextField {...params} label={copy.toolsLabel} />}
           />
         </>
@@ -857,10 +843,8 @@ const NodePanel = ({ node, copy, apps, agents, toolPackages, officialTools, conn
             if (!raw) {
               setSchemaJsonError(false);
               onChange((current) => {
-                if (current.type !== 'llm_agent' && current.type !== 'forger_agent') {
-                  return current;
-                }
-                const { outputSchema: _schema, ...rest } = current;
+                const agentNode = current as Extract<WorkflowNode, { type: 'llm_agent' | 'forger_agent' }>;
+                const { outputSchema: _schema, ...rest } = agentNode;
                 return rest as WorkflowNode;
               });
               return;
@@ -868,9 +852,7 @@ const NodePanel = ({ node, copy, apps, agents, toolPackages, officialTools, conn
             try {
               const parsed = JSON.parse(raw) as Record<string, unknown>;
               setSchemaJsonError(false);
-              onChange((current) => current.type === 'llm_agent' || current.type === 'forger_agent'
-                ? { ...current, outputSchema: parsed } as WorkflowNode
-                : current);
+              onChange((current) => ({ ...current, outputSchema: parsed } as WorkflowNode));
             } catch {
               setSchemaJsonError(true);
             }
@@ -885,9 +867,7 @@ const NodePanel = ({ node, copy, apps, agents, toolPackages, officialTools, conn
             size="small"
             label={copy.forgerToolAction}
             value={node.toolId}
-            onChange={(event) => onChange((current) => current.type === 'forger_tool'
-              ? { ...current, toolId: event.target.value as typeof current.toolId }
-              : current)}
+            onChange={(event) => onChange((current) => ({ ...current, toolId: event.target.value } as WorkflowNode))}
           >
             {forgerToolActions.map(({ tool, action }) => (
               <MenuItem key={action.id} value={action.id}>{tool.name}: {action.name}</MenuItem>
@@ -907,9 +887,7 @@ const NodePanel = ({ node, copy, apps, agents, toolPackages, officialTools, conn
                     mapTooltip={copy.mapField}
                     wholeOutputLabel={copy.wholeOutput}
                     triggerGroupLabel={copy.triggerData}
-                    onChange={(nextInput) => onChange((current) => current.type === 'forger_tool'
-                      ? { ...current, input: nextInput }
-                      : current)}
+                    onChange={(nextInput) => onChange((current) => ({ ...current, input: nextInput } as WorkflowNode))}
                   />
                   <Button size="small" variant="text" sx={{ alignSelf: 'flex-start' }} onClick={() => setRawActionInput(true)}>
                     {copy.advancedJson}
@@ -931,7 +909,7 @@ const NodePanel = ({ node, copy, apps, agents, toolPackages, officialTools, conn
                     try {
                       const parsed = JSON.parse(event.target.value || '{}') as Record<string, unknown>;
                       setInputJsonError(false);
-                      onChange((current) => current.type === 'forger_tool' ? { ...current, input: parsed } : current);
+                      onChange((current) => ({ ...current, input: parsed } as WorkflowNode));
                     } catch {
                       setInputJsonError(true);
                     }
@@ -962,13 +940,11 @@ const NodePanel = ({ node, copy, apps, agents, toolPackages, officialTools, conn
             label={copy.connectionType}
             value={connectionTypeAvailable ? node.connectionType : ''}
             onChange={(event) => onChange((current) => {
-              if (current.type !== 'connection') {
-                return current;
-              }
+              const connectionNode = current as Extract<WorkflowNode, { type: 'connection' }>;
               const connectionType = event.target.value;
               const option = connectedConnectionOptions.find((candidate) => candidate.type === connectionType);
               const defaultConnectionId = option?.instances.length === 1 ? option.instances[0]?.id : undefined;
-              const { connectionId: _connectionId, ...rest } = current;
+              const { connectionId: _connectionId, ...rest } = connectionNode;
               return {
                 ...rest,
                 connectionType,
@@ -988,9 +964,7 @@ const NodePanel = ({ node, copy, apps, agents, toolPackages, officialTools, conn
             size="small"
             label={copy.connectionAction}
             value={node.actionId}
-            onChange={(event) => onChange((current) => current.type === 'connection'
-              ? { ...current, actionId: event.target.value }
-              : current)}
+            onChange={(event) => onChange((current) => ({ ...current, actionId: event.target.value } as WorkflowNode))}
           >
             {connectionActions
               .filter((entry) => entry.connectionType === node.connectionType)
@@ -1006,15 +980,13 @@ const NodePanel = ({ node, copy, apps, agents, toolPackages, officialTools, conn
               value={connectionIdAvailable ? node.connectionId ?? '' : ''}
               helperText={copy.connectionIdHelper}
               onChange={(event) => onChange((current) => {
-                if (current.type !== 'connection') {
-                  return current;
-                }
+                const connectionNode = current as Extract<WorkflowNode, { type: 'connection' }>;
                 const connectionId = event.target.value;
                 if (!connectionId) {
-                  const { connectionId: _connectionId, ...rest } = current;
+                  const { connectionId: _connectionId, ...rest } = connectionNode;
                   return rest as WorkflowNode;
                 }
-                return { ...current, connectionId };
+                return { ...connectionNode, connectionId };
               })}
             >
               <MenuItem value="">{copy.connectionDefaultAccount}</MenuItem>
@@ -1030,9 +1002,6 @@ const NodePanel = ({ node, copy, apps, agents, toolPackages, officialTools, conn
               helperText={copy.connectionDefaultAccount}
               disabled
             />
-          ) : null}
-          {selectedConnectionOption && selectedConnectionOption.instances.length === 0 ? (
-            <Alert severity="warning" variant="outlined">{copy.connectionMissing}</Alert>
           ) : null}
           {node.connectionType && (!connectionTypeAvailable || !selectedConnectionOption || !connectionIdAvailable) ? (
             <Alert severity="warning" variant="outlined">{copy.connectionMissing}</Alert>
@@ -1052,9 +1021,7 @@ const NodePanel = ({ node, copy, apps, agents, toolPackages, officialTools, conn
                     mapTooltip={copy.mapField}
                     wholeOutputLabel={copy.wholeOutput}
                     triggerGroupLabel={copy.triggerData}
-                    onChange={(nextInput) => onChange((current) => current.type === 'connection'
-                      ? { ...current, input: nextInput }
-                      : current)}
+                    onChange={(nextInput) => onChange((current) => ({ ...current, input: nextInput } as WorkflowNode))}
                   />
                   <Button size="small" variant="text" sx={{ alignSelf: 'flex-start' }} onClick={() => setRawActionInput(true)}>
                     {copy.advancedJson}
@@ -1076,7 +1043,7 @@ const NodePanel = ({ node, copy, apps, agents, toolPackages, officialTools, conn
                     try {
                       const parsed = JSON.parse(event.target.value || '{}') as Record<string, unknown>;
                       setInputJsonError(false);
-                      onChange((current) => current.type === 'connection' ? { ...current, input: parsed } : current);
+                      onChange((current) => ({ ...current, input: parsed } as WorkflowNode));
                     } catch {
                       setInputJsonError(true);
                     }
@@ -1106,9 +1073,10 @@ const NodePanel = ({ node, copy, apps, agents, toolPackages, officialTools, conn
             label={copy.conditionLeft}
             value={node.expression.left}
             helperText={copy.promptHelper}
-            onChange={(event) => onChange((current) => current.type === 'condition'
-              ? { ...current, expression: { ...current.expression, left: event.target.value } }
-              : current)}
+            onChange={(event) => onChange((current) => {
+              const condition = current as Extract<WorkflowNode, { type: 'condition' }>;
+              return { ...condition, expression: { ...condition.expression, left: event.target.value } };
+            })}
             slotProps={{
               input: {
                 endAdornment: sourcesWithItem.length > 0 ? (
@@ -1117,9 +1085,10 @@ const NodePanel = ({ node, copy, apps, agents, toolPackages, officialTools, conn
                     tooltip={copy.mapField}
                     wholeOutputLabel={copy.wholeOutput}
                     triggerGroupLabel={copy.triggerData}
-                    onPick={(reference) => onChange((current) => current.type === 'condition'
-                      ? { ...current, expression: { ...current.expression, left: reference } }
-                      : current)}
+                    onPick={(reference) => onChange((current) => {
+                      const condition = current as Extract<WorkflowNode, { type: 'condition' }>;
+                      return { ...condition, expression: { ...condition.expression, left: reference } };
+                    })}
                   />
                 ) : undefined,
               },
@@ -1130,9 +1099,10 @@ const NodePanel = ({ node, copy, apps, agents, toolPackages, officialTools, conn
             size="small"
             label={copy.conditionOperator}
             value={node.expression.operator}
-            onChange={(event) => onChange((current) => current.type === 'condition'
-              ? { ...current, expression: { ...current.expression, operator: event.target.value as WorkflowConditionOperator } }
-              : current)}
+            onChange={(event) => onChange((current) => {
+              const condition = current as Extract<WorkflowNode, { type: 'condition' }>;
+              return { ...condition, expression: { ...condition.expression, operator: event.target.value as WorkflowConditionOperator } };
+            })}
           >
             {CONDITION_OPERATORS.map((operator) => (
               <MenuItem key={operator} value={operator}>{copy.operators[operator]}</MenuItem>
@@ -1143,9 +1113,10 @@ const NodePanel = ({ node, copy, apps, agents, toolPackages, officialTools, conn
               size="small"
               label={copy.conditionRight}
               value={node.expression.right ?? ''}
-              onChange={(event) => onChange((current) => current.type === 'condition'
-                ? { ...current, expression: { ...current.expression, right: event.target.value } }
-                : current)}
+              onChange={(event) => onChange((current) => {
+                const condition = current as Extract<WorkflowNode, { type: 'condition' }>;
+                return { ...condition, expression: { ...condition.expression, right: event.target.value } };
+              })}
             />
           ) : null}
         </>
@@ -1205,7 +1176,7 @@ const NodePanel = ({ node, copy, apps, agents, toolPackages, officialTools, conn
         onChange={(event) => {
           const minutes = Number(event.target.value);
           onChange((current) => {
-            if (!Number.isFinite(minutes) || minutes <= 0) {
+            if (minutes <= 0) {
               const { timeoutMs: _timeout, ...rest } = current;
               return rest as WorkflowNode;
             }

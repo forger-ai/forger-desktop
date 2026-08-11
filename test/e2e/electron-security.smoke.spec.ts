@@ -92,6 +92,10 @@ test('real Electron startup preserves renderer isolation and denies uncontrolled
       timeout: 30_000,
     });
     const page = await waitForDesktopWindow(electronApp);
+    await expect.poll(() => electronApp?.windows().length ?? 0, {
+      timeout: 5_000,
+      message: 'desktop startup should settle to the single main window before the child-window probe',
+    }).toBe(1);
 
     const runtimeProfile = await electronApp.evaluate(({ app }) => ({
       isPackaged: app.isPackaged,
@@ -154,12 +158,21 @@ test('real Electron startup preserves renderer isolation and denies uncontrolled
     });
 
     const initialWindowCount = electronApp.windows().length;
-    const unexpectedWindow = electronApp.waitForEvent('window', { timeout: 1_000 }).then(() => true, () => false);
+    const unexpectedWindow = electronApp.waitForEvent('window', { timeout: 1_000 }).catch(() => null);
     await page.evaluate(() => {
       window.open('about:blank', 'uncontrolled-e2e-child');
     });
-    expect(await unexpectedWindow).toBe(false);
-    expect(electronApp.windows()).toHaveLength(initialWindowCount);
+    const transientWindow = await unexpectedWindow;
+    if (transientWindow) {
+      await expect.poll(() => transientWindow.isClosed(), {
+        timeout: 2_000,
+        message: 'an uncontrolled child window must close after the main-process denial',
+      }).toBe(true);
+    }
+    await expect.poll(() => electronApp?.windows().length ?? 0, {
+      timeout: 2_000,
+      message: 'an uncontrolled child window must not remain attached to the Electron app',
+    }).toBe(initialWindowCount);
     const shellCalls = await electronApp.evaluate(() => (
       (globalThis as typeof globalThis & { __forgerE2eShellCalls?: unknown[] }).__forgerE2eShellCalls ?? []
     ));

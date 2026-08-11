@@ -110,6 +110,7 @@ export function BackgroundTasksDrawer({
                   >
                     <Box sx={{ pt: 0.25 }}>{taskIcon(task)}</Box>
                     <ListItemText
+                      disableTypography
                       primary={
                         <Stack direction="row" alignItems="center" spacing={1} sx={{ minWidth: 0 }}>
                           <Typography fontWeight={700} noWrap sx={{ minWidth: 0 }}>

@@ -240,7 +240,7 @@ export class LlmProviderRunService {
     profileId: string,
     runtimeAuthMode: 'materialized' | 'externalActiveOnly',
   ): Promise<string | undefined> {
-    if (!this.options.providerProfilesRoot || runtimeAuthMode !== 'materialized' || provider === 'antigravity') {
+    if (!this.options.providerProfilesRoot || runtimeAuthMode !== 'materialized') {
       return undefined;
     }
     const profileDir = path.join(this.options.providerProfilesRoot, provider, safeProfileDirectoryName(profileId));

@@ -67,7 +67,7 @@ export const MappingMenuButton = ({ sources, tooltip, wholeOutputLabel, triggerG
   return (
     <>
       <Tooltip title={tooltip}>
-        <IconButton size="small" onClick={open} edge="end">
+        <IconButton size="small" aria-label={tooltip} onClick={open} edge="end">
           <DataObjectRounded fontSize="small" />
         </IconButton>
       </Tooltip>

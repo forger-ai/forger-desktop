@@ -187,10 +187,7 @@ const findQuotedSensitiveAssignment = (
   value: string,
   quoteIndex: number,
 ): SensitiveAssignmentValue | null => {
-  const quote = value[quoteIndex];
-  if (!isQuote(quote)) {
-    return null;
-  }
+  const quote = value[quoteIndex] as '"' | "'";
   const encodingLevel = resolveQuoteEncodingLevel(value, quoteIndex);
   if (encodingLevel === null) {
     return null;

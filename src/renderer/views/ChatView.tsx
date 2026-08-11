@@ -142,7 +142,7 @@ const readFileAsBase64 = async (file: File): Promise<string> =>
     const reader = new FileReader();
     reader.onload = () => {
       const value = typeof reader.result === 'string' ? reader.result : '';
-      resolve(value.includes(',') ? value.split(',').pop() ?? '' : value);
+      resolve(value.includes(',') ? value.split(',').at(-1)! : value);
     };
     reader.onerror = () => reject(reader.error ?? new Error('clipboard_image_read_failed'));
     reader.readAsDataURL(file);
@@ -283,7 +283,7 @@ export function ChatView({
       ? ''
       : value === 'auto'
         ? t.sections.chat.autoProviderLabel(providerLabel(resolvedProviderForAuto))
-        : providerOptions.find((option) => option.value === value)?.label ?? providerLabel(value);
+        : providerLabel(value);
   const selectedProviderValue = providerOptions.some((option) => option.value === selectedProvider) ? selectedProvider : '';
   const effectiveProvider = selectedProvider === 'auto' ? resolvedProviderForAuto : selectedProvider;
   const activeQuestionAction = useMemo(
@@ -422,9 +422,6 @@ export function ChatView({
   };
 
   const handleStopRun = async () => {
-    if (!canStopRun || stopBusy) {
-      return;
-    }
     setStopBusy(true);
     try {
       await onStopRun();
@@ -434,9 +431,6 @@ export function ChatView({
   };
 
   const sendComposerMessage = () => {
-    if (!canSendCurrentMode) {
-      return;
-    }
     onSend(pendingModeOverride);
   };
 
@@ -481,7 +475,7 @@ export function ChatView({
     beforeRange.setEnd(range.startContainer, range.startOffset);
     const fragment = beforeRange.cloneContents();
     fragment.querySelectorAll?.('[data-file-chip]').forEach((node) => node.remove());
-    return (fragment.textContent ?? '').replace(/\u00a0/g, ' ');
+    return fragment.textContent!.replace(/\u00a0/g, ' ');
   };
 
   const syncComposerText = () => {
@@ -537,7 +531,7 @@ export function ChatView({
       if (root.contains(range.startContainer)) {
         const textNode = range.startContainer;
         if (textNode.nodeType === Node.TEXT_NODE) {
-          const text = textNode.textContent ?? '';
+          const text = textNode.textContent!;
           const before = text.slice(0, range.startOffset);
           const match = before.match(/(?:^|\s)@([^\s@]*)$/);
           if (match?.index !== undefined) {
@@ -1136,11 +1130,11 @@ export function ChatView({
                   <Box
                     component="div"
                     ref={inputRef}
-                    contentEditable={intelligenceProviderConfigured}
+                    contentEditable
                     suppressContentEditableWarning
                     role="textbox"
-                    aria-label={intelligenceProviderConfigured ? t.sections.chat.inputPlaceholder : t.sections.chat.inputProviderMissingPlaceholder}
-                    data-placeholder={intelligenceProviderConfigured ? t.sections.chat.inputPlaceholder : t.sections.chat.inputProviderMissingPlaceholder}
+                    aria-label={t.sections.chat.inputPlaceholder}
+                    data-placeholder={t.sections.chat.inputPlaceholder}
                     onInput={syncComposerText}
                     onPaste={handlePaste}
                     onClick={(event) => {
@@ -1154,9 +1148,6 @@ export function ChatView({
                       }
                     }}
                     onKeyDown={(event) => {
-                      if (!intelligenceProviderConfigured) {
-                        return;
-                      }
                       if (event.key === 'Enter' && !event.shiftKey) {
                         event.preventDefault();
                         if (!isSending && canSendCurrentMode && (serializeComposerText().trim() || pendingFiles.length > 0 || mentionedFiles.length > 0)) {

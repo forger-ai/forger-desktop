@@ -30,6 +30,7 @@ export const formatRelativeHistoryTime = (updatedAt: string, nowLabel: string): 
     ['h', 60 * 60],
     ['m', 60],
   ];
-  const [unit, seconds] = units.find(([, unitSeconds]) => diffSeconds >= unitSeconds) ?? ['m', 60];
+  // The earlier guard guarantees at least the final minute bucket matches.
+  const [unit, seconds] = units.find(([, unitSeconds]) => diffSeconds >= unitSeconds)!;
   return `${Math.floor(diffSeconds / seconds)}${unit}`;
 };

@@ -229,7 +229,7 @@ export class WhatsAppConnectionManager {
       return { success: false, userMessage: 'No hay metadata suficiente para descargar ese adjunto.', technicalCode: 'whatsapp_attachment_raw_message_missing' };
     }
     await this.ensureStarted(context);
-    const baileys = await importBaileys();
+    const baileys = await this.loadBaileys();
     const downloadMediaMessage = baileys.downloadMediaMessage as BaileysDownloadMediaMessage | undefined;
     if (!downloadMediaMessage) {
       return { success: false, userMessage: 'La version actual de Baileys no expone descarga de adjuntos.', technicalCode: 'whatsapp_attachment_download_unavailable' };
@@ -575,14 +575,11 @@ export class WhatsAppConnectionManager {
   }
 
   private async writeAttachmentFile(attachmentId: string, fileName: string | undefined, buffer: Buffer): Promise<string> {
-    const safeName = sanitizePathSegment(fileName || `${attachmentId}.bin`);
-    const safeId = sanitizePathSegment(attachmentId);
+    const safeName = sanitizePathSegment(fileName || 'attachment.bin').slice(0, 100);
+    const safeId = sanitizePathSegment(attachmentId).slice(0, 100);
     const directory = path.join(this.store.downloadsDirectory(), safeId.slice(0, 24));
     await fs.mkdir(directory, { recursive: true, mode: 0o700 });
     const filePath = path.join(directory, `${safeId}-${safeName}`);
-    if (!isInside(directory, filePath)) {
-      throw new Error('whatsapp_attachment_path_invalid');
-    }
     await fs.writeFile(filePath, buffer, { mode: 0o600 });
     await fs.chmod(filePath, 0o600).catch(() => undefined);
     return filePath;
@@ -773,12 +770,8 @@ const fileExists = async (filePath: string): Promise<boolean> => {
 
 const sanitizePathSegment = (value: string): string => {
   const cleaned = value.trim().replace(/[/\\]/g, '-').replace(/[^a-zA-Z0-9._-]/g, '-').replace(/-+/g, '-');
-  return cleaned.slice(0, 180) || 'attachment';
-};
-
-const isInside = (root: string, target: string): boolean => {
-  const relative = path.relative(root, target);
-  return relative === '' || (!relative.startsWith('..') && !path.isAbsolute(relative));
+  const bounded = cleaned.slice(0, 180);
+  return !bounded || bounded === '.' || bounded === '..' ? 'attachment' : bounded;
 };
 
 const chmodAuthFiles = async (directory: string): Promise<void> => {

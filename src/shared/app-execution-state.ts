@@ -3,7 +3,7 @@ import type { AppConnectMode, AppExecutionMode, AppExecutionPhase, AppSummary } 
 export interface AppExecutionState {
   phase: AppExecutionPhase;
   mode: AppExecutionMode | null;
-  connectMode?: AppConnectMode | null;
+  connectMode: AppConnectMode | null;
 }
 
 interface DeriveAppExecutionStateOptions {
@@ -54,6 +54,6 @@ export const withAppExecutionState = <T extends AppSummary>(
     ...app,
     executionPhase: execution.phase,
     executionMode: execution.mode,
-    connectMode: execution.connectMode ?? null,
+    connectMode: execution.connectMode,
   };
 };
