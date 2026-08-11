@@ -31,7 +31,7 @@
     "test:renderer": "vitest run",
     "test:e2e": "npm run build:renderer && npm run build:electron && npm run test:e2e:built",
     "test:e2e:built": "playwright test --config=playwright.config.ts",
-    "test:resources": "python -m unittest discover -s test/resources -p '*_test.py'",
+    "test:resources": "python test/resources/speech_to_text_server_test.py",
     "test:coverage": "npm run test:coverage:electron:strict && npm run test:coverage:renderer",
     "test:coverage:electron:report": "npm run build:electron && c8 --reporter=text node --test --test-force-exit test/contracts/*.test.mjs test/main/*.test.mjs scripts/test-automation-approval-policy.mjs scripts/test-app-agent-runtime-contract.mjs",
     "test:coverage:electron:strict": "npm run build:electron && c8 --check-coverage --lines=100 --statements=100 --branches=100 --functions=100 --reporter=text node --test --test-force-exit test/contracts/*.test.mjs test/main/*.test.mjs scripts/test-automation-approval-policy.mjs scripts/test-app-agent-runtime-contract.mjs",

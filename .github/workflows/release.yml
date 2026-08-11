@@ -127,6 +127,10 @@ jobs:
         if: runner.os != 'Linux'
         run: npm run test:e2e:built
 
+      - name: Remove generated test artifacts before packaging
+        run: |
+          node -e "require('node:fs').rmSync('test-results', { recursive: true, force: true })"
+
       - run: npm run ${{ matrix.script }}
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
