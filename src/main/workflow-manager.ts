@@ -132,6 +132,7 @@ interface WorkflowManagerOptions {
   callConnectorAction?: (input: CallOfficialToolInput) => Promise<CallOfficialToolResult>;
   getValidToolIds?: () => ReadonlySet<string>;
   onAgentRunActivity?: (activity: AgentRunActivity) => void;
+  persistAgentRunActivity?: (activity: AgentRunActivity) => Promise<void>;
   onWorkflowUpdated: (event: WorkflowUpdatedEvent) => void;
 }
 
@@ -143,9 +144,14 @@ export class WorkflowManager {
   private workflows = new Map<string, Workflow>();
   private timers = new Map<string, NodeJS.Timeout>();
   private activeRuns = new Map<string, ActiveRunState>();
+  private activeRunTasks = new Map<string, Promise<void>>();
   private nodeContexts = new Map<string, WorkflowMcpNodeContext>();
   private nodeCompletions = new Map<string, WorkflowNodeCompletion>();
   private readonly store: WorkflowStore;
+  private activityPersistenceTail: Promise<void> = Promise.resolve();
+  private readonly backgroundFailures: unknown[] = [];
+  private disposalPromise: Promise<void> | null = null;
+  private disposed = false;
 
   public constructor(private readonly options: WorkflowManagerOptions) {
     this.store = new WorkflowStore({ metadataRoot: options.metadataRoot });
@@ -171,11 +177,25 @@ export class WorkflowManager {
     }
   }
 
-  public dispose(): void {
+  public dispose(): Promise<void> {
+    this.disposalPromise ??= this.disposeInternal();
+    return this.disposalPromise;
+  }
+
+  private async disposeInternal(): Promise<void> {
+    this.disposed = true;
     for (const timer of this.timers.values()) {
       clearTimeout(timer);
     }
     this.timers.clear();
+    for (const active of this.activeRuns.values()) {
+      this.stopActiveRun(active);
+    }
+    while (this.activeRunTasks.size > 0) {
+      await Promise.all(this.activeRunTasks.values());
+    }
+    await this.activityPersistenceTail;
+    this.throwBackgroundFailures();
   }
 
   public list(): Workflow[] {
@@ -281,7 +301,7 @@ export class WorkflowManager {
     await this.store.appendRunId(workflow.id, run.id);
     await this.persistRun(workflow.id, run);
     await this.markWorkflowRunning(workflow.id, true);
-    void this.executeSingleNode(workflow.id, run, nodeId);
+    this.trackRunTask(run.id, this.executeSingleNode(workflow.id, run, nodeId));
     return toWorkflowRunSummary(run);
   }
 
@@ -393,15 +413,11 @@ export class WorkflowManager {
     if (!active) {
       return { success: false, technicalCode: 'workflow_run_not_active', userMessage: 'Ese flujo no esta en ejecucion.' };
     }
-    active.canceled = true;
-    for (const resolver of active.approvalResolvers.values()) {
-      resolver(false);
-    }
-    active.approvalResolvers.clear();
-    for (const child of active.children) {
-      this.killChild(child);
-    }
-    return { success: true, userMessage: 'Deteniendo el flujo...' };
+    this.stopActiveRun(active);
+    await this.activeRunTasks.get(runId);
+    await this.activityPersistenceTail;
+    this.throwBackgroundFailures();
+    return { success: true, userMessage: 'Flujo detenido.' };
   }
 
   public async approveNode(input: WorkflowApproveNodeInput): Promise<FilesActionResult> {
@@ -471,6 +487,9 @@ export class WorkflowManager {
   // --- Run execution -----------------------------------------------------
 
   private async startRun(id: string, trigger: WorkflowRunTrigger): Promise<WorkflowRunSummary> {
+    if (this.disposed) {
+      throw new Error('workflow_manager_disposed');
+    }
     const workflow = this.requireWorkflow(id);
     if (workflow.running) {
       const skipped = this.createRunRecord(workflow, trigger, 'skipped', 'workflow_already_running');
@@ -481,7 +500,7 @@ export class WorkflowManager {
     await this.store.appendRunId(workflow.id, run.id);
     await this.persistRun(workflow.id, run);
     await this.markWorkflowRunning(workflow.id, true);
-    void this.executeRun(workflow.id, run);
+    this.trackRunTask(run.id, this.executeRun(workflow.id, run));
     return toWorkflowRunSummary(run);
   }
 
@@ -930,7 +949,7 @@ export class WorkflowManager {
     const emitActivity = (next: AgentRunActivity): void => {
       activity = next;
       this.options.onAgentRunActivity?.(activity);
-      void persistAgentRunActivity(this.options.metadataRoot, activity);
+      this.queueActivityPersistence(activity);
     };
     emitActivity(activity);
     const inputContext = this.buildAgentInputContext(context);
@@ -1184,6 +1203,9 @@ export class WorkflowManager {
 
   private async scheduleWorkflow(id: string): Promise<void> {
     this.clearTimer(id);
+    if (this.disposed) {
+      return;
+    }
     const workflow = this.workflows.get(id);
     if (!workflow?.enabled || workflow.trigger.type !== 'scheduled' || !workflow.nextRunAt) {
       return;
@@ -1346,6 +1368,46 @@ export class WorkflowManager {
     if (timer) {
       clearTimeout(timer);
       this.timers.delete(id);
+    }
+  }
+
+  private stopActiveRun(active: ActiveRunState): void {
+    active.canceled = true;
+    for (const resolver of active.approvalResolvers.values()) {
+      resolver(false);
+    }
+    active.approvalResolvers.clear();
+    for (const child of active.children) {
+      this.killChild(child);
+    }
+  }
+
+  private trackRunTask(runId: string, task: Promise<void>): void {
+    const tracked = task
+      .catch((error) => {
+        this.backgroundFailures.push(error);
+      })
+      .finally(() => {
+        if (this.activeRunTasks.get(runId) === tracked) {
+          this.activeRunTasks.delete(runId);
+        }
+      });
+    this.activeRunTasks.set(runId, tracked);
+  }
+
+  private queueActivityPersistence(activity: AgentRunActivity): void {
+    const persist = this.options.persistAgentRunActivity
+      ?? ((next: AgentRunActivity) => persistAgentRunActivity(this.options.metadataRoot, next));
+    this.activityPersistenceTail = this.activityPersistenceTail
+      .then(() => persist(activity))
+      .catch((error) => {
+        this.backgroundFailures.push(error);
+      });
+  }
+
+  private throwBackgroundFailures(): void {
+    if (this.backgroundFailures.length > 0) {
+      throw new AggregateError(this.backgroundFailures, 'workflow_background_task_failed');
     }
   }
 

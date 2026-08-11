@@ -1,13 +1,13 @@
 import { randomUUID } from 'node:crypto';
-import fs from 'node:fs/promises';
+import { constants } from 'node:fs';
+import fs, { type FileHandle } from 'node:fs/promises';
 import path from 'node:path';
+import { pipeline } from 'node:stream/promises';
 import type {
   FilesActionResult,
   FilesCreateCategoryInput,
   FilesDeleteCategoryInput,
   FilesDeleteInput,
-  FilesDiscardStagedForChatInput,
-  FilesImportInput,
   FilesListInput,
   FilesMoveInput,
   FilesRenameCategoryInput,
@@ -15,8 +15,31 @@ import type {
   FilesStageForChatInput,
   ForgerFileCategory,
   ForgerFileRecord,
-  PickedChatFile,
 } from '../shared/types';
+
+export interface FileLibrarySourceFile {
+  sourcePath: string;
+  name: string;
+  sizeBytes: number;
+  modifiedAt: string;
+  type: string;
+  staged?: boolean;
+}
+
+export interface FileLibraryImportInput {
+  sourcePaths?: string[];
+  sources?: Array<{
+    fileHandle: FileHandle;
+    name: string;
+    verify?: () => Promise<void>;
+  }>;
+  categoryPath?: string;
+  appId?: string;
+}
+
+export interface FileLibraryDiscardStagedInput {
+  sourcePaths: string[];
+}
 
 interface StoredFileIndex {
   files: ForgerFileRecord[];
@@ -63,8 +86,8 @@ export class FileLibrary {
     private readonly metadataRoot: string,
   ) {}
 
-  public async pickFileInfo(filePaths: string[]): Promise<PickedChatFile[]> {
-    const picked: PickedChatFile[] = [];
+  public async pickFileInfo(filePaths: string[]): Promise<FileLibrarySourceFile[]> {
+    const picked: FileLibrarySourceFile[] = [];
     for (const filePath of filePaths) {
       const stat = await fs.stat(filePath).catch(() => null);
       if (!stat?.isFile()) {
@@ -81,7 +104,7 @@ export class FileLibrary {
     return picked;
   }
 
-  public async stageFileForChat(input: FilesStageForChatInput): Promise<PickedChatFile> {
+  public async stageFileForChat(input: FilesStageForChatInput): Promise<FileLibrarySourceFile> {
     const mimeType = input.mimeType.toLowerCase().trim();
     const extension = IMAGE_EXTENSION_BY_MIME_TYPE[mimeType];
     if (!extension) {
@@ -106,12 +129,13 @@ export class FileLibrary {
     };
   }
 
-  public async discardStagedFilesForChat(input: FilesDiscardStagedForChatInput): Promise<FilesActionResult> {
+  public async discardStagedFilesForChat(input: FileLibraryDiscardStagedInput): Promise<FilesActionResult> {
     const stagingRoot = await this.chatStagingRoot();
+    const stagingRootReal = await fs.realpath(stagingRoot);
     for (const sourcePath of input.sourcePaths) {
-      const target = path.resolve(sourcePath);
-      if (isPathInside(target, stagingRoot)) {
-        await fs.rm(target, { force: true });
+      const targetReal = await fs.realpath(path.resolve(sourcePath)).catch(() => null);
+      if (targetReal && isPathInside(targetReal, stagingRootReal)) {
+        await fs.rm(targetReal, { force: true });
       }
     }
     return { success: true };
@@ -276,44 +300,76 @@ export class FileLibrary {
     return { success: true, userMessage: 'Categoria eliminada.' };
   }
 
-  public async importFiles(input: FilesImportInput): Promise<ForgerFileRecord[]> {
+  public async importFiles(input: FileLibraryImportInput): Promise<ForgerFileRecord[]> {
     const categoryPath = normalizeCategoryPath(input.categoryPath ?? '');
     await fs.mkdir(await this.resolveDataPath(categoryPath), { recursive: true });
     const index = await this.readIndex();
     const imported: ForgerFileRecord[] = [];
+    const createdPaths: string[] = [];
 
-    for (const sourcePath of input.sourcePaths) {
-      const sourceReal = await fs.realpath(sourcePath).catch(() => null);
-      if (!sourceReal) {
-        continue;
-      }
-      const sourceStat = await fs.stat(sourceReal).catch(() => null);
-      if (!sourceStat?.isFile()) {
-        continue;
+    try {
+      const importSource = async (originalNameInput: string, copy: (targetPath: string) => Promise<void>): Promise<void> => {
+        const originalName = sanitizeFileName(originalNameInput);
+        const available = await this.resolveAvailableDataPath(categoryPath ? `${categoryPath}/${originalName}` : originalName, false);
+        await copy(available.absolutePath);
+        const copiedStat = await fs.stat(available.absolutePath);
+        imported.push({
+          id: randomUUID(),
+          name: path.basename(available.relativePath),
+          relativePath: available.relativePath,
+          categoryPath,
+          sizeBytes: copiedStat.size,
+          uploadedAt: new Date().toISOString(),
+          modifiedAt: copiedStat.mtime.toISOString(),
+          type: inferType(available.relativePath),
+          appId: input.appId,
+        });
+      };
+
+      for (const source of input.sources ?? []) {
+        const stat = await source.fileHandle.stat();
+        if (!stat.isFile()) {
+          throw new Error('file_selection_not_file');
+        }
+        await importSource(source.name, async (targetPath) => {
+          const targetHandle = await fs.open(targetPath, 'wx');
+          createdPaths.push(targetPath);
+          try {
+            await pipeline(
+              source.fileHandle.createReadStream({ autoClose: false, start: 0 }),
+              targetHandle.createWriteStream({ autoClose: true, start: 0 }),
+            );
+          } finally {
+            await targetHandle.close().catch(() => undefined);
+          }
+          await source.verify?.();
+        });
       }
 
-      const originalName = sanitizeFileName(path.basename(sourceReal));
-      const available = await this.resolveAvailableDataPath(categoryPath ? `${categoryPath}/${originalName}` : originalName, false);
-      await fs.copyFile(sourceReal, available.absolutePath);
-      const copiedStat = await fs.stat(available.absolutePath);
-      imported.push({
-        id: randomUUID(),
-        name: path.basename(available.relativePath),
-        relativePath: available.relativePath,
-        categoryPath,
-        sizeBytes: copiedStat.size,
-        uploadedAt: new Date().toISOString(),
-        modifiedAt: copiedStat.mtime.toISOString(),
-        type: inferType(available.relativePath),
-        appId: input.appId,
+      for (const sourcePath of input.sourcePaths ?? []) {
+        const sourceReal = await fs.realpath(sourcePath).catch(() => null);
+        if (!sourceReal) {
+          continue;
+        }
+        const sourceStat = await fs.stat(sourceReal).catch(() => null);
+        if (!sourceStat?.isFile()) {
+          continue;
+        }
+        await importSource(path.basename(sourceReal), async (targetPath) => {
+          await fs.copyFile(sourceReal, targetPath, constants.COPYFILE_EXCL);
+          createdPaths.push(targetPath);
+        });
+      }
+
+      await this.writeIndex({
+        ...index,
+        files: [...imported, ...index.files],
       });
+      return imported;
+    } catch (error) {
+      await Promise.allSettled(createdPaths.map((createdPath) => fs.rm(createdPath, { force: true })));
+      throw error;
     }
-
-    await this.writeIndex({
-      ...index,
-      files: [...imported, ...index.files],
-    });
-    return imported;
   }
 
   public async moveFiles(input: FilesMoveInput): Promise<ForgerFileRecord[]> {

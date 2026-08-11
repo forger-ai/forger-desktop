@@ -274,6 +274,7 @@ export const IPC_CHANNELS = {
   filesPickForChat: 'forger:files:pick-for-chat',
   filesStageForChat: 'forger:files:stage-for-chat',
   filesDiscardStagedForChat: 'forger:files:discard-staged-for-chat',
+  filesReleaseSelections: 'forger:files:release-selections',
   filesList: 'forger:files:list',
   filesListCategories: 'forger:files:list-categories',
   filesCreateCategory: 'forger:files:create-category',

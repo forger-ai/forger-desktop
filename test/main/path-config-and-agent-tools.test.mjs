@@ -103,6 +103,65 @@ test('path config isolates dev userData before runtime paths are resolved', () =
   assert.equal(productionPath, null);
 });
 
+test('path config isolates explicit unpackaged E2E state without redirecting packaged production', () => {
+  const setPathCalls = [];
+  const e2ePath = configureDesktopUserDataPath({
+    app: {
+      isPackaged: false,
+      getPath: () => {
+        throw new Error('e2e_should_not_resolve_app_data');
+      },
+      setPath: (name, value) => setPathCalls.push([name, value]),
+    },
+    e2eProfileRoot: '/private/e2e-profile',
+    isDev: false,
+    isTest: true,
+    path,
+  });
+  assert.equal(e2ePath, '/private/e2e-profile/user-data');
+  assert.deepEqual(setPathCalls, [['userData', '/private/e2e-profile/user-data']]);
+
+  const controller = createPathController({
+    app: {
+      isPackaged: false,
+      getPath: (name) => `/private/e2e-profile/user-data/${name}`,
+    },
+    e2eProfileRoot: '/private/e2e-profile',
+    isDev: false,
+    isTest: true,
+    os: {
+      homedir: () => {
+        throw new Error('e2e_should_not_resolve_real_home');
+      },
+    },
+  });
+  assert.equal(controller.getForgerHomeRoot(), '/private/e2e-profile/workspace');
+  assert.equal(controller.getPrivateAppsRoot(), '/private/e2e-profile/workspace/apps');
+  assert.equal(controller.getForgerMetadataRoot(), '/private/e2e-profile/workspace/.forger');
+
+  for (const blockedInput of [
+    { isPackaged: true, isTest: true },
+    { isPackaged: false, isTest: false },
+  ]) {
+    const blockedSetPathCalls = [];
+    const blockedPath = configureDesktopUserDataPath({
+      app: {
+        isPackaged: blockedInput.isPackaged,
+        getPath: () => {
+          throw new Error('blocked_e2e_should_not_resolve_app_data');
+        },
+        setPath: (...args) => blockedSetPathCalls.push(args),
+      },
+      e2eProfileRoot: '/private/e2e-profile',
+      isDev: false,
+      isTest: blockedInput.isTest,
+      path,
+    });
+    assert.equal(blockedPath, null);
+    assert.deepEqual(blockedSetPathCalls, []);
+  }
+});
+
 test('path config uses production home and omits account storage key without a cloud user', () => {
   const controller = createPathController({
     forgerAccount: { authenticated: false },

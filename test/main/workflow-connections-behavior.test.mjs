@@ -60,7 +60,7 @@ const createManager = async (overrides = {}) => {
     forgerToolCalls,
     connectionCalls,
     cleanup: async () => {
-      manager.dispose();
+      await manager.dispose();
       await rm(metadataRoot, { recursive: true, force: true });
     },
   };

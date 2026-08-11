@@ -6,6 +6,9 @@ This directory starts the desktop automated test structure.
 
 - `contracts/`: fast `node:test` checks for shared contracts that should not drift.
 - `main/`: `node:test` integration tests for main-process services using temp directories and fake CLIs or servers.
+- `renderer/`: Vitest + jsdom interaction tests that render React/MUI surfaces and exercise them through accessible controls.
+- `e2e/`: Playwright smoke tests that launch the real unpackaged Electron application against built assets.
+- `resources/`: Python integration tests for bundled local services.
 
 ## Test Quality Rules
 
@@ -24,13 +27,62 @@ Allowed contract checks that are not behavior tests:
 - Generic policy lints that scan all files uniformly (for example, no `@ts-nocheck` under `src/main`).
 - Architectural import boundaries (for example, execution surfaces must not import provider adapters directly).
 
-Run:
+Run the default local suite, which includes full Electron behavior and rendered React/MUI behavior:
 
 ```sh
 npm run test
 ```
 
-The tests build `dist-electron` first and then import compiled CommonJS modules. They must not use real Codex or Claude credentials, real user data, or the real private app workspace.
+Run only the full Electron suite with:
+
+```sh
+npm run test:electron
+```
+
+The Electron command builds `dist-electron` once, then runs the contract and main-process suites plus the automation-approval and app-agent-runtime checks against that build. Default and platform Electron runs do not force process exit, so leaked handles fail visibly instead of being hidden. The tests must not use real Codex or Claude credentials, real user data, or the real private app workspace.
+
+The cross-platform CI matrix uses the full Electron suite on Ubuntu and a focused Electron suite on macOS and Windows. The focused suite covers packaging contracts, IPC/preload boundaries, URL/process opening, window bootstrap behavior, transactional backup restore, and signed cloud-backup validation:
+
+```sh
+npm run test:electron:focused
+```
+
+Run rendered React/MUI behavior tests:
+
+```sh
+npm run test:renderer
+```
+
+Run the real Electron smoke locally:
+
+```sh
+npm run test:e2e
+```
+
+`test:e2e` builds the renderer and Electron main/preload assets once, then launches the installed Electron development binary. When those assets are already built, CI and release jobs use:
+
+```sh
+npm run test:e2e:built
+```
+
+The smoke uses one worker, no retries, bounded Playwright timeouts, and no fixed sleeps. Every launch receives a unique temporary profile with an empty process home, isolated Electron `userData`, and an isolated private Forger workspace. The profile override is accepted only when all three conditions hold: the explicit E2E profile variable is present, the process runs with `NODE_ENV=test`, and Electron reports that the app is unpackaged. Packaged production state is never redirected.
+
+The smoke asserts behavior from a real Electron process:
+
+- the Desktop window has `nodeIntegration` off, `contextIsolation` on, and Chromium sandboxing on;
+- renderer JavaScript cannot access `require`, `process`, `module`, `Buffer`, or Node path globals;
+- the `window.forger` preload bridge exists and exposes functions only;
+- an uncontrolled child-window request is denied without creating a window or invoking the operating system shell;
+- Electron closes and the temporary state is removed in `finally` cleanup.
+
+Linux CI runs the smoke through `xvfb-run`; macOS and Windows run it directly. Every native release job runs the smoke against its unpackaged built assets before packaging.
+
+Run the bundled speech-to-text resource tests after installing their exact test dependencies:
+
+```sh
+python -m pip install -r test/resources/requirements.txt
+npm run test:resources
+```
 
 Coverage:
 
@@ -38,15 +90,28 @@ Coverage:
 npm run test:coverage
 ```
 
-`test:coverage` is the report-only Electron coverage harness. It builds `dist-electron` from a clean directory, then runs the same `node:test` contract and main-process suites through `c8`. This covers compiled main-process, preload, and shared modules.
+`test:coverage` runs both enforceable coverage gates: strict Electron coverage and renderer coverage.
 
-The strict gate is intentionally separate:
+To inspect Electron coverage without applying the gate:
+
+```sh
+npm run test:coverage:electron:report
+```
+
+The strict Electron gate builds once, runs the full Electron suite and the two special runtime checks through `c8`, and enforces these initial floors:
+
+- 88% lines
+- 88% statements
+- 83% branches
+- 89% functions
+
+Run it directly with:
 
 ```sh
 npm run test:coverage:electron:strict
 ```
 
-Use the strict script when the current Electron suite is expected to satisfy the configured gate. Do not wire it into the default test path while known uncovered Electron files still make the gate fail.
+The c8 report and strict commands retain Node's forced-exit option because the coverage process currently needs deterministic report finalization. The ordinary Electron suites remain the leak-detection path.
 
 The `c8` config keeps exclusions minimal:
 
@@ -55,8 +120,19 @@ The `c8` config keeps exclusions minimal:
 - Compiled type-only files such as `dist-electron/shared/types/**/*.js`, `dist-electron/main/**/types.js`, and `dist-electron/main/**/*-types.js`.
 - `dist-electron/shared/types.js`, because it is the shared type barrel and re-export glue.
 
-Renderer coverage is out of scope for this harness. Add renderer coverage through Vitest/jsdom rather than the Node runner, because the renderer is bundled for the browser by Vite.
+Renderer coverage uses V8 over the real `src/renderer` tree. It excludes only declaration files and the generated documentation bundle. Untested screens stay visible as zero coverage; the initial global floors intentionally record the small honest baseline rather than hiding those files:
+
+- 1.11% lines
+- 0.84% statements
+- 1.10% branches
+- 0.49% functions
+
+Run it with:
+
+```sh
+npm run test:coverage:renderer
+```
 
 ## Next Layer
 
-Add Playwright Electron after the main-process seams for catalog, install, MCP, Codex, and Claude are easier to stub. The first E2E smoke suite should cover clean install, app install, MCP use, Codex/Claude chat calls, and Electron security flags.
+The current Playwright layer is a startup and security smoke, not installer automation or a full product journey. Later E2E suites should cover clean install, app install, MCP use, and controlled Codex/Claude chat calls after those seams are practical to stub without credentials or live services.

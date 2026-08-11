@@ -73,6 +73,26 @@ export const createPreloadElectronMock = ({ invokeImpl, sendImpl } = {}) => {
   };
 };
 
+export const createTrustedMainWindow = ({ id = 1, send = () => undefined } = {}) => {
+  const mainFrame = { routingId: id };
+  const webContents = {
+    id,
+    mainFrame,
+    isDestroyed: () => false,
+    send,
+  };
+  return {
+    mainWindow: {
+      isDestroyed: () => false,
+      webContents,
+    },
+    trustedIpcEvent: {
+      sender: webContents,
+      senderFrame: mainFrame,
+    },
+  };
+};
+
 export const requireExposedApi = (exposed, name) => {
   const api = exposed.get(name);
   if (!api) {

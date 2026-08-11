@@ -174,7 +174,7 @@ interface ChatViewProps {
   onPickFiles: () => void;
   onStagePastedFile: (input: FilesStageForChatInput) => Promise<void>;
   onCreateUploadCategory: () => void;
-  onRemovePendingFile: (sourcePath: string) => void;
+  onRemovePendingFile: (grantId: string) => void;
   onMentionFile: (file: ForgerFileRecord) => void;
   onRemoveMentionedFile: (fileId: string) => void;
   providerOptions: Array<{ label: string; value: AgentProvider | 'auto' }>;
@@ -1110,10 +1110,10 @@ export function ChatView({
                     <Stack direction="row" spacing={0.5} alignItems="center" flexWrap="wrap" sx={{ mb: 0.5 }}>
                       {pendingFiles.map((file) => (
                         <Chip
-                          key={file.sourcePath}
+                          key={file.grantId}
                           label={compactFileName(file.name)}
                           size="small"
-                          onDelete={() => onRemovePendingFile(file.sourcePath)}
+                          onDelete={() => onRemovePendingFile(file.grantId)}
                           deleteIcon={<CloseRounded />}
                           sx={{
                             height: 24,

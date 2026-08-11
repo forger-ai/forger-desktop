@@ -5,11 +5,12 @@ import { tmpdir } from 'node:os';
 import test from 'node:test';
 import { createRequire } from 'node:module';
 
-import { createIpcMainRecorder } from './electron-test-helpers.mjs';
+import { createIpcMainRecorder, createTrustedMainWindow } from './electron-test-helpers.mjs';
 
 const require = createRequire(import.meta.url);
 const { IPC_CHANNELS } = require('../../dist-electron/shared/ipc.js');
 const { registerMainIpcHandlers } = require('../../dist-electron/main/ipc/main-handlers.js');
+const { mainWindow: trustedMainWindow, trustedIpcEvent } = createTrustedMainWindow();
 
 const createDeps = (overrides = {}) => {
   const { handlers, ipcMain } = createIpcMainRecorder();
@@ -48,7 +49,7 @@ const createDeps = (overrides = {}) => {
     getInstallLogPath: () => '/tmp/forger-install.log',
     ipcMain,
     listCatalogFromBackend: async () => [],
-    mainWindow: null,
+    mainWindow: trustedMainWindow,
     path,
     publicForgerAccount: (account) => ({ authenticated: Boolean(account.authenticated) }),
     registry: { apps: {} },
@@ -68,6 +69,13 @@ const createDeps = (overrides = {}) => {
     ...overrides,
   };
 
+  if (!Object.hasOwn(overrides, 'getMainWindow')) {
+    deps.getMainWindow = () => deps.mainWindow;
+  }
+  if (!Object.hasOwn(overrides, 'getFriendChatWindows')) {
+    deps.getFriendChatWindows = () => [];
+  }
+
   registerMainIpcHandlers(deps);
   return { deps, handlers, logs };
 };
@@ -82,22 +90,22 @@ test('rename installed app validates ownership and input before touching the man
     },
   });
 
-  assert.deepEqual(await handlers.get(IPC_CHANNELS.renameInstalledApp)(null, { appId: 'missing', name: 'Nueva' }), {
+  assert.deepEqual(await handlers.get(IPC_CHANNELS.renameInstalledApp)(trustedIpcEvent, { appId: 'missing', name: 'Nueva' }), {
     success: false,
     userMessage: 'No encontramos esta app instalada.',
     technicalCode: 'app_not_installed',
   });
-  assert.deepEqual(await handlers.get(IPC_CHANNELS.renameInstalledApp)(null, { appId: 'no-dir', name: 'Nueva' }), {
+  assert.deepEqual(await handlers.get(IPC_CHANNELS.renameInstalledApp)(trustedIpcEvent, { appId: 'no-dir', name: 'Nueva' }), {
     success: false,
     userMessage: 'No encontramos esta app instalada.',
     technicalCode: 'app_not_installed',
   });
-  assert.deepEqual(await handlers.get(IPC_CHANNELS.renameInstalledApp)(null, { appId: 'not-owned', name: '   ' }), {
+  assert.deepEqual(await handlers.get(IPC_CHANNELS.renameInstalledApp)(trustedIpcEvent, { appId: 'not-owned', name: '   ' }), {
     success: false,
     userMessage: 'Escribe un nombre para la app.',
     technicalCode: 'app_name_required',
   });
-  assert.deepEqual(await handlers.get(IPC_CHANNELS.renameInstalledApp)(null, { appId: 'not-owned', name: 'Nueva' }), {
+  assert.deepEqual(await handlers.get(IPC_CHANNELS.renameInstalledApp)(trustedIpcEvent, { appId: 'not-owned', name: 'Nueva' }), {
     success: false,
     userMessage: 'Solo puedes cambiar el nombre de apps tuyas o remixes.',
     technicalCode: 'app_rename_not_owned_or_remixable',
@@ -116,7 +124,7 @@ test('rename installed app surfaces manifest failures as a local rename error', 
       },
     });
 
-    assert.deepEqual(await handlers.get(IPC_CHANNELS.renameInstalledApp)(null, { appId: 'demo-app', name: 'Nueva' }), {
+    assert.deepEqual(await handlers.get(IPC_CHANNELS.renameInstalledApp)(trustedIpcEvent, { appId: 'demo-app', name: 'Nueva' }), {
       success: false,
       userMessage: 'No pudimos cambiar el nombre de esta app.',
       technicalCode: 'app_manifest_invalid',
@@ -145,7 +153,7 @@ test('rename installed app persists the manifest display name and updates local 
       upsertInstalledRecord: async (entry) => upserts.push(entry),
     });
 
-    assert.deepEqual(await handlers.get(IPC_CHANNELS.renameInstalledApp)(null, { appId: 'demo-app', name: '  Nueva App  ' }), {
+    assert.deepEqual(await handlers.get(IPC_CHANNELS.renameInstalledApp)(trustedIpcEvent, { appId: 'demo-app', name: '  Nueva App  ' }), {
       success: true,
       userMessage: 'Nombre actualizado.',
       app: { id: 'demo-app', name: 'Vieja' },
@@ -179,7 +187,7 @@ test('rename installed app reports cloud sync outcomes for social apps', async (
       },
       upsertInstalledRecord: async () => undefined,
     });
-    const offline = await noBackend.handlers.get(IPC_CHANNELS.renameInstalledApp)(null, { appId: 'demo-app', name: 'Nueva' });
+    const offline = await noBackend.handlers.get(IPC_CHANNELS.renameInstalledApp)(trustedIpcEvent, { appId: 'demo-app', name: 'Nueva' });
     assert.equal(offline.success, true);
     assert.equal(offline.cloudSynced, false);
     assert.equal(offline.technicalCode, 'backend_client_missing');
@@ -201,7 +209,7 @@ test('rename installed app reports cloud sync outcomes for social apps', async (
       },
       upsertInstalledRecord: async () => undefined,
     });
-    assert.deepEqual(await synced.handlers.get(IPC_CHANNELS.renameInstalledApp)(null, { appId: 'demo-app', name: 'Nueva' }), {
+    assert.deepEqual(await synced.handlers.get(IPC_CHANNELS.renameInstalledApp)(trustedIpcEvent, { appId: 'demo-app', name: 'Nueva' }), {
       success: true,
       userMessage: 'Nombre actualizado.',
       app: { appId: 'demo-app', installDir: rootB, privateLocal: true, publishedSocialSource: { userAppId: 77 } },
@@ -220,7 +228,7 @@ test('rename installed app reports cloud sync outcomes for social apps', async (
       },
       upsertInstalledRecord: async () => undefined,
     });
-    const failed = await failing.handlers.get(IPC_CHANNELS.renameInstalledApp)(null, { appId: 'demo-app', name: 'Nueva' });
+    const failed = await failing.handlers.get(IPC_CHANNELS.renameInstalledApp)(trustedIpcEvent, { appId: 'demo-app', name: 'Nueva' });
     assert.equal(failed.success, true);
     assert.equal(failed.cloudSynced, false);
     assert.equal(failed.technicalCode, 'social_update_rejected');
@@ -258,7 +266,7 @@ test('social upload fails fast with a background task record when the account or
       apps: { 'demo-app': { appId: 'demo-app', installDir: '/apps/demo-app', privateLocal: true, name: 'Demo' } },
     },
   });
-  assert.deepEqual(await noBackend.handlers.get(IPC_CHANNELS.uploadSocialApp)(null, { appId: 'demo-app' }), {
+  assert.deepEqual(await noBackend.handlers.get(IPC_CHANNELS.uploadSocialApp)(trustedIpcEvent, { appId: 'demo-app' }), {
     success: false,
     userMessage: 'Inicia sesion en Forger Cloud para subir apps a Social.',
     technicalCode: 'backend_client_missing',
@@ -277,7 +285,7 @@ test('social upload fails fast with a background task record when the account or
       apps: { 'store-app': { appId: 'store-app', installDir: '/apps/store-app', name: 'Store App' } },
     },
   });
-  assert.deepEqual(await withBackend.handlers.get(IPC_CHANNELS.uploadSocialApp)(null, { appId: 'store-app' }), {
+  assert.deepEqual(await withBackend.handlers.get(IPC_CHANNELS.uploadSocialApp)(trustedIpcEvent, { appId: 'store-app' }), {
     success: false,
     userMessage: 'Solo puedes subir a Social apps tuyas o remixes de apps compartidas.',
     technicalCode: 'social_upload_not_owned_or_remixable',
@@ -350,7 +358,7 @@ test('social upload stages a filtered copy of the app, uploads it, and records t
       },
     });
 
-    const result = await handlers.get(IPC_CHANNELS.uploadSocialApp)(null, {
+    const result = await handlers.get(IPC_CHANNELS.uploadSocialApp)(trustedIpcEvent, {
       appId: 'demo-app',
       name: 'Registro Fácil ✨',
       visibility: 'public',
@@ -418,7 +426,7 @@ test('social upload converts packaging failures into a failed background task an
       },
     });
 
-    assert.deepEqual(await handlers.get(IPC_CHANNELS.uploadSocialApp)(null, { appId: 'demo-app', slug: 'demo-app' }), {
+    assert.deepEqual(await handlers.get(IPC_CHANNELS.uploadSocialApp)(trustedIpcEvent, { appId: 'demo-app', slug: 'demo-app' }), {
       success: false,
       userMessage: 'No pudimos subir la app a Social.',
       technicalCode: 'zip_failed',
@@ -457,13 +465,13 @@ test('social and forum channels reject with backend_client_missing when the clou
 
   for (const [channelKey, , args] of BACKEND_DELEGATED_CHANNELS) {
     await assert.rejects(
-      handlers.get(IPC_CHANNELS[channelKey])(null, ...args),
+      handlers.get(IPC_CHANNELS[channelKey])(trustedIpcEvent, ...args),
       /backend_client_missing/,
       `${channelKey} should reject without a backend client`,
     );
   }
-  assert.deepEqual(await handlers.get(IPC_CHANNELS.getCloudStorageUsage)(), null);
-  assert.deepEqual(await handlers.get(IPC_CHANNELS.listMySocialApps)(), { apps: [] });
+  assert.deepEqual(await handlers.get(IPC_CHANNELS.getCloudStorageUsage)(trustedIpcEvent), null);
+  assert.deepEqual(await handlers.get(IPC_CHANNELS.listMySocialApps)(trustedIpcEvent), { apps: [] });
 });
 
 test('social and forum channels delegate to the backend client with the renderer arguments', async () => {
@@ -485,14 +493,14 @@ test('social and forum channels delegate to the backend client with the renderer
 
   for (const [channelKey, method, args] of BACKEND_DELEGATED_CHANNELS) {
     assert.deepEqual(
-      await handlers.get(IPC_CHANNELS[channelKey])(null, ...args),
+      await handlers.get(IPC_CHANNELS[channelKey])(trustedIpcEvent, ...args),
       { method, args },
       `${channelKey} should return the backend result`,
     );
   }
-  assert.equal(await handlers.get(IPC_CHANNELS.getSocialProfileUrl)(null, 'ada'), 'https://forger.app/u/ada');
-  assert.deepEqual(await handlers.get(IPC_CHANNELS.getCloudStorageUsage)(), { usedBytes: 9 });
-  assert.deepEqual(await handlers.get(IPC_CHANNELS.listMySocialApps)(), { apps: [{ id: 7 }] });
+  assert.equal(await handlers.get(IPC_CHANNELS.getSocialProfileUrl)(trustedIpcEvent, 'ada'), 'https://forger.app/u/ada');
+  assert.deepEqual(await handlers.get(IPC_CHANNELS.getCloudStorageUsage)(trustedIpcEvent), { usedBytes: 9 });
+  assert.deepEqual(await handlers.get(IPC_CHANNELS.listMySocialApps)(trustedIpcEvent), { apps: [{ id: 7 }] });
   assert.deepEqual(
     calls.filter(([name]) => name === 'moderateForumPost'),
     [['moderateForumPost', 3, 'hide', 'spam']],
@@ -500,7 +508,7 @@ test('social and forum channels delegate to the backend client with the renderer
 
   const missingProfileUrl = createDeps();
   await assert.rejects(
-    missingProfileUrl.handlers.get(IPC_CHANNELS.getSocialProfileUrl)(null, 'ada'),
+    missingProfileUrl.handlers.get(IPC_CHANNELS.getSocialProfileUrl)(trustedIpcEvent, 'ada'),
     /backend_client_missing/,
   );
 });
@@ -515,7 +523,7 @@ test('cloud device pairing channels return safe fallbacks without a device manag
     ['deleteMobilePairingRequest', [14], 'No pudimos eliminar la solicitud.'],
   ];
   for (const [channelKey, args, userMessage] of fallbackCases) {
-    assert.deepEqual(await withoutManager.handlers.get(IPC_CHANNELS[channelKey])(null, ...args), {
+    assert.deepEqual(await withoutManager.handlers.get(IPC_CHANNELS[channelKey])(trustedIpcEvent, ...args), {
       devices: [],
       connected: false,
       success: false,
@@ -537,27 +545,27 @@ test('cloud device pairing channels return safe fallbacks without a device manag
       deleteMobilePairingRequest: async (requestId) => ({ success: true, deleted: requestId }),
     },
   });
-  assert.deepEqual(await withManager.handlers.get(IPC_CHANNELS.registerCloudDevice)(null, { name: 'Studio' }), {
+  assert.deepEqual(await withManager.handlers.get(IPC_CHANNELS.registerCloudDevice)(trustedIpcEvent, { name: 'Studio' }), {
     success: true,
     registered: 'Studio',
   });
-  assert.deepEqual(await withManager.handlers.get(IPC_CHANNELS.registerCloudDevice)(null, undefined), {
+  assert.deepEqual(await withManager.handlers.get(IPC_CHANNELS.registerCloudDevice)(trustedIpcEvent, undefined), {
     success: true,
     registered: '',
   });
-  assert.deepEqual(await withManager.handlers.get(IPC_CHANNELS.unlinkMobileDeviceFromDesktop)(null, 11), {
+  assert.deepEqual(await withManager.handlers.get(IPC_CHANNELS.unlinkMobileDeviceFromDesktop)(trustedIpcEvent, 11), {
     success: true,
     authorizationId: 11,
   });
-  assert.deepEqual(await withManager.handlers.get(IPC_CHANNELS.acceptMobilePairingRequest)(null, 12), {
+  assert.deepEqual(await withManager.handlers.get(IPC_CHANNELS.acceptMobilePairingRequest)(trustedIpcEvent, 12), {
     success: true,
     accepted: 12,
   });
-  assert.deepEqual(await withManager.handlers.get(IPC_CHANNELS.rejectMobilePairingRequest)(null, 13), {
+  assert.deepEqual(await withManager.handlers.get(IPC_CHANNELS.rejectMobilePairingRequest)(trustedIpcEvent, 13), {
     success: true,
     rejected: 13,
   });
-  assert.deepEqual(await withManager.handlers.get(IPC_CHANNELS.deleteMobilePairingRequest)(null, 14), {
+  assert.deepEqual(await withManager.handlers.get(IPC_CHANNELS.deleteMobilePairingRequest)(trustedIpcEvent, 14), {
     success: true,
     deleted: 14,
   });
@@ -592,18 +600,18 @@ test('speech-to-text channels delegate to the service including stop, audio pick
     getSpeechToTextService: () => service,
   });
 
-  assert.deepEqual(await handlers.get(IPC_CHANNELS.speechToTextStop)(), { status: 'idle' });
+  assert.deepEqual(await handlers.get(IPC_CHANNELS.speechToTextStop)(trustedIpcEvent), { status: 'idle' });
   assert.deepEqual(calls[0], ['stop']);
-  assert.deepEqual(await handlers.get(IPC_CHANNELS.speechToTextUpdateConfig)(null, { language: 'es' }), {
+  assert.deepEqual(await handlers.get(IPC_CHANNELS.speechToTextUpdateConfig)(trustedIpcEvent, { language: 'es' }), {
     status: 'configured',
     input: { language: 'es' },
   });
-  assert.deepEqual(await handlers.get(IPC_CHANNELS.speechToTextPickAudio)(), {
+  assert.deepEqual(await handlers.get(IPC_CHANNELS.speechToTextPickAudio)(trustedIpcEvent), {
     canceled: false,
     path: '/tmp/audio.m4a',
   });
   assert.deepEqual(calls.at(-1), ['allowUserSelectedPath', '/tmp/audio.m4a']);
-  assert.deepEqual(await handlers.get(IPC_CHANNELS.speechToTextProcess)(null, { path: '/tmp/audio.m4a' }), {
+  assert.deepEqual(await handlers.get(IPC_CHANNELS.speechToTextProcess)(trustedIpcEvent, { path: '/tmp/audio.m4a' }), {
     text: 'transcrito',
   });
   assert.deepEqual(calls.at(-1), [
@@ -611,11 +619,11 @@ test('speech-to-text channels delegate to the service including stop, audio pick
     { path: '/tmp/audio.m4a' },
     { extraAllowedRoots: ['/tmp/forger-private-data'] },
   ]);
-  assert.deepEqual(await handlers.get(IPC_CHANNELS.speechToTextProcessUpload)(null, { bytes: 12 }), {
+  assert.deepEqual(await handlers.get(IPC_CHANNELS.speechToTextProcessUpload)(trustedIpcEvent, { bytes: 12 }), {
     text: 'upload',
     bytes: 12,
   });
-  assert.deepEqual(await handlers.get(IPC_CHANNELS.speechToTextCreateRealtimeSession)(), { sessionId: 'rt-1' });
+  assert.deepEqual(await handlers.get(IPC_CHANNELS.speechToTextCreateRealtimeSession)(trustedIpcEvent), { sessionId: 'rt-1' });
 });
 
 test('speech-to-text audio picker skips path allow-listing when the user cancels', async () => {
@@ -627,7 +635,7 @@ test('speech-to-text audio picker skips path allow-listing when the user cancels
     }),
   });
 
-  assert.deepEqual(await handlers.get(IPC_CHANNELS.speechToTextPickAudio)(), { canceled: true, path: undefined });
+  assert.deepEqual(await handlers.get(IPC_CHANNELS.speechToTextPickAudio)(trustedIpcEvent), { canceled: true, path: undefined });
   assert.deepEqual(calls, []);
 });
 
@@ -647,32 +655,32 @@ test('text-to-speech, developer settings, and background task channels delegate 
     updateDeveloperMode: async (input) => ({ developerMode: input.enabled }),
   });
 
-  assert.deepEqual(await handlers.get(IPC_CHANNELS.textToSpeechStop)(), { status: 'ready' });
+  assert.deepEqual(await handlers.get(IPC_CHANNELS.textToSpeechStop)(trustedIpcEvent), { status: 'ready' });
   assert.deepEqual(calls, [['tts-stop']]);
-  assert.deepEqual(await handlers.get(IPC_CHANNELS.textToSpeechUpdateConfig)(null, { voice: 'es-CL' }), {
+  assert.deepEqual(await handlers.get(IPC_CHANNELS.textToSpeechUpdateConfig)(trustedIpcEvent, { voice: 'es-CL' }), {
     status: 'configured',
     input: { voice: 'es-CL' },
   });
-  assert.deepEqual(await handlers.get(IPC_CHANNELS.textToSpeechSynthesize)(null, { text: 'hola' }), {
+  assert.deepEqual(await handlers.get(IPC_CHANNELS.textToSpeechSynthesize)(trustedIpcEvent, { text: 'hola' }), {
     audioPath: '/tmp/out.wav',
     text: 'hola',
   });
 
-  assert.deepEqual(await handlers.get(IPC_CHANNELS.updateDeveloperMode)(null, { enabled: true }), {
+  assert.deepEqual(await handlers.get(IPC_CHANNELS.updateDeveloperMode)(trustedIpcEvent, { enabled: true }), {
     developerMode: true,
   });
-  assert.deepEqual(await handlers.get(IPC_CHANNELS.updateAppDeveloperSettings)(null, { appId: 'demo', developerPath: '/dev/demo' }), {
+  assert.deepEqual(await handlers.get(IPC_CHANNELS.updateAppDeveloperSettings)(trustedIpcEvent, { appId: 'demo', developerPath: '/dev/demo' }), {
     appId: 'demo',
     developerPath: '/dev/demo',
   });
-  assert.deepEqual(await handlers.get(IPC_CHANNELS.getDeveloperPathState)(null, 'demo'), {
+  assert.deepEqual(await handlers.get(IPC_CHANNELS.getDeveloperPathState)(trustedIpcEvent, 'demo'), {
     appId: 'demo',
     developerMode: true,
   });
 
-  assert.deepEqual(await handlers.get(IPC_CHANNELS.backgroundTasksList)(), [{ id: 'task-1' }]);
-  assert.deepEqual(await handlers.get(IPC_CHANNELS.backgroundTaskGet)(null, 'task-1'), { id: 'task-1' });
-  const upserted = await handlers.get(IPC_CHANNELS.backgroundTasksUpsert)(null, { id: 'task-2', status: 'queued' });
+  assert.deepEqual(await handlers.get(IPC_CHANNELS.backgroundTasksList)(trustedIpcEvent), [{ id: 'task-1' }]);
+  assert.deepEqual(await handlers.get(IPC_CHANNELS.backgroundTaskGet)(trustedIpcEvent, 'task-1'), { id: 'task-1' });
+  const upserted = await handlers.get(IPC_CHANNELS.backgroundTasksUpsert)(trustedIpcEvent, { id: 'task-2', status: 'queued' });
   assert.deepEqual(upserted, { id: 'task-2', status: 'queued' });
   assert.deepEqual(taskStore.upserts, [{ id: 'task-2', status: 'queued' }]);
 });
@@ -693,11 +701,11 @@ test('workflows early-access IPC delegates each runtime toggle once and returns 
   });
 
   assert.deepEqual(
-    await handlers.get(IPC_CHANNELS.updateWorkflowsEarlyAccess)(null, true),
+    await handlers.get(IPC_CHANNELS.updateWorkflowsEarlyAccess)(trustedIpcEvent, true),
     settingsFor(true),
   );
   assert.deepEqual(
-    await handlers.get(IPC_CHANNELS.updateWorkflowsEarlyAccess)(null, false),
+    await handlers.get(IPC_CHANNELS.updateWorkflowsEarlyAccess)(trustedIpcEvent, false),
     settingsFor(false),
   );
   assert.deepEqual(calls, [true, false]);
@@ -712,26 +720,26 @@ test('remote share and activity channels delegate when wired and fall back to em
     stopRemoteNetworkShare: async (appId) => ({ success: true, stopped: appId }),
   });
 
-  assert.deepEqual(await handlers.get(IPC_CHANNELS.startRemoteNetworkShare)(null, 'demo-app'), {
+  assert.deepEqual(await handlers.get(IPC_CHANNELS.startRemoteNetworkShare)(trustedIpcEvent, 'demo-app'), {
     success: true,
     started: 'demo-app',
   });
-  assert.deepEqual(await handlers.get(IPC_CHANNELS.stopRemoteNetworkShare)(null, 'demo-app'), {
+  assert.deepEqual(await handlers.get(IPC_CHANNELS.stopRemoteNetworkShare)(trustedIpcEvent, 'demo-app'), {
     success: true,
     stopped: 'demo-app',
   });
-  assert.deepEqual(await handlers.get(IPC_CHANNELS.getRemoteNetworkShareStatus)(null, 'demo-app'), {
+  assert.deepEqual(await handlers.get(IPC_CHANNELS.getRemoteNetworkShareStatus)(trustedIpcEvent, 'demo-app'), {
     active: true,
     appId: 'demo-app',
   });
-  assert.deepEqual(await handlers.get(IPC_CHANNELS.getRemoteActivity)(), {
+  assert.deepEqual(await handlers.get(IPC_CHANNELS.getRemoteActivity)(trustedIpcEvent), {
     activities: [{ id: 'a1' }],
     activeCount: 1,
     preparingCount: 0,
     errorCount: 0,
     updatedAt: 'now',
   });
-  assert.deepEqual(await handlers.get(IPC_CHANNELS.llmRunsSnapshotGet)(), {
+  assert.deepEqual(await handlers.get(IPC_CHANNELS.llmRunsSnapshotGet)(trustedIpcEvent), {
     items: [{ runId: 'run-1' }],
     activeCount: 1,
     errorCount: 0,
@@ -739,8 +747,8 @@ test('remote share and activity channels delegate when wired and fall back to em
   });
 
   const defaults = createDeps();
-  assert.equal(await defaults.handlers.get(IPC_CHANNELS.getRemoteNetworkShareStatus)(null, 'demo-app'), undefined);
-  const emptyActivity = await defaults.handlers.get(IPC_CHANNELS.getRemoteActivity)();
+  assert.equal(await defaults.handlers.get(IPC_CHANNELS.getRemoteNetworkShareStatus)(trustedIpcEvent, 'demo-app'), undefined);
+  const emptyActivity = await defaults.handlers.get(IPC_CHANNELS.getRemoteActivity)(trustedIpcEvent);
   assert.deepEqual({ ...emptyActivity, updatedAt: 'checked' }, {
     activities: [],
     activeCount: 0,
@@ -749,7 +757,7 @@ test('remote share and activity channels delegate when wired and fall back to em
     updatedAt: 'checked',
   });
   assert.ok(!Number.isNaN(Date.parse(emptyActivity.updatedAt)));
-  const emptyRuns = await defaults.handlers.get(IPC_CHANNELS.llmRunsSnapshotGet)();
+  const emptyRuns = await defaults.handlers.get(IPC_CHANNELS.llmRunsSnapshotGet)(trustedIpcEvent);
   assert.deepEqual({ ...emptyRuns, updatedAt: 'checked' }, {
     items: [],
     activeCount: 0,
@@ -775,28 +783,28 @@ test('app creation, social review install flow, official tool calls, and app-sha
   });
 
   assert.deepEqual(
-    await handlers.get(IPC_CHANNELS.createLocalApp)(null, { name: 'Mi App' }, 'es-CL'),
+    await handlers.get(IPC_CHANNELS.createLocalApp)(trustedIpcEvent, { name: 'Mi App' }, 'es-CL'),
     { success: true, appId: 'local-1' },
   );
   assert.deepEqual(calls, [['createLocalApp', { name: 'Mi App' }, 'es-CL']]);
   assert.deepEqual(
-    await handlers.get(IPC_CHANNELS.prepareSocialAppReview)(null, { shareCode: 'ABC' }, 'es-CL'),
+    await handlers.get(IPC_CHANNELS.prepareSocialAppReview)(trustedIpcEvent, { shareCode: 'ABC' }, 'es-CL'),
     { success: true, quarantine: { id: 'q-1', shareCode: 'ABC' }, userMessage: 'ok', locale: 'es-CL' },
   );
   assert.deepEqual(
-    await handlers.get(IPC_CHANNELS.finishSocialAppInstall)(null, { quarantineId: 'q-1' }, 'es-CL'),
+    await handlers.get(IPC_CHANNELS.finishSocialAppInstall)(trustedIpcEvent, { quarantineId: 'q-1' }, 'es-CL'),
     { success: true, appId: 'social-1', quarantineId: 'q-1', locale: 'es-CL' },
   );
   assert.deepEqual(
-    await handlers.get(IPC_CHANNELS.deleteQuarantinedSocialApp)(null, { quarantineId: 'q-1' }, 'es-CL'),
+    await handlers.get(IPC_CHANNELS.deleteQuarantinedSocialApp)(trustedIpcEvent, { quarantineId: 'q-1' }, 'es-CL'),
     { success: true, deleted: 'q-1', locale: 'es-CL' },
   );
   assert.deepEqual(
-    await handlers.get(IPC_CHANNELS.callOfficialTool)(null, { toolId: 'gmail.search_messages' }),
+    await handlers.get(IPC_CHANNELS.callOfficialTool)(trustedIpcEvent, { toolId: 'gmail.search_messages' }),
     { output: 'ran:gmail.search_messages' },
   );
   assert.deepEqual(
-    await handlers.get(IPC_CHANNELS.sendCloudAppShareMessage)(null, { friendUserId: 4, userAppId: 77 }),
+    await handlers.get(IPC_CHANNELS.sendCloudAppShareMessage)(trustedIpcEvent, { friendUserId: 4, userAppId: 77 }),
     { id: 31, friendUserId: 4, userAppId: 77 },
   );
 });
@@ -804,12 +812,14 @@ test('app creation, social review install flow, official tool calls, and app-sha
 test('antigravity auth session channels validate input and forward session events to the renderer', async () => {
   const sends = [];
   const calls = [];
+  const authWindow = createTrustedMainWindow({ send: (channel, payload) => sends.push([channel, payload]) });
+  const { trustedIpcEvent: authEvent } = authWindow;
   const { handlers } = createDeps({
     cancelAntigravityAuthSession: async (sessionId) => {
       calls.push(['cancel', sessionId]);
       return { success: true, canceled: sessionId };
     },
-    mainWindow: { webContents: { send: (channel, payload) => sends.push([channel, payload]) } },
+    mainWindow: authWindow.mainWindow,
     startAntigravityAuthSession: async (onEvent) => {
       onEvent({ type: 'awaiting_code', url: 'https://auth.example' });
       return { success: true, sessionId: 'ag-1' };
@@ -820,25 +830,25 @@ test('antigravity auth session channels validate input and forward session event
     },
   });
 
-  assert.deepEqual(await handlers.get(IPC_CHANNELS.startAntigravityAuthSession)(), { success: true, sessionId: 'ag-1' });
+  assert.deepEqual(await handlers.get(IPC_CHANNELS.startAntigravityAuthSession)(authEvent), { success: true, sessionId: 'ag-1' });
   assert.deepEqual(sends, [
     [IPC_CHANNELS.antigravityAuthSessionEvent, { type: 'awaiting_code', url: 'https://auth.example' }],
   ]);
 
-  assert.deepEqual(await handlers.get(IPC_CHANNELS.writeAntigravityAuthSession)(null, { sessionId: 'ag-1' }), {
+  assert.deepEqual(await handlers.get(IPC_CHANNELS.writeAntigravityAuthSession)(authEvent, { sessionId: 'ag-1' }), {
     success: false,
     userMessage: 'Invalid Antigravity auth input.',
     technicalCode: 'invalid_antigravity_auth_input',
   });
-  assert.deepEqual(await handlers.get(IPC_CHANNELS.writeAntigravityAuthSession)(null, { sessionId: 'ag-1', input: '1234' }), {
+  assert.deepEqual(await handlers.get(IPC_CHANNELS.writeAntigravityAuthSession)(authEvent, { sessionId: 'ag-1', input: '1234' }), {
     success: true,
   });
-  assert.deepEqual(await handlers.get(IPC_CHANNELS.cancelAntigravityAuthSession)(null, 42), {
+  assert.deepEqual(await handlers.get(IPC_CHANNELS.cancelAntigravityAuthSession)(authEvent, 42), {
     success: false,
     userMessage: 'Invalid Antigravity auth session.',
     technicalCode: 'invalid_antigravity_auth_session',
   });
-  assert.deepEqual(await handlers.get(IPC_CHANNELS.cancelAntigravityAuthSession)(null, 'ag-1'), {
+  assert.deepEqual(await handlers.get(IPC_CHANNELS.cancelAntigravityAuthSession)(authEvent, 'ag-1'), {
     success: true,
     canceled: 'ag-1',
   });
@@ -846,6 +856,101 @@ test('antigravity auth session channels validate input and forward session event
     ['write', 'ag-1', '1234'],
     ['cancel', 'ag-1'],
   ]);
+});
+
+test('delegated main IPC handlers inherit the trusted sender boundary', async () => {
+  let serviceCalls = 0;
+  const { handlers } = createDeps({
+    getConnectionsService: () => ({
+      listState: async () => {
+        serviceCalls += 1;
+        return { types: [], instances: [] };
+      },
+    }),
+  });
+  const listConnections = handlers.get(IPC_CHANNELS.connectionsList);
+
+  await assert.rejects(
+    listConnections({ sender: { id: 999 } }),
+    /ipc_sender_not_authorized/,
+  );
+  assert.equal(serviceCalls, 0);
+  assert.deepEqual(await listConnections(trustedIpcEvent), { types: [], instances: [] });
+  assert.equal(serviceCalls, 1);
+});
+
+test('Desktop IPC accepts friend windows but rejects installed-app and unknown windows', async () => {
+  const friend = createTrustedMainWindow({ id: 41 });
+  const installedApp = createTrustedMainWindow({ id: 42 });
+  const unknown = createTrustedMainWindow({ id: 43 });
+  let serviceCalls = 0;
+  const { handlers } = createDeps({
+    getFriendChatWindows: () => [friend.mainWindow],
+    getConnectionsService: () => ({
+      listState: async () => {
+        serviceCalls += 1;
+        return { types: [], instances: [] };
+      },
+    }),
+    resolveAppIdForWebContents: (id) => id === installedApp.mainWindow.webContents.id ? 'finance-os' : null,
+  });
+  const listConnections = handlers.get(IPC_CHANNELS.connectionsList);
+
+  assert.deepEqual(await listConnections(friend.trustedIpcEvent), { types: [], instances: [] });
+  await assert.rejects(listConnections(installedApp.trustedIpcEvent), /ipc_sender_not_authorized/);
+  await assert.rejects(listConnections(unknown.trustedIpcEvent), /ipc_sender_not_authorized/);
+  assert.equal(serviceCalls, 1);
+});
+
+test('every Desktop-scoped handler registered through main IPC rejects a missing sender before service access', async () => {
+  const { handlers } = createDeps();
+  assert.ok(handlers.size > 250, 'the contract must exercise direct and delegated registrations');
+  const installedAppChannels = new Set([
+    IPC_CHANNELS.appSelectExternalFolder,
+    IPC_CHANNELS.appAiSubscriptionStatus,
+    IPC_CHANNELS.appGetContext,
+    IPC_CHANNELS.appToolsListAvailable,
+    IPC_CHANNELS.appToolsGetStatus,
+    IPC_CHANNELS.appToolsCall,
+    IPC_CHANNELS.appMessagesSend,
+    IPC_CHANNELS.appMessagesList,
+  ]);
+
+  for (const [channel, handler] of handlers) {
+    if (installedAppChannels.has(channel)) continue;
+    await assert.rejects(
+      handler(undefined, { raw: `untrusted:${channel}` }),
+      (error) => error instanceof Error && error.message === 'ipc_sender_not_authorized',
+      channel,
+    );
+  }
+});
+
+test('main IPC resolves the live main window after registration and after replacement', async () => {
+  const firstWindow = createTrustedMainWindow({ id: 101 });
+  const replacementWindow = createTrustedMainWindow({ id: 202 });
+  let currentMainWindow = null;
+  let serviceCalls = 0;
+  const { handlers } = createDeps({
+    getMainWindow: () => currentMainWindow,
+    mainWindow: null,
+    getConnectionsService: () => ({
+      listState: async () => {
+        serviceCalls += 1;
+        return { types: [], instances: [] };
+      },
+    }),
+  });
+  const listConnections = handlers.get(IPC_CHANNELS.connectionsList);
+
+  await assert.rejects(listConnections(firstWindow.trustedIpcEvent), /ipc_sender_not_authorized/);
+  currentMainWindow = firstWindow.mainWindow;
+  assert.deepEqual(await listConnections(firstWindow.trustedIpcEvent), { types: [], instances: [] });
+
+  currentMainWindow = replacementWindow.mainWindow;
+  await assert.rejects(listConnections(firstWindow.trustedIpcEvent), /ipc_sender_not_authorized/);
+  assert.deepEqual(await listConnections(replacementWindow.trustedIpcEvent), { types: [], instances: [] });
+  assert.equal(serviceCalls, 2);
 });
 
 test('desktop error report preparation caches sanitized attachments and submit consumes them once', async () => {
@@ -884,12 +989,12 @@ test('desktop error report preparation caches sanitized attachments and submit c
       appId: 'demo-app',
       occurredAt: '2026-05-24T10:00:04.000Z',
     };
-    const preview = await handlers.get(IPC_CHANNELS.prepareDesktopErrorReport)(null, input);
+    const preview = await handlers.get(IPC_CHANNELS.prepareDesktopErrorReport)(trustedIpcEvent, input);
     assert.equal(typeof preview.diagnosticAttachmentToken, 'string');
     assert.equal(preview.diagnosticFiles.length, 1);
     assert.equal(preview.diagnosticFiles[0].kind, 'install_log');
 
-    const submitResult = await handlers.get(IPC_CHANNELS.submitDesktopErrorReport)(null, {
+    const submitResult = await handlers.get(IPC_CHANNELS.submitDesktopErrorReport)(trustedIpcEvent, {
       ...input,
       diagnosticAttachmentToken: preview.diagnosticAttachmentToken,
     });
@@ -898,13 +1003,13 @@ test('desktop error report preparation caches sanitized attachments and submit c
     assert.equal(submitted[0].attachments[0].filename, 'install-log.jsonl');
 
     await fs.rm(installLogPath, { force: true });
-    await handlers.get(IPC_CHANNELS.submitDesktopErrorReport)(null, {
+    await handlers.get(IPC_CHANNELS.submitDesktopErrorReport)(trustedIpcEvent, {
       ...input,
       diagnosticAttachmentToken: preview.diagnosticAttachmentToken,
     });
     assert.deepEqual(submitted[1].attachments, [], 'a consumed token must not replay cached attachments');
 
-    const noAttachments = await handlers.get(IPC_CHANNELS.prepareDesktopErrorReport)(null, {
+    const noAttachments = await handlers.get(IPC_CHANNELS.prepareDesktopErrorReport)(trustedIpcEvent, {
       source: 'desktop',
       operation: 'uncaughtException',
       message: 'boom',
@@ -949,14 +1054,14 @@ test('conversation diagnostic reports attach run logs, cache them by token, and 
       runId: 'run-9',
       title: 'Fallo del agente',
     };
-    const preview = await handlers.get(IPC_CHANNELS.prepareConversationDiagnosticReport)(null, input);
+    const preview = await handlers.get(IPC_CHANNELS.prepareConversationDiagnosticReport)(trustedIpcEvent, input);
     assert.equal(typeof preview.diagnosticAttachmentToken, 'string');
     assert.equal(preview.diagnosticFiles.length, 1);
     assert.equal(preview.diagnosticFiles[0].filename, 'run-log-run-9.log');
     assert.deepEqual(preview.payload.diagnosticFiles, preview.diagnosticFiles);
     assert.equal(preview.payload.appVersion, '1.2.3');
 
-    const submitResult = await handlers.get(IPC_CHANNELS.submitConversationDiagnosticReport)(null, {
+    const submitResult = await handlers.get(IPC_CHANNELS.submitConversationDiagnosticReport)(trustedIpcEvent, {
       ...input,
       diagnosticAttachmentToken: preview.diagnosticAttachmentToken,
     });
@@ -964,13 +1069,13 @@ test('conversation diagnostic reports attach run logs, cache them by token, and 
     assert.equal(submitted[0].attachments.length, 1);
     assert.match(submitted[0].attachments[0].text, /agent exploded/);
 
-    await handlers.get(IPC_CHANNELS.submitConversationDiagnosticReport)(null, {
+    await handlers.get(IPC_CHANNELS.submitConversationDiagnosticReport)(trustedIpcEvent, {
       ...input,
       diagnosticAttachmentToken: preview.diagnosticAttachmentToken,
     });
     assert.deepEqual(submitted[1].attachments, [], 'a consumed token must not replay cached attachments');
 
-    const noRun = await handlers.get(IPC_CHANNELS.prepareConversationDiagnosticReport)(null, {
+    const noRun = await handlers.get(IPC_CHANNELS.prepareConversationDiagnosticReport)(trustedIpcEvent, {
       source: 'desktop_chat',
       conversationId: 'conv-2',
       appId: 'demo-app',
@@ -980,7 +1085,7 @@ test('conversation diagnostic reports attach run logs, cache them by token, and 
 
     const withoutBackend = createDeps({ ...overrides, forgerBackendClient: null });
     assert.deepEqual(
-      await withoutBackend.handlers.get(IPC_CHANNELS.submitConversationDiagnosticReport)(null, input),
+      await withoutBackend.handlers.get(IPC_CHANNELS.submitConversationDiagnosticReport)(trustedIpcEvent, input),
       {
         success: false,
         userMessage: 'No pudimos enviar el reporte de conversación.',
@@ -999,11 +1104,11 @@ test('desktop log channel validates the event and appends a sanitized renderer l
       getForgerMetadataRoot: () => root,
     });
 
-    assert.deepEqual(await handlers.get(IPC_CHANNELS.desktopLog)(null, null), { success: false });
-    assert.deepEqual(await handlers.get(IPC_CHANNELS.desktopLog)(null, { event: '   ' }), { success: false });
+    assert.deepEqual(await handlers.get(IPC_CHANNELS.desktopLog)(trustedIpcEvent, null), { success: false });
+    assert.deepEqual(await handlers.get(IPC_CHANNELS.desktopLog)(trustedIpcEvent, { event: '   ' }), { success: false });
 
     assert.deepEqual(
-      await handlers.get(IPC_CHANNELS.desktopLog)(null, {
+      await handlers.get(IPC_CHANNELS.desktopLog)(trustedIpcEvent, {
         event: ' renderer_boot ',
         level: 'warn',
         message: 'arrancando',
@@ -1012,7 +1117,7 @@ test('desktop log channel validates the event and appends a sanitized renderer l
       { success: true },
     );
     assert.deepEqual(
-      await handlers.get(IPC_CHANNELS.desktopLog)(null, { event: 'renderer_click', level: 'not-a-level' }),
+      await handlers.get(IPC_CHANNELS.desktopLog)(trustedIpcEvent, { event: 'renderer_click', level: 'not-a-level' }),
       { success: true },
     );
 
@@ -1062,7 +1167,7 @@ test('chat start run in social review mode uses the quarantine prompt context wh
       runRoot: `/quarantine/${appId}`,
     }));
     assert.deepEqual(
-      await reviewHandlers.get(IPC_CHANNELS.chatStartRun)(null, {
+      await reviewHandlers.get(IPC_CHANNELS.chatStartRun)(trustedIpcEvent, {
         appId: 'social-demo',
         chatMode: 'social_app_review',
         prompt: 'revisa esta app',
@@ -1075,7 +1180,7 @@ test('chat start run in social review mode uses the quarantine prompt context wh
     assert.equal(promptInputs.at(-1).appRoot, '/quarantine/social-demo');
 
     const fallbackHandlers = makeHandlers(async () => 'not-an-object');
-    await fallbackHandlers.get(IPC_CHANNELS.chatStartRun)(null, {
+    await fallbackHandlers.get(IPC_CHANNELS.chatStartRun)(trustedIpcEvent, {
       appId: 'social-demo',
       chatMode: 'social_app_review',
       prompt: 'revisa esta app',
@@ -1108,18 +1213,18 @@ test('personal agent runtime provider connection checks map each provider to its
   });
   const create = handlers.get(IPC_CHANNELS.personalAgentsCreate);
 
-  assert.equal((await create(null, { name: 'A', runtime: { provider: 'claude' } })).id, 'agent-1');
-  assert.equal((await create(null, { name: 'B', runtime: { provider: 'antigravity' } })).id, 'agent-2');
+  assert.equal((await create(trustedIpcEvent, { name: 'A', runtime: { provider: 'claude' } })).id, 'agent-1');
+  assert.equal((await create(trustedIpcEvent, { name: 'B', runtime: { provider: 'antigravity' } })).id, 'agent-2');
   await assert.rejects(
-    create(null, { name: 'C', runtime: { provider: 'codex' } }),
+    create(trustedIpcEvent, { name: 'C', runtime: { provider: 'codex' } }),
     /personal_agent_runtime_provider_not_connected/,
   );
 
   auth.codex = true;
   auth.claude = false;
-  assert.equal((await create(null, { name: 'D', runtime: { provider: 'codex' } })).id, 'agent-3');
+  assert.equal((await create(trustedIpcEvent, { name: 'D', runtime: { provider: 'codex' } })).id, 'agent-3');
   await assert.rejects(
-    create(null, { name: 'E', runtime: { provider: 'claude' } }),
+    create(trustedIpcEvent, { name: 'E', runtime: { provider: 'claude' } }),
     /personal_agent_runtime_provider_not_connected/,
   );
   assert.deepEqual(createdAgents.map((agent) => agent.name), ['A', 'B', 'D']);

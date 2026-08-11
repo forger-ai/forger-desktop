@@ -22,6 +22,23 @@ const waitFor = async (predicate) => {
   throw new Error('wait_for_timeout');
 };
 
+const assertProcessTerminationRequested = (processEntry, calls) => {
+  if (process.platform === 'win32') {
+    assert.ok(calls.some((call) => (
+      call[0] === 'runCommand'
+      && call[1] === 'taskkill'
+      && call[2]?.[0] === '/pid'
+      && call[2]?.[1] === String(processEntry.child.pid)
+      && call[2]?.[2] === '/t'
+      && call[2]?.[3] === '/f'
+    )));
+    return;
+  }
+
+  assert.equal(processEntry.child.killed, true);
+  assert.equal(processEntry.child.signal, 'SIGTERM');
+};
+
 class FakeChildProcess extends EventEmitter {
   constructor(label) {
     super();
@@ -334,9 +351,11 @@ test('openInstalledApp resolves FastAPI imports, merges PYTHONPATH, logs process
     assert.deepEqual(appWindow.openHandler({ url: 'forger://apps/demo-app' }), { action: 'deny' });
     assert.deepEqual(harness.deepLinks, [{ kind: 'app', rawUrl: 'forger://apps/demo-app' }]);
 
-    await controller.stopInstalledApp('demo-app');
-    assert.equal(spawned[0].child.killed, true);
-    assert.equal(spawned[1].child.killed, true);
+    const stopResult = await controller.stopInstalledApp('demo-app');
+    assert.equal(stopResult.success, true);
+    assert.equal(harness.deps.runningApps.has('demo-app'), false);
+    assertProcessTerminationRequested(spawned[0], harness.calls);
+    assertProcessTerminationRequested(spawned[1], harness.calls);
   });
 });
 
