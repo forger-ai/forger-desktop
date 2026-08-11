@@ -199,6 +199,8 @@ export const WORKFLOW_MANAGEMENT_TOOL_IDS = new Set<AgentToolId>([
   'forger_workflow_list',
   'forger_workflow_get',
   'forger_workflow_upsert',
+  'forger_workflow_review',
+  'forger_workflow_apply',
   'forger_workflow_run',
 ]);
 

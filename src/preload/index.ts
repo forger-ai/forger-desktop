@@ -296,7 +296,12 @@ const IPC_CHANNELS = {
   automationsGetRunTranscript: 'forger:automations:get-run-transcript',
   automationUpdated: 'forger:automations:updated',
   workflowsList: 'forger:workflows:list',
+  workflowsListAppActions: 'forger:workflows:list-app-actions',
   workflowsUpsert: 'forger:workflows:upsert',
+  workflowsReview: 'forger:workflows:review',
+  workflowsApply: 'forger:workflows:apply',
+  workflowsListRevisions: 'forger:workflows:list-revisions',
+  workflowsRestoreRevision: 'forger:workflows:restore-revision',
   workflowsDelete: 'forger:workflows:delete',
   workflowsSetEnabled: 'forger:workflows:set-enabled',
   workflowsRunNow: 'forger:workflows:run-now',
@@ -305,6 +310,7 @@ const IPC_CHANNELS = {
   workflowsApproveNode: 'forger:workflows:approve-node',
   workflowsListRuns: 'forger:workflows:list-runs',
   workflowsGetRun: 'forger:workflows:get-run',
+  workflowsRetryRun: 'forger:workflows:retry-run',
   workflowUpdated: 'forger:workflows:updated',
   backgroundTasksList: 'forger:background-tasks:list',
   backgroundTaskGet: 'forger:background-tasks:get',
@@ -768,7 +774,12 @@ const api: ForgerDesktopApi = {
     };
   },
   workflowsList: () => ipcRenderer.invoke(IPC_CHANNELS.workflowsList),
+  workflowsListAppActions: (appId) => ipcRenderer.invoke(IPC_CHANNELS.workflowsListAppActions, appId),
   workflowsUpsert: (input) => ipcRenderer.invoke(IPC_CHANNELS.workflowsUpsert, input),
+  workflowsReview: (id) => ipcRenderer.invoke(IPC_CHANNELS.workflowsReview, id),
+  workflowsApply: (id, input) => ipcRenderer.invoke(IPC_CHANNELS.workflowsApply, id, input),
+  workflowsListRevisions: (id) => ipcRenderer.invoke(IPC_CHANNELS.workflowsListRevisions, id),
+  workflowsRestoreRevision: (id, input) => ipcRenderer.invoke(IPC_CHANNELS.workflowsRestoreRevision, id, input),
   workflowsDelete: (id) => ipcRenderer.invoke(IPC_CHANNELS.workflowsDelete, id),
   workflowsSetEnabled: (id, enabled) => ipcRenderer.invoke(IPC_CHANNELS.workflowsSetEnabled, id, enabled),
   workflowsRunNow: (id) => ipcRenderer.invoke(IPC_CHANNELS.workflowsRunNow, id),
@@ -777,6 +788,7 @@ const api: ForgerDesktopApi = {
   workflowsApproveNode: (input) => ipcRenderer.invoke(IPC_CHANNELS.workflowsApproveNode, input),
   workflowsListRuns: (workflowId) => ipcRenderer.invoke(IPC_CHANNELS.workflowsListRuns, workflowId),
   workflowsGetRun: (runId) => ipcRenderer.invoke(IPC_CHANNELS.workflowsGetRun, runId),
+  workflowsRetryRun: (runId) => ipcRenderer.invoke(IPC_CHANNELS.workflowsRetryRun, runId),
   onWorkflowUpdated: (listener) => {
     const wrapped = (_event: unknown, payload: Parameters<typeof listener>[0]) => {
       listener(payload);

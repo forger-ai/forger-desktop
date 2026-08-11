@@ -40,6 +40,8 @@ import type {
   TextToSpeechSynthesizeInput,
   TextToSpeechSynthesizeResult,
   Workflow,
+  WorkflowApplyInput,
+  WorkflowReviewReport,
   WorkflowRunSummary,
   WorkflowUpsertInput,
   AutomationFrequency,
@@ -68,6 +70,7 @@ import {
 } from './forger-mcp/connection-tools';
 import { executePersonalAgentRoutineTool } from './forger-mcp/personal-agent-routine-tools';
 import { canUsePersonalAgentSpawnTool, executePersonalAgentSpawnTool, type PersonalAgentSpawnToolOptions } from './forger-mcp/personal-agent-spawn-tool';
+import { executeWorkflowManagementTool } from './forger-mcp/workflow-management-tools';
 import {
   cleanString,
   connectionActionGranted,
@@ -95,7 +98,6 @@ import {
   sendMcpJson,
   toConnectionCallInput,
   withToolAuthorization,
-  workflowMcpErrorMessage,
 } from './forger-mcp-server-helpers';
 export interface ForgerMcpSessionRef {
   url: string;
@@ -260,6 +262,8 @@ interface ForgerMcpServerOptions extends PersonalAgentSpawnToolOptions {
   workflowsList?: () => Workflow[];
   workflowsGet?: (workflowId: string) => Workflow | null;
   workflowsUpsert?: (input: WorkflowUpsertInput) => Promise<Workflow>;
+  workflowsReview?: (workflowId: string) => Promise<WorkflowReviewReport>;
+  workflowsApply?: (workflowId: string, input: WorkflowApplyInput) => Promise<Workflow>;
   workflowsRun?: (workflowId: string) => Promise<WorkflowRunSummary>;
   isWorkflowsEnabled?: () => boolean;
   onToolProgress?: (input: { appId: string; runId: string; toolName?: unknown; message: string }) => void;
@@ -479,12 +483,17 @@ export class ForgerMcpServer {
   ): Promise<Record<string, unknown>> {
     const params = rawParams as { name?: unknown; arguments?: unknown } | undefined;
     const toolName = params?.name;
+    const argumentCount = params?.arguments
+      && typeof params.arguments === 'object'
+      && !Array.isArray(params.arguments)
+      ? Object.keys(params.arguments).length
+      : 0;
     await this.options.appendInstallLog('agent_tool:mcp_tools_call_received', {
       appId: session.appId,
       runId: session.runId,
       id,
       toolName,
-      arguments: params?.arguments ?? null,
+      argumentCount,
     });
     const allToolDefinitions = await this.getAllToolDefinitions();
     if (typeof toolName !== 'string' || !allToolDefinitions.some((tool) => tool.id === toolName)) {
@@ -816,7 +825,7 @@ export class ForgerMcpServer {
         appId: session.appId,
         runId: session.runId,
         toolId,
-        args,
+        argumentCount: Object.keys(args).length,
       });
       return { success: false, userMessage: getSharedCopy(session.locale).tools.unavailable, technicalCode: 'tool_not_found' };
     }
@@ -825,7 +834,7 @@ export class ForgerMcpServer {
       appId: session.appId,
       runId: session.runId,
       toolId,
-      args,
+      argumentCount: Object.keys(args).length,
       requiresApproval: this.options.getToolSettings().approvals[tool.id] ?? tool.defaultRequiresApproval,
     });
 
@@ -1229,7 +1238,7 @@ export class ForgerMcpServer {
     }
 
     if (WORKFLOW_MANAGEMENT_TOOL_IDS.has(toolId)) {
-      const result = await this.executeWorkflowManagementTool(session, toolId, args);
+      const result = await executeWorkflowManagementTool(session, toolId, args, this.options);
       await this.options.appendInstallLog('agent_tool:call_result', { appId: session.appId, runId: session.runId, toolId, result });
       return withToolAuthorization(result, approval);
     }
@@ -1535,51 +1544,6 @@ export class ForgerMcpServer {
     const result = this.options.workflowFailNode?.(session.runId, { reason: args.reason })
       ?? { success: false, technicalCode: 'workflow_manager_unavailable' };
     return result;
-  }
-
-  private async executeWorkflowManagementTool(
-    session: AgentMcpSession,
-    toolId: AgentToolId,
-    args: Record<string, unknown>,
-  ): Promise<unknown> {
-    if (session.caller === 'workflow' || session.caller === 'app-agent') {
-      return {
-        success: false,
-        userMessage: getSharedCopy(session.locale).tools.unavailable,
-        technicalCode: 'workflow_management_not_allowed',
-      };
-    }
-    try {
-      if (toolId === 'forger_workflow_list') {
-        const workflows = this.options.workflowsList?.() ?? [];
-        return { success: true, workflows };
-      }
-      if (toolId === 'forger_workflow_get') {
-        const workflow = this.options.workflowsGet?.(cleanString(args.workflowId)) ?? null;
-        return workflow
-          ? { success: true, workflow }
-          : { success: false, userMessage: 'No encontramos ese flujo.', technicalCode: 'workflow_not_found' };
-      }
-      if (toolId === 'forger_workflow_upsert') {
-        if (!this.options.workflowsUpsert) {
-          return { success: false, technicalCode: 'workflow_manager_unavailable' };
-        }
-        const workflow = await this.options.workflowsUpsert(args as unknown as WorkflowUpsertInput);
-        return { success: true, workflow };
-      }
-      if (!this.options.workflowsRun) {
-        return { success: false, technicalCode: 'workflow_manager_unavailable' };
-      }
-      const run = await this.options.workflowsRun(cleanString(args.workflowId));
-      return { success: true, run };
-    } catch (error) {
-      const code = error instanceof Error ? error.message : 'workflow_operation_failed';
-      return {
-        success: false,
-        userMessage: workflowMcpErrorMessage(code),
-        technicalCode: code,
-      };
-    }
   }
 
   private emitToolProgress(session: AgentMcpSession, toolId: AgentToolId, message: string): void {

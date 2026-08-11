@@ -979,6 +979,28 @@ test('workflow IPC keeps mutations and runs behind the disabled feature gate', a
     handlers.get(IPC_CHANNELS.workflowsUpsert)(desktopIpcEvent, { name: 'Daily summary' }),
     /workflow_feature_disabled/,
   );
+  await assert.rejects(
+    handlers.get(IPC_CHANNELS.workflowsReview)(desktopIpcEvent, 'workflow-1'),
+    /workflow_feature_disabled/,
+  );
+  await assert.rejects(
+    handlers.get(IPC_CHANNELS.workflowsApply)(desktopIpcEvent, 'workflow-1', {
+      definitionHash: 'hash-1',
+      expectedRevision: 1,
+    }),
+    /workflow_feature_disabled/,
+  );
+  await assert.rejects(
+    handlers.get(IPC_CHANNELS.workflowsListRevisions)(desktopIpcEvent, 'workflow-1'),
+    /workflow_feature_disabled/,
+  );
+  await assert.rejects(
+    handlers.get(IPC_CHANNELS.workflowsRestoreRevision)(desktopIpcEvent, 'workflow-1', {
+      revisionId: 'revision-1',
+      expectedRevision: 1,
+    }),
+    /workflow_feature_disabled/,
+  );
   assert.deepEqual(
     await handlers.get(IPC_CHANNELS.workflowsDelete)(desktopIpcEvent, 'workflow-1'),
     { success: false, technicalCode: 'workflow_feature_disabled' },
@@ -993,6 +1015,10 @@ test('workflow IPC keeps mutations and runs behind the disabled feature gate', a
   );
   await assert.rejects(
     handlers.get(IPC_CHANNELS.workflowsRunNode)(desktopIpcEvent, 'workflow-1', 'node-1'),
+    /workflow_feature_disabled/,
+  );
+  await assert.rejects(
+    handlers.get(IPC_CHANNELS.workflowsRetryRun)(desktopIpcEvent, 'run-1'),
     /workflow_feature_disabled/,
   );
   assert.deepEqual(
@@ -1016,10 +1042,23 @@ test('workflow IPC resolves the current enabled manager for every request', asyn
   const createManager = (calls) => ({
     list: () => (calls.push(['list']), []),
     upsert: async (input) => (calls.push(['upsert', input]), { id: 'workflow-1' }),
+    review: async (id) => (calls.push(['review', id]), { status: 'ready' }),
+    apply: async (id, input) => (calls.push(['apply', id, input]), { id }),
+    listRevisions: async (id) => (calls.push(['listRevisions', id]), [{
+      id: 'revision-1',
+      workflowId: id,
+      revision: 1,
+      definitionHash: 'hash-1',
+      createdAt: '2026-08-10T00:00:00.000Z',
+      applied: true,
+      workflow: { id, nodes: [{ input: { note: 'private' } }] },
+    }]),
+    restoreRevision: async (id, input) => (calls.push(['restoreRevision', id, input]), { id }),
     delete: async (id) => (calls.push(['delete', id]), { success: true }),
     setEnabled: async (id, enabled) => (calls.push(['setEnabled', id, enabled]), { id, enabled }),
     runNow: async (id) => (calls.push(['runNow', id]), { id: 'run-1' }),
     runNode: async (workflowId, nodeId) => (calls.push(['runNode', workflowId, nodeId]), { id: 'run-2' }),
+    retryRun: async (runId) => (calls.push(['retryRun', runId]), { id: 'run-3' }),
     cancelRun: async (runId) => (calls.push(['cancelRun', runId]), { success: true }),
     approveNode: async (input) => (calls.push(['approveNode', input]), { success: true }),
     listRuns: async (workflowId) => (calls.push(['listRuns', workflowId]), []),
@@ -1039,10 +1078,29 @@ test('workflow IPC resolves the current enabled manager for every request', asyn
 
   await handlers.get(IPC_CHANNELS.workflowsList)(desktopIpcEvent);
   await handlers.get(IPC_CHANNELS.workflowsUpsert)(desktopIpcEvent, { name: 'Daily summary' });
+  await handlers.get(IPC_CHANNELS.workflowsReview)(desktopIpcEvent, 'workflow-1');
+  await handlers.get(IPC_CHANNELS.workflowsApply)(desktopIpcEvent, 'workflow-1', {
+    definitionHash: 'hash-1',
+    expectedRevision: 1,
+  });
+  const publicRevisions = await handlers.get(IPC_CHANNELS.workflowsListRevisions)(desktopIpcEvent, 'workflow-1');
+  assert.deepEqual(publicRevisions, [{
+    id: 'revision-1',
+    workflowId: 'workflow-1',
+    revision: 1,
+    definitionHash: 'hash-1',
+    createdAt: '2026-08-10T00:00:00.000Z',
+    applied: true,
+  }]);
+  await handlers.get(IPC_CHANNELS.workflowsRestoreRevision)(desktopIpcEvent, 'workflow-1', {
+    revisionId: 'revision-1',
+    expectedRevision: 1,
+  });
   await handlers.get(IPC_CHANNELS.workflowsDelete)(desktopIpcEvent, 'workflow-1');
   await handlers.get(IPC_CHANNELS.workflowsSetEnabled)(desktopIpcEvent, 'workflow-1', true);
   await handlers.get(IPC_CHANNELS.workflowsRunNow)(desktopIpcEvent, 'workflow-1');
   await handlers.get(IPC_CHANNELS.workflowsRunNode)(desktopIpcEvent, 'workflow-1', 'node-1');
+  await handlers.get(IPC_CHANNELS.workflowsRetryRun)(desktopIpcEvent, 'run-1');
   await handlers.get(IPC_CHANNELS.workflowsCancelRun)(desktopIpcEvent, 'run-1');
   await handlers.get(IPC_CHANNELS.workflowsApproveNode)(desktopIpcEvent, {
     runId: 'run-1',
@@ -1052,14 +1110,32 @@ test('workflow IPC resolves the current enabled manager for every request', asyn
   await handlers.get(IPC_CHANNELS.workflowsListRuns)(desktopIpcEvent, 'workflow-1');
   await handlers.get(IPC_CHANNELS.workflowsGetRun)(desktopIpcEvent, 'run-1');
 
+  await assert.rejects(
+    handlers.get(IPC_CHANNELS.workflowsSetEnabled)(desktopIpcEvent, 'workflow-1', 'false'),
+    /workflow_enabled_required/,
+  );
+  await assert.rejects(
+    handlers.get(IPC_CHANNELS.workflowsApproveNode)(desktopIpcEvent, {
+      runId: 'run-1',
+      nodeId: 'node-1',
+      approved: 'false',
+    }),
+    /workflow_approval_input_invalid/,
+  );
+
   assert.deepEqual(callsAtRegistration, []);
   assert.deepEqual(currentCalls, [
     ['list'],
     ['upsert', { name: 'Daily summary' }],
+    ['review', 'workflow-1'],
+    ['apply', 'workflow-1', { definitionHash: 'hash-1', expectedRevision: 1 }],
+    ['listRevisions', 'workflow-1'],
+    ['restoreRevision', 'workflow-1', { revisionId: 'revision-1', expectedRevision: 1 }],
     ['delete', 'workflow-1'],
     ['setEnabled', 'workflow-1', true],
     ['runNow', 'workflow-1'],
     ['runNode', 'workflow-1', 'node-1'],
+    ['retryRun', 'run-1'],
     ['cancelRun', 'run-1'],
     ['approveNode', { runId: 'run-1', nodeId: 'node-1', approved: true }],
     ['listRuns', 'workflow-1'],

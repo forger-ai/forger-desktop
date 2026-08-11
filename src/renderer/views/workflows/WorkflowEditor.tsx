@@ -1,4 +1,4 @@
-import { useCallback, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import {
   Alert,
   Autocomplete,
@@ -47,6 +47,7 @@ import type {
   PersonalAgent,
   PersonalAgentGrantOptionConnection,
   WorkflowConditionOperator,
+  WorkflowAppActionDefinition,
   WorkflowEdge,
   WorkflowEdgeCondition,
   WorkflowNode,
@@ -63,12 +64,27 @@ import { TemplateEditor, type TemplateSourceNode } from './TemplateEditor';
 import { MappingMenuButton, SchemaForm } from './SchemaForm';
 
 const NODE_TYPE_COLORS: Record<WorkflowNode['type'], string> = {
+  app_action: '#5e35b1',
   llm_agent: '#7c4dff',
   forger_agent: '#2e7d32',
   forger_tool: '#0288d1',
   connection: '#1565c0',
   condition: '#ed6c02',
 };
+
+export const WORKFLOW_NODE_TYPE_ORDER: WorkflowNode['type'][] = [
+  'app_action',
+  'llm_agent',
+  'forger_agent',
+  'forger_tool',
+  'connection',
+  'condition',
+];
+
+export interface WorkflowAppActionOption {
+  appId: string;
+  action: WorkflowAppActionDefinition;
+}
 
 const EDGE_COLORS: Record<WorkflowEdgeCondition, string> = {
   success: '#2e7d32',
@@ -201,6 +217,10 @@ interface WorkflowEditorProps {
   draft: WorkflowDraft;
   onDraftChange: (updater: (current: WorkflowDraft) => WorkflowDraft) => void;
   apps: AppSummary[];
+  appActions: WorkflowAppActionOption[];
+  loadingAppActionAppIds?: ReadonlySet<string>;
+  loadedAppActionAppIds?: ReadonlySet<string>;
+  onRequestAppActions?: (appId: string) => void;
   agents: PersonalAgent[];
   toolPackages: AgentToolPackageDefinition[];
   officialTools: OfficialToolSummary[];
@@ -220,7 +240,7 @@ interface WorkflowEditorProps {
   t: AppDictionary;
 }
 
-export function WorkflowEditor({ draft, onDraftChange, apps, agents, toolPackages, officialTools, connectionOptions, providerOptions, outputSamples, savedNodeIds, onRunNode, readOnly = false, nodeRuns, onOpenNodeRun, t }: WorkflowEditorProps) {
+export function WorkflowEditor({ draft, onDraftChange, apps, appActions, loadingAppActionAppIds = new Set(), loadedAppActionAppIds = new Set(), onRequestAppActions, agents, toolPackages, officialTools, connectionOptions, providerOptions, outputSamples, savedNodeIds, onRunNode, readOnly = false, nodeRuns, onOpenNodeRun, t }: WorkflowEditorProps) {
   const copy = t.sections.workflows;
   const theme = useTheme();
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
@@ -342,6 +362,14 @@ export function WorkflowEditor({ draft, onDraftChange, apps, agents, toolPackage
   const selectedNode = draft.nodes.find((node) => node.id === selectedNodeId) ?? null;
   const selectedEdge = draft.edges.find((edge) => edgeKey(edge) === selectedEdgeKey) ?? null;
 
+  useEffect(() => {
+    if (selectedNode?.type === 'app_action' && selectedNode.appId) {
+      onRequestAppActions?.(selectedNode.appId);
+    }
+  }, [selectedNode, onRequestAppActions]);
+
+  const usesAi = draft.nodes.some((node) => node.type === 'llm_agent' || node.type === 'forger_agent');
+
   const actionOutputSchemas = useMemo(() => {
     const connectionOutputSchemas: Record<string, Record<string, unknown>> = {};
     const forgerToolOutputSchemas: Record<string, Record<string, unknown>> = {};
@@ -436,7 +464,7 @@ export function WorkflowEditor({ draft, onDraftChange, apps, agents, toolPackage
             flexWrap="wrap"
             useFlexGap
           >
-            {(Object.keys(copy.nodeTypes) as Array<WorkflowNode['type']>).map((type) => (
+            {WORKFLOW_NODE_TYPE_ORDER.map((type) => (
               <Tooltip key={type} title={copy.nodeTypeTooltips[type]}>
                 <span>
                   <Button
@@ -452,6 +480,9 @@ export function WorkflowEditor({ draft, onDraftChange, apps, agents, toolPackage
                 </span>
               </Tooltip>
             ))}
+            {!usesAi && draft.nodes.length > 0 ? (
+              <Chip size="small" color="success" variant="outlined" label={copy.noAiRequired} sx={{ alignSelf: 'center' }} />
+            ) : null}
           </Stack>
         )}
         {connectError ? (
@@ -534,6 +565,10 @@ export function WorkflowEditor({ draft, onDraftChange, apps, agents, toolPackage
               node={selectedNode}
               copy={copy}
               apps={apps}
+              appActions={appActions}
+              appActionLoading={selectedNode.type === 'app_action' && loadingAppActionAppIds.has(selectedNode.appId)}
+              appActionLoaded={selectedNode.type === 'app_action' && loadedAppActionAppIds.has(selectedNode.appId)}
+              onRequestAppActions={onRequestAppActions}
               agents={agents}
               toolPackages={toolPackages}
               officialTools={officialTools}
@@ -582,10 +617,14 @@ const EdgePanel = ({ edge, copy, onChangeCondition, onDelete }: {
   </Stack>
 );
 
-const NodePanel = ({ node, copy, apps, agents, toolPackages, officialTools, connectionOptions, providerOptions, sources, canRunNode, onRunNode, onChange, onDelete }: {
+const NodePanel = ({ node, copy, apps, appActions, appActionLoading, appActionLoaded, onRequestAppActions, agents, toolPackages, officialTools, connectionOptions, providerOptions, sources, canRunNode, onRunNode, onChange, onDelete }: {
   node: WorkflowNode;
   copy: WorkflowCopy;
   apps: AppSummary[];
+  appActions: WorkflowAppActionOption[];
+  appActionLoading: boolean;
+  appActionLoaded: boolean;
+  onRequestAppActions?: (appId: string) => void;
   agents: PersonalAgent[];
   toolPackages: AgentToolPackageDefinition[];
   officialTools: OfficialToolSummary[];
@@ -672,6 +711,21 @@ const NodePanel = ({ node, copy, apps, agents, toolPackages, officialTools, conn
   const connectionIdAvailable = node.type !== 'connection'
     || !node.connectionId
     || Boolean(selectedConnectionOption?.instances.some((instance) => instance.id === node.connectionId));
+  const appActionOptions = node.type === 'app_action'
+    ? appActions.filter(({ appId }) => appId === node.appId).map(({ action }) => action)
+    : [];
+  const appActionAppAvailable = node.type !== 'app_action'
+    || !node.appId
+    || apps.some((app) => app.id === node.appId);
+  const appActionAvailable = node.type !== 'app_action'
+    || !node.toolName
+    || appActionOptions.some((action) => action.toolName === node.toolName);
+  const currentAppAction = node.type === 'app_action'
+    ? appActionOptions.find((action) => action.toolName === node.toolName)
+    : undefined;
+  const appActionContractChanged = node.type === 'app_action'
+    && Boolean(currentAppAction && currentAppAction.contractHash !== node.action.contractHash);
+  const appActionRequiresApproval = node.type === 'app_action';
 
   return (
     <Stack spacing={1.5}>
@@ -706,6 +760,110 @@ const NodePanel = ({ node, copy, apps, agents, toolPackages, officialTools, conn
             ))}
           </Stack>
         </Box>
+      ) : null}
+
+      {node.type === 'app_action' ? (
+        <>
+          <TextField
+            select
+            size="small"
+            label={copy.appActionApp}
+            value={node.appId}
+            onChange={(event) => {
+              const appId = event.target.value;
+              if (appId) {
+                onRequestAppActions?.(appId);
+              }
+              onChange((current) => current.type !== 'app_action'
+                ? current
+                : {
+                    ...current,
+                    appId,
+                    toolName: '',
+                    input: {},
+                    requiresApproval: true,
+                    action: {
+                      title: '',
+                      inputSchema: {},
+                      outputSchema: {},
+                      effect: 'unknown',
+                      risk: 'high',
+                      idempotent: false,
+                      contractHash: '',
+                    },
+                  })}}
+          >
+            {!appActionAppAvailable && node.appId ? (
+              <MenuItem value={node.appId}>{node.appId} · {copy.appActionMissing}</MenuItem>
+            ) : null}
+            {apps.map((app) => <MenuItem key={app.id} value={app.id}>{app.name}</MenuItem>)}
+          </TextField>
+          <TextField
+            select
+            size="small"
+            disabled={!node.appId || appActionLoading}
+            label={copy.appActionAction}
+            value={node.toolName}
+            helperText={appActionLoading ? copy.appActionLoading : undefined}
+            onChange={(event) => {
+              const action = appActionOptions.find((candidate) => candidate.toolName === event.target.value);
+              if (!action) {
+                return;
+              }
+              const { toolName, ...snapshot } = action;
+              onChange((current) => current.type !== 'app_action'
+                ? current
+                : { ...current, toolName, action: snapshot, input: {}, requiresApproval: true });
+            }}
+          >
+            {!appActionAvailable && node.toolName ? (
+              <MenuItem value={node.toolName}>{node.action.title || node.toolName} · {copy.appActionMissing}</MenuItem>
+            ) : null}
+            {appActionOptions.map((action) => (
+              <MenuItem key={action.toolName} value={action.toolName}>{action.title}</MenuItem>
+            ))}
+          </TextField>
+          {node.appId && !appActionAppAvailable ? (
+            <Alert severity="warning" variant="outlined">{copy.appActionAppMissing}</Alert>
+          ) : null}
+          {node.toolName && !appActionAvailable && appActionLoaded && !appActionLoading ? (
+            <Alert severity="warning" variant="outlined">
+              {copy.appActionMissing} · {node.action.contractHash}
+            </Alert>
+          ) : null}
+          {appActionContractChanged ? (
+            <Alert severity="warning" variant="outlined">{copy.appActionContractChanged}</Alert>
+          ) : null}
+          {node.toolName ? (
+            <>
+              <Stack direction="row" spacing={0.75} flexWrap="wrap" useFlexGap>
+                <Chip size="small" label={copy.appActionEffects[node.action.effect]} />
+                <Chip
+                  size="small"
+                  color={node.action.risk === 'high' ? 'error' : node.action.risk === 'medium' ? 'warning' : 'default'}
+                  label={copy.appActionRisks[node.action.risk]}
+                />
+              </Stack>
+              {node.action.description ? (
+                <Typography variant="caption" color="text.secondary">{node.action.description}</Typography>
+              ) : null}
+              <SchemaForm
+                schema={node.action.inputSchema}
+                value={node.input}
+                sources={sourcesWithItem}
+                mapTooltip={copy.mapField}
+                wholeOutputLabel={copy.wholeOutput}
+                triggerGroupLabel={copy.triggerData}
+                onChange={(nextInput) => onChange((current) => current.type === 'app_action'
+                  ? { ...current, input: nextInput }
+                  : current)}
+              />
+              {appActionRequiresApproval ? (
+                <Alert severity="warning" variant="outlined">{copy.appActionApprovalRequired}</Alert>
+              ) : null}
+            </>
+          ) : null}
+        </>
       ) : null}
 
       {node.type === 'llm_agent' || node.type === 'forger_agent' ? (
@@ -1189,13 +1347,16 @@ const NodePanel = ({ node, copy, apps, agents, toolPackages, officialTools, conn
           control={(
             <Checkbox
               size="small"
-              checked={node.requiresApproval === true}
+              checked={appActionRequiresApproval || node.requiresApproval === true}
+              disabled={appActionRequiresApproval}
               onChange={(event) => onChange((current) => ({ ...current, requiresApproval: event.target.checked }))}
             />
           )}
           label={copy.requiresApproval}
         />
-        <Typography variant="caption" color="text.secondary" sx={{ display: 'block' }}>{copy.requiresApprovalHelper}</Typography>
+        <Typography variant="caption" color="text.secondary" sx={{ display: 'block' }}>
+          {appActionRequiresApproval ? copy.appActionApprovalRequired : copy.requiresApprovalHelper}
+        </Typography>
       </Box>
       <TextField
         size="small"

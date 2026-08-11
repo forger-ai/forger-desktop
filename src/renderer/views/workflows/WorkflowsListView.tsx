@@ -30,6 +30,11 @@ const formatSchedule = (workflow: Workflow, t: AppDictionary): string => {
   return `${t.sections.workflows.triggerScheduled} · ${t.sections.automations.frequencyLabels[workflow.trigger.frequency.type]}`;
 };
 
+const hasAppliedSchedule = (workflow: Workflow): boolean =>
+  workflow.appliedTrigger?.type === 'scheduled'
+  || (workflow.appliedRevision === workflow.revision && workflow.trigger.type === 'scheduled')
+  || workflow.enabled;
+
 export function WorkflowsListView({ t, workflows, busy, onCreate, onOpen, onToggleEnabled, onRunNow, onDelete }: {
   t: AppDictionary;
   workflows: Workflow[];
@@ -74,8 +79,16 @@ export function WorkflowsListView({ t, workflows, busy, onCreate, onOpen, onTogg
                         {workflow.running ? <CircularProgress size={14} /> : null}
                         <Chip
                           size="small"
-                          color={workflow.running ? 'info' : workflow.enabled ? 'success' : 'default'}
-                          label={workflow.running ? copy.running : workflow.enabled ? copy.active : copy.paused}
+                          color={workflow.running
+                            ? 'info'
+                            : hasAppliedSchedule(workflow)
+                              ? workflow.enabled ? 'success' : 'default'
+                              : workflow.appliedRevision ? 'success' : 'default'}
+                          label={workflow.running
+                            ? copy.running
+                            : hasAppliedSchedule(workflow)
+                              ? workflow.enabled ? copy.active : copy.paused
+                              : workflow.appliedRevision ? copy.appliedRevision : copy.draftRevision}
                         />
                         <Chip size="small" variant="outlined" label={formatSchedule(workflow, t)} />
                       </Stack>
@@ -96,20 +109,22 @@ export function WorkflowsListView({ t, workflows, busy, onCreate, onOpen, onTogg
                   </CardContent>
                 </CardActionArea>
                 <Stack direction="row" spacing={0.25} alignItems="center" sx={{ px: 1 }}>
-                  <Tooltip title={copy.runNow}>
+                  <Tooltip title={workflow.appliedRevision ? copy.runApplied : copy.appliedRequired}>
                     <span>
-                      <IconButton size="small" disabled={busy || workflow.running} onClick={() => onRunNow(workflow)}>
+                      <IconButton size="small" disabled={busy || workflow.running || !workflow.appliedRevision} onClick={() => onRunNow(workflow)}>
                         <PlayArrowRounded fontSize="small" />
                       </IconButton>
                     </span>
                   </Tooltip>
-                  <Tooltip title={workflow.enabled ? copy.disable : copy.enable}>
-                    <span>
-                      <IconButton size="small" disabled={busy} onClick={() => onToggleEnabled(workflow)}>
-                        {workflow.enabled ? <PauseRounded fontSize="small" /> : <PlayArrowRounded fontSize="small" />}
-                      </IconButton>
-                    </span>
-                  </Tooltip>
+                  {hasAppliedSchedule(workflow) ? (
+                    <Tooltip title={workflow.enabled ? copy.deactivateSchedule : copy.activateSchedule}>
+                      <span>
+                        <IconButton size="small" disabled={busy || !workflow.appliedRevision} onClick={() => onToggleEnabled(workflow)}>
+                          {workflow.enabled ? <PauseRounded fontSize="small" /> : <PlayArrowRounded fontSize="small" />}
+                        </IconButton>
+                      </span>
+                    </Tooltip>
+                  ) : null}
                   <Tooltip title={copy.delete}>
                     <IconButton size="small" color="error" onClick={() => setPendingDelete(workflow)}>
                       <DeleteOutlineRounded fontSize="small" />

@@ -389,6 +389,15 @@ export const workflowMcpErrorMessage = (code: string): string => {
   if (code === 'workflow_nodes_required') {
     return 'El flujo necesita al menos un nodo.';
   }
+  if (code === 'workflow_applied_revision_required' || code === 'workflow_not_applied') {
+    return 'El flujo necesita una revision aplicada antes de activarlo o ejecutarlo.';
+  }
+  if (code === 'workflow_review_required' || code === 'workflow_review_stale') {
+    return 'Revisa el borrador actual antes de aplicar sus cambios.';
+  }
+  if (code === 'workflow_revision_conflict' || code === 'workflow_expected_revision_required') {
+    return 'El borrador cambio desde que lo leiste. Vuelve a cargarlo antes de guardar o aplicar.';
+  }
   if (code === 'workflow_graph_has_cycle') {
     return 'Las conexiones del flujo forman un ciclo; un flujo debe avanzar siempre hacia adelante.';
   }

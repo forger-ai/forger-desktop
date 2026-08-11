@@ -5,6 +5,7 @@ import {
   LLM_PROVIDER_REGISTRY,
 } from '../../shared/agent-runtime-registry';
 import { APP_CATEGORIES } from '../../shared/types/catalog';
+import { WORKFLOW_UPSERT_INPUT_SCHEMA } from './workflow-input-schema';
 
 export interface McpToolAnnotations {
   readOnlyHint: boolean;
@@ -1131,7 +1132,7 @@ export const getMcpToolInputSchema = (toolId: AgentToolId): Record<string, unkno
     };
   }
 
-  if (toolId === 'forger_workflow_get' || toolId === 'forger_workflow_run') {
+  if (toolId === 'forger_workflow_get' || toolId === 'forger_workflow_review' || toolId === 'forger_workflow_run') {
     return {
       type: 'object',
       properties: {
@@ -1142,53 +1143,21 @@ export const getMcpToolInputSchema = (toolId: AgentToolId): Record<string, unkno
     };
   }
 
-  if (toolId === 'forger_workflow_upsert') {
+  if (toolId === 'forger_workflow_apply') {
     return {
       type: 'object',
       properties: {
-        id: { type: 'string', description: 'ID del flujo existente. Omitir para crear uno nuevo.' },
-        name: { type: 'string' },
-        description: { type: 'string' },
-        enabled: { type: 'boolean' },
-        trigger: {
-          type: 'object',
-          properties: {
-            type: { type: 'string', enum: ['manual', 'scheduled'] },
-            frequency: {
-              type: 'object',
-              properties: {
-                type: { type: 'string', enum: ['hourly', 'daily', 'weekly'] },
-                timeOfDay: { type: 'string', description: 'HH:MM para daily/weekly.' },
-                weeklyDay: { type: 'number', description: '0 (domingo) a 6 (sabado) para weekly.' },
-              },
-            },
-            missedRunPolicy: { type: 'string', enum: ['skip', 'always', 'within_window'] },
-            missedRunWindowMinutes: { type: 'number' },
-          },
-          required: ['type'],
-        },
-        nodes: {
-          type: 'array',
-          description: 'Nodos del flujo. Tipos: llm_agent (prompt, toolIds, connectionGrants, appIds, runtime, outputSchema), forger_agent (agentId, prompt), forger_tool (toolId, input), connection (connectionType, actionId, connectionId opcional, input), condition (expression con left, operator, right). Todos requieren id y name. requiresApproval pausa el flujo hasta aprobar el paso.',
-          items: { type: 'object' },
-        },
-        edges: {
-          type: 'array',
-          description: 'Conexiones entre nodos: { from, to, condition } con condition success, error o always. En nodos condition, success es la rama verdadera y error la falsa.',
-          items: {
-            type: 'object',
-            properties: {
-              from: { type: 'string' },
-              to: { type: 'string' },
-              condition: { type: 'string', enum: ['success', 'error', 'always'] },
-            },
-            required: ['from', 'to'],
-          },
-        },
+        workflowId: { type: 'string' },
+        definitionHash: { type: 'string' },
+        expectedRevision: { type: 'number', minimum: 1 },
       },
-      required: ['name', 'trigger', 'nodes'],
+      required: ['workflowId', 'definitionHash', 'expectedRevision'],
       additionalProperties: false,
     };
+  }
+
+  if (toolId === 'forger_workflow_upsert') {
+    return WORKFLOW_UPSERT_INPUT_SCHEMA;
   }
 
   if (toolId === 'slack.list_channels') {

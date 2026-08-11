@@ -94,6 +94,8 @@ export type AgentToolId =
   | 'forger_workflow_list'
   | 'forger_workflow_get'
   | 'forger_workflow_upsert'
+  | 'forger_workflow_review'
+  | 'forger_workflow_apply'
   | 'forger_workflow_run'
   | 'slack.connection.status'
   | 'slack.list_channels'

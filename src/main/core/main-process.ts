@@ -18,14 +18,10 @@ import { AppMcpManager } from '../app-mcp-manager';
 import { AutomationManager } from '../automation-manager';
 import { WorkflowFeatureController } from '../workflow-feature-controller';
 import { WorkflowManager } from '../workflow-manager';
+import { WorkflowAppActionRuntime } from '../app-action-runtime';
 import { BackgroundTaskStore } from '../background-task-store';
-import {
-  extractDeepLinkFromArgv, focusWindow as focusDeepLinkWindow,
-  FORGER_PROTOCOL,
-  parseForgerUrl,
-  registerForgerProtocol,
-  type ForgerDeepLink,
-} from '../deep-links';
+import { extractDeepLinkFromArgv, focusWindow as focusDeepLinkWindow, FORGER_PROTOCOL,
+  parseForgerUrl, registerForgerProtocol, type ForgerDeepLink } from '../deep-links';
 import { DevCatalogService } from '../dev-catalog-service';
 import { DesktopUpdater } from '../desktop-updater';
 import { DesktopRuntimeBridge } from '../desktop-runtime-bridge';
@@ -231,6 +227,7 @@ let desktopErrorReporter: DesktopErrorReporter | null = null;
 let automationManager: AutomationManager | null = null;
 let workflowFeatureController: WorkflowFeatureController | null = null;
 let workflowManager: WorkflowManager | null = null;
+let workflowAppActionRuntime: WorkflowAppActionRuntime | null = null;
 const updateWorkflowsEarlyAccess = async (enabled: boolean): Promise<Settings> => {
   const controller = workflowFeatureController;
   if (!controller) throw new Error('workflow_feature_controller_unavailable');
@@ -1356,7 +1353,9 @@ const getMainProcessIpcDeps = (): MainProcessIpcDeps & AgentIpcDeps => ({
   appendInstallLog,
   automationManager,
   workflowManager,
+  workflowAppActionRuntime,
   getWorkflowManager: () => workflowFeatureController?.requireManager() ?? workflowManager,
+  getWorkflowAppActionRuntime: () => workflowAppActionRuntime,
   buildAppSecretsState,
   buildCodexPromptWithAppContext,
   buildForgerToolsContextForApp,
@@ -1543,6 +1542,7 @@ const mainLifecycleState = {
   get automationManager() { return automationManager; }, set automationManager(value) { automationManager = value; },
   get workflowFeatureController() { return workflowFeatureController; }, set workflowFeatureController(value) { workflowFeatureController = value; },
   get workflowManager() { return workflowManager; }, set workflowManager(value) { workflowManager = value; },
+  get workflowAppActionRuntime() { return workflowAppActionRuntime; }, set workflowAppActionRuntime(value) { workflowAppActionRuntime = value; },
   get appMcpManager() { return appMcpManager; }, set appMcpManager(value) { appMcpManager = value; },
   get backupsManager() { return backupsManager; }, set backupsManager(value) { backupsManager = value; },
   get memoryStore() { return memoryStore; }, set memoryStore(value) { memoryStore = value; },
@@ -1559,7 +1559,7 @@ const mainLifecycleState = {
 };
 
 registerMainLifecycle({
-  AGENT_TOOL_DEFINITIONS, AppAgentConversationManager, AppAgentTaskManager, AppMcpManager, AutomationManager, WorkflowFeatureController, WorkflowManager,
+  AGENT_TOOL_DEFINITIONS, AppAgentConversationManager, AppAgentTaskManager, AppMcpManager, AutomationManager, WorkflowFeatureController, WorkflowManager, WorkflowAppActionRuntime,
   BrowserWindow, ChatOrchestrator, CloudDeviceManager, CloudIdentityStore, DesktopRuntimeBridge,
   DevCatalogService, FORGER_AGENT_CONTRACT_VERSION, FileLibrary, ForgerAccountStore, ForgerBackendClient,
   ForgerMcpServer, IPC_CHANNELS, MemoryMaintenanceManager, MemoryStore, SecretsStore, anyAppAllowsAgentNetworkAccess, app,

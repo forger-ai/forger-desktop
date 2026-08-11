@@ -57,6 +57,47 @@ export interface WorkflowForgerAgentNode extends WorkflowNodeBase {
   outputSchema?: Record<string, unknown>;
 }
 
+export type WorkflowAppActionEffect = 'read' | 'write' | 'external' | 'destructive' | 'unknown';
+export type WorkflowAppActionRisk = 'low' | 'medium' | 'high';
+
+/** Immutable contract captured when an app action is added to a workflow. */
+export interface WorkflowAppAction {
+  title: string;
+  description?: string;
+  inputSchema: Record<string, unknown>;
+  outputSchema: Record<string, unknown>;
+  effect: WorkflowAppActionEffect;
+  risk: WorkflowAppActionRisk;
+  idempotent: boolean;
+  contractHash: string;
+}
+
+/** Live action definition returned by an installed app during preflight. */
+export interface WorkflowAppActionDefinition extends WorkflowAppAction {
+  toolName: string;
+}
+
+export interface WorkflowAppActionNode extends WorkflowNodeBase {
+  type: 'app_action';
+  appId: string;
+  toolName: string;
+  input: Record<string, unknown>;
+  action: WorkflowAppAction;
+}
+
+export type WorkflowAppActionContractSnapshot = WorkflowAppAction;
+
+export interface WorkflowAppActionCallInput {
+  appId: string;
+  toolName: string;
+  input: Record<string, unknown>;
+  expectedContractHash: string;
+  timeoutMs: number;
+  runId: string;
+  nodeId: string;
+  signal: AbortSignal;
+}
+
 export interface WorkflowConnectorNode extends WorkflowNodeBase {
   type: 'connector';
   toolId: string;
@@ -101,6 +142,7 @@ export interface WorkflowConditionNode extends WorkflowNodeBase {
 }
 
 export type WorkflowNode =
+  | WorkflowAppActionNode
   | WorkflowLlmAgentNode
   | WorkflowForgerAgentNode
   | WorkflowForgerToolNode
@@ -122,6 +164,18 @@ export interface Workflow {
   createdAt: string;
   updatedAt: string;
   lastRun?: WorkflowRunSummary;
+  /** Monotonic identity of the current editable draft. */
+  revision: number;
+  /** Stable identity of the current editable draft snapshot. */
+  revisionId: string;
+  /** Last revision explicitly applied after a successful review. */
+  appliedRevision?: number;
+  /** Stable identity of the immutable applied snapshot. */
+  appliedRevisionId?: string;
+  /** Trigger belonging to the applied snapshot, independent from later draft edits. */
+  appliedTrigger?: WorkflowTrigger;
+  /** Readiness report for this exact draft. Saving another draft clears it. */
+  review?: WorkflowReviewReport;
 }
 
 export interface WorkflowUpsertInput {
@@ -132,7 +186,43 @@ export interface WorkflowUpsertInput {
   nodes: WorkflowNode[];
   edges: WorkflowEdge[];
   enabled?: boolean;
+  /** Rejects a save based on a stale editor snapshot. */
+  expectedRevision?: number;
 }
+
+export type WorkflowReviewStatus = 'ready' | 'blocked';
+
+/** Static, zero-effect readiness report for one exact workflow definition. */
+export interface WorkflowReviewReport {
+  status: WorkflowReviewStatus;
+  issues: string[];
+  definitionHash: string;
+}
+
+export interface WorkflowApplyInput {
+  definitionHash: string;
+  expectedRevision: number;
+}
+
+export interface WorkflowRestoreRevisionInput {
+  revisionId: string;
+  expectedRevision: number;
+}
+
+/** Immutable definition snapshot kept in workflow history. */
+export interface WorkflowRevision {
+  id: string;
+  workflowId: string;
+  revision: number;
+  definitionHash: string;
+  createdAt: string;
+  applied: boolean;
+  appliedAt?: string;
+  workflow: Workflow;
+}
+
+/** Revision metadata safe to expose to the renderer; definitions stay in main storage. */
+export type WorkflowRevisionSummary = Omit<WorkflowRevision, 'workflow'>;
 
 export type WorkflowRunTrigger = 'manual' | 'scheduled' | 'chat' | 'step';
 
@@ -141,6 +231,7 @@ export type WorkflowRunStatus =
   | 'running'
   | 'waiting_approval'
   | 'succeeded'
+  | 'completed_with_issues'
   | 'failed'
   | 'skipped'
   | 'canceled';
@@ -180,6 +271,14 @@ export interface WorkflowRunSummary {
   /** Node id waiting for user approval when status is waiting_approval. */
   pendingApprovalNodeId?: string;
   nodeRuns: WorkflowNodeRun[];
+  /** Immutable workflow definition executed by this run. */
+  workflowRevision: number;
+  workflowRevisionId: string;
+  definitionHash: string;
+  /** Original failed run when this is a safe retry. */
+  retryOfRunId?: string;
+  /** True only when the run failed during preflight, before effects began. */
+  safeToRetry?: boolean;
 }
 
 export interface WorkflowRun extends WorkflowRunSummary {

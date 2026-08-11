@@ -5,32 +5,18 @@ import type { ChildProcessWithoutNullStreams } from 'node:child_process';
 import { appendDesktopLog } from '../desktop-logger';
 import { reportSanitizerRoots } from '../conversation-diagnostics';
 import type { StoredForgerAccount } from '../forger-account-store';
-import { createAppMcpSecretsFingerprint } from '../app-mcp-manager';
+import { createAppMcpSecretsFingerprint, type AppMcpManager as AppMcpManagerService } from '../app-mcp-manager';
 import { AppFolderGrantStore } from '../app-folder-grants';
 import type {
   AgentProvider, AgentRuntime, AgentRuntimeRequest,
-  AgentToolDefinition,
-  AppSummary, AppSecretDeclaration,
-  AutomationFrequency,
-  BasicActionResult,
-  CatalogApp,
-  ChatCreatedAppRequest,
-  ChatQuestion,
-  ChatQuestionRequest,
-  AntigravityAuthStatus,
-  CodexAuthStatus,
-  ClaudeAuthStatus,
-  CreateLocalAppInput,
-  CreateLocalAppResult,
-  RuntimeStatus,
-  AudioRuntimeDevices,
-  CallConnectionActionInput,
-  ConfigureConnectionInput,
-  CallOfficialToolInput,
-  PersonalAgent,
-  PersonalAgentPeerThread,
-  SecretMutationResult,
-  WorkflowUpsertInput,
+  AgentToolDefinition, AppSecretDeclaration, AppSummary,
+  AntigravityAuthStatus, AudioRuntimeDevices, AutomationFrequency,
+  BasicActionResult, CallConnectionActionInput, CallOfficialToolInput,
+  CatalogApp, ChatCreatedAppRequest, ChatQuestion,
+  ChatQuestionRequest, ClaudeAuthStatus, CodexAuthStatus,
+  ConfigureConnectionInput, CreateLocalAppInput, CreateLocalAppResult,
+  PersonalAgent, PersonalAgentPeerThread, RuntimeStatus,
+  SecretMutationResult, WorkflowApplyInput, WorkflowUpsertInput,
 } from '../../shared/types';
 import type {
   AsyncFn,
@@ -54,10 +40,7 @@ import type {
   ToolAccess,
 } from './main-lifecycle-types';
 import type { AppManifest, InstalledAppRecord, RuntimeBinarySet, RunningAppProcess } from './main-process-types';
-import {
-  createStartupLoadingController,
-  createStartupLogger,
-} from './startup-loading';
+import { createStartupLoadingController, createStartupLogger } from './startup-loading';
 import { appAllowsAgentRuntimeControl, appAllowsAudioInput, appAllowsSidekickDisplay, appAllowsSidekickSpeech, appAllowsSpeechToText, appAllowsTextToSpeech, appAllowsWorkspaceFolders } from '../../shared/platform-capabilities';
 import type { LlmProviderAuthProfileResolver } from '../llm-provider/types';
 import { connectionToolDefinitionsFromState } from './mcp-connection-tools';
@@ -68,15 +51,17 @@ import { isRemoteAgentSessionCloseEvent, isRemoteTunnelCloseEvent } from './remo
 import type { SidekickService } from '../sidekick-service';
 import type { SidekickVoiceOutcomeInput } from '../sidekick-voice-runtime';
 import { createSidekickRuntimeBridgeBindings } from '../sidekick-runtime-bridge';
+import type { WorkflowAppActionRuntime as WorkflowAppActionRuntimeService } from '../app-action-runtime';
 import type { WorkflowFeatureController as WorkflowFeatureControllerService } from '../workflow-feature-controller';
 import type { WorkflowManager as WorkflowManagerService } from '../workflow-manager';
 export interface MainLifecycleDeps {
   AGENT_TOOL_DEFINITIONS: AgentToolDefinition[];
   AppAgentConversationManager: ServiceConstructor<LifecycleService>;
   AppAgentTaskManager: ServiceConstructor<LifecycleService>;
-  AppMcpManager: ServiceConstructor<LifecycleService>;
+  AppMcpManager: ServiceConstructor<AppMcpManagerService>;
   AutomationManager: ServiceConstructor<LifecycleService>;
   WorkflowFeatureController: typeof WorkflowFeatureControllerService;
+  WorkflowAppActionRuntime?: ServiceConstructor<WorkflowAppActionRuntimeService>;
   WorkflowManager: ServiceConstructor<WorkflowManagerService>;
   BrowserWindow: typeof BrowserWindow;
   ChatOrchestrator: ServiceConstructor<ChatOrchestratorService>;
@@ -269,6 +254,7 @@ export const registerMainLifecycle = (deps: MainLifecycleDeps) => {
     AppMcpManager,
     AutomationManager,
     WorkflowFeatureController,
+    WorkflowAppActionRuntime,
     WorkflowManager,
     BrowserWindow,
     ChatOrchestrator,
@@ -950,12 +936,20 @@ export const registerMainLifecycle = (deps: MainLifecycleDeps) => {
         ?? { success: false, technicalCode: 'workflow_manager_unavailable' },
     workflowsList: () => state.workflowManager?.list() ?? [],
     workflowsGet: (workflowId: string) => state.workflowManager?.get(workflowId) ?? null,
-    workflowsUpsert: async (input: unknown) => {
+    workflowsUpsert: async (input: WorkflowUpsertInput) => {
       if (!state.workflowManager) {
         throw new Error('workflow_manager_unavailable');
       }
-      return await state.workflowManager.upsert(input as WorkflowUpsertInput);
+      return await state.workflowManager.upsert(input);
     },
+    workflowsReview: async (workflowId: string) => await (
+      state.workflowManager?.review(workflowId)
+        ?? Promise.reject(new Error('workflow_manager_unavailable'))
+    ),
+    workflowsApply: async (workflowId: string, input: WorkflowApplyInput) => await (
+      state.workflowManager?.apply(workflowId, input)
+        ?? Promise.reject(new Error('workflow_manager_unavailable'))
+    ),
     workflowsRun: async (workflowId: string) => {
       if (!state.workflowManager) {
         throw new Error('workflow_manager_unavailable');
@@ -1012,6 +1006,9 @@ export const registerMainLifecycle = (deps: MainLifecycleDeps) => {
     serializeErrorForInstallLog,
     onMcpStartFailed: (input: { appId: string; runId: string; error: unknown }) => state.desktopErrorReporter?.reportAppMcpStartFailure(input),
   });
+  if (WorkflowAppActionRuntime) {
+    state.workflowAppActionRuntime = new WorkflowAppActionRuntime({ appMcpManager: state.appMcpManager });
+  }
   });
   await startupLogger.step('startup:file_library:create', () => {
     state.fileLibrary = new FileLibrary(getPrivateDataRoot(), getForgerMetadataRoot());
@@ -1509,6 +1506,7 @@ export const registerMainLifecycle = (deps: MainLifecycleDeps) => {
       await getConnectionsService().call(input as CallConnectionActionInput),
     callConnectorAction: async (input: unknown) =>
       await getOfficialToolsService().callFromAgent(input),
+    ...(state.workflowAppActionRuntime?.workflowManagerOptions() ?? {}),
     getValidToolIds: () => new Set(AGENT_TOOL_DEFINITIONS.map((tool) => tool.id)),
     onAgentRunActivity: (activity: unknown) => {
       llmRunsStore?.recordWorkflowNodeActivity(activity, {

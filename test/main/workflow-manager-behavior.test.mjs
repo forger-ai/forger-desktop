@@ -102,6 +102,16 @@ test('upsert validates and persists workflows, list/get/delete/setEnabled work',
     );
     await assert.rejects(
       harness.manager.upsert({
+        name: 'No debe perder pasos',
+        trigger: { type: 'manual' },
+        nodes: [connectorNode('valido'), { id: 'roto', name: 'Roto', type: 'not_a_node' }],
+        edges: [],
+      }),
+      /workflow_node_invalid/,
+    );
+    assert.equal(harness.manager.list().length, 0);
+    await assert.rejects(
+      harness.manager.upsert({
         name: 'Ciclo',
         trigger: { type: 'manual' },
         nodes: [connectorNode('a'), connectorNode('b')],
@@ -121,7 +131,7 @@ test('upsert validates and persists workflows, list/get/delete/setEnabled work',
       edges: [],
     });
     assert.ok(workflow.id);
-    assert.equal(workflow.enabled, true);
+    assert.equal(workflow.enabled, false);
     assert.equal(workflow.nextRunAt, null);
     assert.equal(harness.manager.list().length, 1);
     assert.equal(harness.manager.get(workflow.id)?.name, 'Mi flujo');
@@ -131,13 +141,21 @@ test('upsert validates and persists workflows, list/get/delete/setEnabled work',
 
     const scheduled = await harness.manager.upsert({
       id: workflow.id,
+      expectedRevision: workflow.revision,
       name: 'Mi flujo',
       trigger: { type: 'scheduled', frequency: { type: 'hourly' } },
       nodes: [connectorNode('a')],
       edges: [],
       enabled: true,
     });
-    assert.ok(scheduled.nextRunAt, 'scheduled workflow gets nextRunAt');
+    assert.equal(scheduled.nextRunAt, null, 'saving a scheduled draft does not activate it');
+    const review = await harness.manager.review(workflow.id);
+    await harness.manager.apply(workflow.id, {
+      definitionHash: review.definitionHash,
+      expectedRevision: scheduled.revision,
+    });
+    const activated = await harness.manager.setEnabled(workflow.id, true);
+    assert.ok(activated.nextRunAt, 'activating an applied schedule gets nextRunAt');
 
     const deletion = await harness.manager.delete(workflow.id);
     assert.equal(deletion.success, true);
@@ -221,9 +239,9 @@ test('error branches handle connector failures and unhandled failures fail the r
     const handledRun = await harness.manager.runNow(handled.id);
     const handledResult = await waitFor(async () => {
       const run = await harness.manager.getRun(handledRun.id);
-      return run && ['succeeded', 'failed'].includes(run.status) ? run : null;
+      return run && ['completed_with_issues', 'failed'].includes(run.status) ? run : null;
     });
-    assert.equal(handledResult.status, 'succeeded');
+    assert.equal(handledResult.status, 'completed_with_issues');
     const byNode = Object.fromEntries(handledResult.nodeRuns.map((nodeRun) => [nodeRun.nodeId, nodeRun]));
     assert.equal(byNode.rompe.status, 'failed');
     assert.equal(byNode.rompe.error, 'connector_boom');
