@@ -7,6 +7,7 @@ import { createRequire } from 'node:module';
 
 const require = createRequire(import.meta.url);
 const { WorkflowManager, friendlyWorkflowFailureMessage } = require('../../dist-electron/main/workflow-manager.js');
+const agentCommandRunner = require('../../dist-electron/main/automation/agent-command-runner.js');
 
 const wait = (ms) => new Promise((resolveWait) => setTimeout(resolveWait, ms));
 
@@ -25,6 +26,96 @@ const waitFor = async (predicate, timeoutMs = 10_000) => {
 const waitForRunEnd = (manager, runId) => waitFor(async () => {
   const run = await manager.getRun(runId);
   return run && ['succeeded', 'failed', 'canceled', 'skipped'].includes(run.status) ? run : null;
+});
+
+const CONTROLLED_WAIT_TIMEOUT_MS = 2_000;
+
+const createControlledAgentCommands = () => {
+  const queued = [];
+  const listeners = [];
+  return {
+    runAgentCommand: async () => await new Promise((resolve) => {
+      const command = {
+        finish: (result = {}) => resolve({ code: 0, stdout: '', stderr: '', ...result }),
+      };
+      const listener = listeners.shift();
+      if (listener) listener(command);
+      else queued.push(command);
+    }),
+    next: async ({ timeoutMs = CONTROLLED_WAIT_TIMEOUT_MS } = {}) => {
+      const command = queued.shift();
+      if (command) return command;
+
+      return await new Promise((resolve, reject) => {
+        let timeoutId;
+        const listener = (startedCommand) => {
+          clearTimeout(timeoutId);
+          resolve(startedCommand);
+        };
+        timeoutId = setTimeout(() => {
+          const listenerIndex = listeners.indexOf(listener);
+          if (listenerIndex >= 0) listeners.splice(listenerIndex, 1);
+          reject(new Error('controlled_agent_command_start_timeout'));
+        }, timeoutMs);
+        listeners.push(listener);
+      });
+    },
+  };
+};
+
+const createWorkflowIdleObserver = () => {
+  const idleRuns = new Map();
+  const waiters = new Map();
+  return {
+    onWorkflowUpdated: ({ workflow }) => {
+      const run = workflow.lastRun;
+      if (workflow.running || !run || !['succeeded', 'failed', 'canceled', 'skipped'].includes(run.status)) return;
+      idleRuns.set(run.id, run);
+      waiters.get(run.id)?.resolve(run);
+      waiters.delete(run.id);
+    },
+    waitForRunIdle: async (runId, { timeoutMs = CONTROLLED_WAIT_TIMEOUT_MS } = {}) => {
+      const idleRun = idleRuns.get(runId);
+      if (idleRun) return idleRun;
+
+      return await new Promise((resolve, reject) => {
+        const timeoutId = setTimeout(() => {
+          waiters.delete(runId);
+          reject(new Error(`controlled_workflow_idle_timeout:${runId}`));
+        }, timeoutMs);
+        waiters.set(runId, {
+          resolve: (run) => {
+            clearTimeout(timeoutId);
+            resolve(run);
+          },
+        });
+      });
+    },
+  };
+};
+
+test('controlled workflow waits resolve observable events and fail with bounded diagnostics', async () => {
+  const commands = createControlledAgentCommands();
+  const workflowIdle = createWorkflowIdleObserver();
+
+  const commandRun = commands.runAgentCommand();
+  const command = await commands.next({ timeoutMs: 10 });
+  command.finish({ stdout: 'done' });
+  assert.equal((await commandRun).stdout, 'done');
+
+  const idleRun = { id: 'run-idle', status: 'succeeded' };
+  const idlePromise = workflowIdle.waitForRunIdle(idleRun.id, { timeoutMs: 10 });
+  workflowIdle.onWorkflowUpdated({ workflow: { running: false, lastRun: idleRun } });
+  assert.equal(await idlePromise, idleRun);
+
+  await assert.rejects(
+    commands.next({ timeoutMs: 10 }),
+    { message: 'controlled_agent_command_start_timeout' },
+  );
+  await assert.rejects(
+    workflowIdle.waitForRunIdle('run-never-idle', { timeoutMs: 10 }),
+    { message: 'controlled_workflow_idle_timeout:run-never-idle' },
+  );
 });
 
 const writeFakeCodexCli = async (root, { sleepMs = 0, message = 'Hecho por codex', exitCode = 0 } = {}) => {
@@ -148,15 +239,20 @@ test('llm node runs the provider CLI, injects context, and falls back to the las
   }
 });
 
-test('llm node honours MCP completion, schema validation, and reported failures', async () => {
+test('llm node honours MCP completion, schema validation, and reported failures', async (t) => {
   const harness = await createManager();
-  const cliPath = await writeFakeCodexCli(harness.metadataRoot, { sleepMs: 700, message: 'texto libre' });
+  const commands = createControlledAgentCommands();
+  const workflowIdle = createWorkflowIdleObserver();
+  const originalRunAgentCommand = agentCommandRunner.runAgentCommand;
+  agentCommandRunner.runAgentCommand = commands.runAgentCommand;
+  t.after(() => { agentCommandRunner.runAgentCommand = originalRunAgentCommand; });
   try {
     const withCli = await createManager({
       metadataRoot: harness.metadataRoot,
       options: {
         getCodexAuthenticated: async () => true,
-        getCodexCliPath: async () => cliPath,
+        getCodexCliPath: async () => '/controlled/codex',
+        onWorkflowUpdated: workflowIdle.onWorkflowUpdated,
       },
     });
     const workflow = await withCli.manager.upsert(llmWorkflowInput({
@@ -166,8 +262,9 @@ test('llm node honours MCP completion, schema validation, and reported failures'
     const summary = await withCli.manager.runNow(workflow.id);
     const nodeRunKey = `${summary.id}:agente`;
 
-    await waitFor(async () => withCli.manager.getNodeContext(nodeRunKey));
+    const firstCommand = await commands.next();
     const context = withCli.manager.getNodeContext(nodeRunKey);
+    assert.ok(context);
     assert.equal(context.workflowName, 'Flujo LLM');
     assert.equal(context.nodeId, 'agente');
     assert.deepEqual(context.outputSchema.required, ['total']);
@@ -180,8 +277,10 @@ test('llm node honours MCP completion, schema validation, and reported failures'
 
     const valid = withCli.manager.completeNodeFromMcp(nodeRunKey, { output: { total: 7 }, summary: 'Siete elementos' });
     assert.equal(valid.success, true);
+    firstCommand.finish({ stdout: 'texto libre' });
 
-    const finished = await waitForRunEnd(withCli.manager, summary.id);
+    await workflowIdle.waitForRunIdle(summary.id);
+    const finished = await withCli.manager.getRun(summary.id);
     assert.equal(finished.status, 'succeeded');
     const nodeRun = finished.nodeRuns.find((entry) => entry.nodeId === 'agente');
     assert.deepEqual(nodeRun.output, { total: 7 });
@@ -189,19 +288,27 @@ test('llm node honours MCP completion, schema validation, and reported failures'
 
     // A second run where the agent reports failure through MCP.
     const failSummary = await withCli.manager.runNow(workflow.id);
+    assert.equal(failSummary.status, 'queued');
     const failKey = `${failSummary.id}:agente`;
-    await waitFor(async () => withCli.manager.getNodeContext(failKey));
+    const failCommand = await commands.next();
+    assert.ok(withCli.manager.getNodeContext(failKey));
     assert.equal(withCli.manager.failNodeFromMcp(failKey, { reason: 'sin datos suficientes' }).success, true);
-    const failed = await waitForRunEnd(withCli.manager, failSummary.id);
+    failCommand.finish();
+    await workflowIdle.waitForRunIdle(failSummary.id);
+    const failed = await withCli.manager.getRun(failSummary.id);
     assert.equal(failed.status, 'failed');
     assert.equal(failed.error, 'sin datos suficientes');
 
     // Default reason when the agent reports failure without one.
     const defaultSummary = await withCli.manager.runNow(workflow.id);
+    assert.equal(defaultSummary.status, 'queued');
     const defaultKey = `${defaultSummary.id}:agente`;
-    await waitFor(async () => withCli.manager.getNodeContext(defaultKey));
+    const defaultCommand = await commands.next();
+    assert.ok(withCli.manager.getNodeContext(defaultKey));
     assert.equal(withCli.manager.failNodeFromMcp(defaultKey, {}).success, true);
-    const defaulted = await waitForRunEnd(withCli.manager, defaultSummary.id);
+    defaultCommand.finish();
+    await workflowIdle.waitForRunIdle(defaultSummary.id);
+    const defaulted = await withCli.manager.getRun(defaultSummary.id);
     assert.equal(defaulted.error, 'workflow_node_reported_failure');
 
     await withCli.manager.dispose();

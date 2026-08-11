@@ -214,9 +214,8 @@ export class AgentStore {
       updatedAt: agent.updatedAt,
     });
     await this.ensureWorkspace(agent);
-    await this.upsertPermission({
+    await this.upsertLegacyPermission({
       agentId: agent.id,
-      kind: 'legacy',
       targetId: 'network_access',
       mode: agent.permissionMode,
       granted: agent.networkAccess,
@@ -268,9 +267,8 @@ export class AgentStore {
       SET permission_mode = ?, network_access = ?, can_spawn_agents = ?, group_id = ?, runtime_provider = ?, runtime_model = ?, runtime_effort = ?, updated_at = ?
       WHERE id = ?
     `).run(permissionMode, networkAccess ? 1 : 0, canSpawnAgents ? 1 : 0, groupId, runtime?.provider ?? null, runtime?.model ?? null, runtime?.effort ?? null, now, agent.id);
-    await this.upsertPermission({
+    await this.upsertLegacyPermission({
       agentId: agent.id,
-      kind: 'legacy',
       targetId: 'network_access',
       mode: permissionMode,
       granted: networkAccess,
@@ -364,7 +362,7 @@ export class AgentStore {
       targetConversation.id,
       parentThread?.id ?? null,
       rootThreadId,
-      sanitizeAgentId(input.createdByRunId) ?? input.createdByRunId ?? null,
+      sanitizeAgentId(input.createdByRunId) ?? null,
       title,
       'active',
       now,
@@ -380,7 +378,7 @@ export class AgentStore {
     if (!row) {
       throw new Error('personal_agent_peer_thread_not_found');
     }
-    return this.peerThreadFromRow(row, { includeMessages: true, includeChildren: true });
+    return this.peerThreadFromRow(row, { includeMessages: true });
   }
 
   public async updatePeerThreadStatus(input: { threadId: string; status: PersonalAgentPeerThread['status'] }): Promise<PersonalAgentPeerThread> {
@@ -399,19 +397,19 @@ export class AgentStore {
     if (!updated) {
       throw new Error('personal_agent_peer_thread_not_found');
     }
-    return this.peerThreadFromRow(updated, { includeMessages: true, includeChildren: true });
+    return this.peerThreadFromRow(updated, { includeMessages: true });
   }
 
   public async getPeerThread(threadId: string): Promise<PersonalAgentPeerThread | null> {
     await this.load();
     const row = this.peerThreadRowById(threadId);
-    return row ? this.peerThreadFromRow(row, { includeMessages: true, includeChildren: true }) : null;
+    return row ? this.peerThreadFromRow(row, { includeMessages: true }) : null;
   }
 
   public async getPeerThreadByTargetConversation(conversationId: string): Promise<PersonalAgentPeerThread | null> {
     await this.load();
     const row = this.peerThreadRowByTargetConversation(conversationId);
-    return row ? this.peerThreadFromRow(row, { includeMessages: true, includeChildren: true }) : null;
+    return row ? this.peerThreadFromRow(row, { includeMessages: true }) : null;
   }
 
   public async listPeerThreadsForConversation(input: { agentId: string; conversationId: string }): Promise<PersonalAgentPeerThread[]> {
@@ -439,7 +437,7 @@ export class AgentStore {
       ORDER BY thread_row.updated_at DESC
       LIMIT ?
     `).all(agent.id, agent.id, safeLimit) as PeerThreadRow[];
-    return rows.map((row) => this.peerThreadFromRow(row, { includeMessages: false, includeChildren: true }));
+    return rows.map((row) => this.peerThreadFromRow(row, { includeMessages: false }));
   }
 
   public async requirePeerThreadAccess(input: { agentId: string; threadId: string }): Promise<PersonalAgentPeerThread> {
@@ -451,7 +449,7 @@ export class AgentStore {
     if (thread.caller_agent_id !== input.agentId && thread.target_agent_id !== input.agentId) {
       throw new Error('personal_agent_peer_thread_not_allowed');
     }
-    return this.peerThreadFromRow(thread, { includeMessages: true, includeChildren: true });
+    return this.peerThreadFromRow(thread, { includeMessages: true });
   }
 
   public async listPermissions(agentId: string): Promise<PersonalAgentPermission[]> {
@@ -1010,14 +1008,13 @@ export class AgentStore {
     return await this.readWorkspaceTextFile({ agentId: input.agentId, relativePath: input.relativePath });
   }
 
-  private async upsertPermission(input: { agentId: string; kind: PersonalAgentPermission['kind']; targetId: string; mode: AgentPermissionMode; granted: boolean }): Promise<void> {
+  private async upsertLegacyPermission(input: { agentId: string; targetId: string; mode: AgentPermissionMode; granted: boolean }): Promise<void> {
     const now = new Date().toISOString();
-    const permission = input.kind === 'legacy' ? input.targetId : `${input.kind}:${input.targetId}`;
     this.requireDb().prepare(`
       INSERT INTO personal_agent_permissions (id, agent_id, kind, target_id, permission, mode, granted, created_at, updated_at)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT(agent_id, kind, target_id) DO UPDATE SET permission = excluded.permission, mode = excluded.mode, granted = excluded.granted, updated_at = excluded.updated_at
-    `).run(randomUUID(), input.agentId, input.kind, input.targetId, permission, input.mode, input.granted ? 1 : 0, now, now);
+    `).run(randomUUID(), input.agentId, 'legacy', input.targetId, input.targetId, input.mode, input.granted ? 1 : 0, now, now);
   }
 
   private async replaceGrants(agentId: string, kind: 'app' | 'tool', targetIds: string[], now: string): Promise<void> {
@@ -1408,10 +1405,10 @@ export class AgentStore {
 
   private peerThreadFromRow(
     row: PeerThreadRow,
-    options: { includeMessages: boolean; includeChildren: boolean },
+    options: { includeMessages: boolean },
   ): PersonalAgentPeerThread {
     const messages = options.includeMessages ? this.messagesForConversation(row.target_conversation_id) : [];
-    const children = options.includeChildren ? this.peerThreadChildren(row.id, options) : [];
+    const children = this.peerThreadChildren(row.id, options);
     return {
       id: row.id,
       callerAgentId: row.caller_agent_id,
@@ -1434,7 +1431,7 @@ export class AgentStore {
 
   private peerThreadChildren(
     parentThreadId: string,
-    options: { includeMessages: boolean; includeChildren: boolean },
+    options: { includeMessages: boolean },
   ): PersonalAgentPeerThread[] {
     const rows = this.requireDb().prepare(`
       SELECT
@@ -1462,7 +1459,7 @@ export class AgentStore {
       WHERE thread_row.source_conversation_id = ?
       ORDER BY thread_row.updated_at DESC
     `).all(conversationId) as PeerThreadRow[];
-    return rows.map((row) => this.peerThreadFromRow(row, { includeMessages: options.includeMessages, includeChildren: true }));
+    return rows.map((row) => this.peerThreadFromRow(row, { includeMessages: options.includeMessages }));
   }
 
   private agentNameById(agentId: string): string | null {

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type UIEvent } from 'react';
 import AppsRounded from '@mui/icons-material/AppsRounded';
 import CheckRounded from '@mui/icons-material/CheckRounded';
 import ErrorOutlineRounded from '@mui/icons-material/ErrorOutlineRounded';
@@ -27,7 +27,7 @@ import {
   alpha,
   useTheme,
 } from '@mui/material';
-import type { CloudMessage, CloudSocialEvent, ForgerAccountSession, SocialUserApp } from '@shared/types';
+import type { CloudAppShareMessage, CloudMessage, CloudSocialEvent, ForgerAccountSession, SocialUserApp } from '@shared/types';
 
 interface FriendChatWindowViewProps {
   account: ForgerAccountSession;
@@ -36,12 +36,12 @@ interface FriendChatWindowViewProps {
   friendDisplayName: string;
 }
 
-const messageTimestamp = (value?: string) => {
-  const timestamp = new Date(value ?? '').getTime();
+const messageTimestamp = (value: string) => {
+  const timestamp = new Date(value).getTime();
   return Number.isFinite(timestamp) ? timestamp : 0;
 };
 
-const formatMessageTime = (value?: string) => {
+const formatMessageTime = (value: string) => {
   const timestamp = messageTimestamp(value);
   if (!timestamp) {
     return '';
@@ -62,27 +62,33 @@ const sortMessages = (entries: CloudMessage[]) =>
 const messageIdentity = (message: CloudMessage) =>
   message.id ? `id:${message.id}` : message.clientMessageId ? `client:${message.clientMessageId}` : null;
 
+const hasSameMessageIdentity = (left: CloudMessage, right: CloudMessage) =>
+  Boolean(
+    (left.id && right.id && left.id === right.id)
+    || (left.clientMessageId && right.clientMessageId && left.clientMessageId === right.clientMessageId),
+  );
+
 const mergeMessage = (messages: CloudMessage[], message: CloudMessage) => {
   const identity = messageIdentity(message);
   if (!identity) {
     return sortMessages([...messages, message]);
   }
-  const next = messages.filter((entry) => messageIdentity(entry) !== identity);
+  const next = messages.filter((entry) => !hasSameMessageIdentity(entry, message));
   next.push(message);
   return sortMessages(next);
 };
 
 const createClientMessageId = () => {
+  if (!globalThis.crypto?.getRandomValues) {
+    return `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  }
   const bytes = new Uint8Array(8);
-  globalThis.crypto?.getRandomValues?.(bytes);
+  globalThis.crypto.getRandomValues(bytes);
   const suffix = Array.from(bytes).map((byte) => byte.toString(16).padStart(2, '0')).join('');
-  return `${Date.now()}-${suffix || Math.random().toString(16).slice(2)}`;
+  return `${Date.now()}-${suffix}`;
 };
 
-const appShareState = (message: CloudMessage) => {
-  if (message.type !== 'CloudAppShareMessage') {
-    return null;
-  }
+const appShareState = (message: CloudAppShareMessage) => {
   const revoked = Boolean(message.appShare.share?.revokedAt);
   if (revoked) {
     return { label: 'Link revocado', color: 'warning' as const };
@@ -206,11 +212,8 @@ export function FriendChatWindowView({
     container.scrollTo({ top: container.scrollHeight, behavior: 'smooth' });
   }, [messages]);
 
-  const handleMessagesScroll = () => {
-    const container = scrollRef.current;
-    if (!container) {
-      return;
-    }
+  const handleMessagesScroll = (event: UIEvent<HTMLDivElement>) => {
+    const container = event.currentTarget;
     const distanceFromBottom = container.scrollHeight - container.scrollTop - container.clientHeight;
     shouldStickToBottomRef.current = distanceFromBottom < 96;
   };
@@ -227,7 +230,7 @@ export function FriendChatWindowView({
     const optimistic: CloudMessage = {
       type: 'CloudTextMessage',
       sender: {
-        id: account.user?.id ?? 0,
+        id: account.user!.id,
         username: account.user?.username ?? 'me',
         firstName: account.user?.firstName,
         lastName: account.user?.lastName,
@@ -260,7 +263,7 @@ export function FriendChatWindowView({
       setMessages((current) => mergeMessage(current, sent));
     } catch (err) {
       setMessages((current) => mergeMessage(current, { ...optimistic, localState: 'failed' }));
-      setDraft((current) => current || text);
+      setDraft(text);
       setError(err instanceof Error ? err.message : 'No pudimos enviar el mensaje.');
     } finally {
       setSending(false);
@@ -268,10 +271,6 @@ export function FriendChatWindowView({
   };
 
   const openShareDialog = async () => {
-    if (shareAppsLoading || sharingApp) {
-      return;
-    }
-
     setShareDialogOpen(true);
     setShareError(null);
     setShareAppsLoading(true);
@@ -288,10 +287,6 @@ export function FriendChatWindowView({
 
   const handleShareApp = async () => {
     const userAppId = Number(selectedShareAppId);
-    if (!Number.isFinite(userAppId) || sharingApp) {
-      return;
-    }
-
     setSharingApp(true);
     setShareError(null);
     try {
@@ -308,13 +303,10 @@ export function FriendChatWindowView({
     }
   };
 
-  const handleInstallAppShare = async (message: CloudMessage) => {
-    const input = appShareInstallInput(message);
-    const key = messageIdentity(message) ?? (message.type === 'CloudAppShareMessage' ? `app-share:${message.appShare.id}` : null);
-    if (!input || !key || installingShareKeys.has(key)) {
-      return;
-    }
-
+  const handleInstallAppShare = async (
+    input: { appId: number } | { shareCode: string },
+    key: string,
+  ) => {
     setInstallingShareKeys((current) => new Set(current).add(key));
     setAppShareInstallErrors((current) => {
       const next = { ...current };
@@ -447,10 +439,12 @@ export function FriendChatWindowView({
               const key = message.id ?? `${message.clientMessageId ?? 'message'}-${index}`;
               const body = message.plaintext?.trim();
               const localState = message.localState;
-              const shareState = appShareState(message);
+              const shareState = message.type === 'CloudAppShareMessage' ? appShareState(message) : null;
               const shareInstallInput = appShareInstallInput(message);
-              const shareActionKey = messageIdentity(message) ?? (message.type === 'CloudAppShareMessage' ? `app-share:${message.appShare.id}` : null);
-              const installingShare = Boolean(shareActionKey && installingShareKeys.has(shareActionKey));
+              const shareActionKey = message.type === 'CloudAppShareMessage'
+                ? messageIdentity(message) ?? `app-share:${message.appShare.id}`
+                : '';
+              const installingShare = installingShareKeys.has(shareActionKey);
 
               return (
                 <Stack key={key} alignItems={outgoing ? 'flex-end' : 'flex-start'}>
@@ -494,7 +488,7 @@ export function FriendChatWindowView({
                               color: theme.palette.primary.main,
                             }}
                           >
-                            {shareState?.label === 'Link revocado' ? <LinkOffRounded /> : <AppsRounded />}
+                            {shareState!.label === 'Link revocado' ? <LinkOffRounded /> : <AppsRounded />}
                           </Avatar>
                           <Stack spacing={0.35} sx={{ minWidth: 0, flex: 1 }}>
                             <Typography variant="subtitle2" sx={{ fontWeight: 800 }} noWrap>
@@ -504,9 +498,7 @@ export function FriendChatWindowView({
                               @{message.appShare.appOwnerUsernameSnapshot}
                             </Typography>
                           </Stack>
-                          {shareState ? (
-                            <Chip size="small" label={shareState.label} color={shareState.color} variant="outlined" />
-                          ) : null}
+                          <Chip size="small" label={shareState!.label} color={shareState!.color} variant="outlined" />
                         </Stack>
                         <Stack direction="row" spacing={0.75} flexWrap="wrap" useFlexGap>
                           <Chip size="small" label={message.appShare.shareKind === 'public_app' ? 'Pública' : message.appShare.shareKind === 'friends_link' ? 'Amigos' : 'Privada'} />
@@ -517,12 +509,12 @@ export function FriendChatWindowView({
                             {body}
                           </Typography>
                         ) : null}
-                        {shareActionKey && appShareInstallFeedback[shareActionKey] ? (
+                        {appShareInstallFeedback[shareActionKey] ? (
                           <Alert severity="success" sx={{ py: 0.25 }}>
                             {appShareInstallFeedback[shareActionKey]}
                           </Alert>
                         ) : null}
-                        {shareActionKey && appShareInstallErrors[shareActionKey] ? (
+                        {appShareInstallErrors[shareActionKey] ? (
                           <Alert severity="error" sx={{ py: 0.25 }}>
                             {appShareInstallErrors[shareActionKey]}
                           </Alert>
@@ -531,7 +523,7 @@ export function FriendChatWindowView({
                           size="small"
                           variant="contained"
                           disabled={!shareInstallInput || installingShare}
-                          onClick={() => void handleInstallAppShare(message)}
+                          onClick={() => void handleInstallAppShare(shareInstallInput!, shareActionKey)}
                         >
                           {installingShare ? 'Instalando...' : 'Instalar'}
                         </Button>
@@ -589,6 +581,7 @@ export function FriendChatWindowView({
           fullWidth
           multiline
           maxRows={4}
+          slotProps={{ htmlInput: { 'aria-label': 'Mensaje' } }}
           value={draft}
           onChange={(event) => setDraft(event.target.value)}
           onKeyDown={(event) => {
@@ -601,6 +594,7 @@ export function FriendChatWindowView({
           placeholder={`Escribe a @${friendUsername}`}
         />
         <IconButton
+          aria-label="Enviar mensaje"
           color="primary"
           onClick={() => void handleSend()}
           disabled={!draft.trim() || sending || !account.authenticated || !account.user?.confirmed}
@@ -634,6 +628,7 @@ export function FriendChatWindowView({
             ) : (
               <Select
                 fullWidth
+                inputProps={{ 'aria-label': 'App para compartir' }}
                 value={selectedShareAppId}
                 onChange={(event) => setSelectedShareAppId(String(event.target.value))}
                 disabled={sharingApp}

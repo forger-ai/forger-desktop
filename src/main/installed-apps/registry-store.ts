@@ -221,8 +221,10 @@ const shouldRetryRegistryRename = (error: unknown): boolean =>
   ['EPERM', 'EACCES'].includes(errorCode(error) ?? '');
 
 const renameRegistryFile = async (tempPath: string, registryPath: string): Promise<void> => {
-  const retryDelaysMs = [25, 100, 250];
-  for (const delayMs of [0, ...retryDelaysMs]) {
+  const retryDelaysMs = [0, 25, 100, 250];
+  let attemptIndex = 0;
+  while (true) {
+    const delayMs = retryDelaysMs[attemptIndex];
     if (delayMs > 0) {
       await wait(delayMs);
     }
@@ -231,9 +233,10 @@ const renameRegistryFile = async (tempPath: string, registryPath: string): Promi
       await fs.rename(tempPath, registryPath);
       return;
     } catch (error) {
-      if (!shouldRetryRegistryRename(error) || delayMs === retryDelaysMs[retryDelaysMs.length - 1]) {
+      if (!shouldRetryRegistryRename(error) || attemptIndex === retryDelaysMs.length - 1) {
         throw error;
       }
+      attemptIndex += 1;
     }
   }
 };

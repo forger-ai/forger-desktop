@@ -381,11 +381,11 @@ export class DesktopRuntimeBridge {
       if (!grantToken) {
         throw new BridgeError(400, 'desktop_runtime_folder_grant_token_required');
       }
-      const grant = await (this.options.requestFolderGrant?.(appId, grantToken) ?? Promise.resolve(null));
+      const grant = await this.options.requestFolderGrant!(appId, grantToken);
       if (!grant) {
         throw new BridgeError(403, 'desktop_runtime_folder_grant_invalid');
       }
-      return grant ? { canceled: false, ...grant } : { canceled: true };
+      return { canceled: false, ...grant };
     }
 
     const folderGrantsMatch = pathname.match(/^\/v1\/apps\/([^/]+)\/folder-grants(?:\/([^/]+))?(?:\/revoke)?$/);
@@ -397,11 +397,11 @@ export class DesktopRuntimeBridge {
       const isRevoke = pathname.endsWith('/revoke');
       if (method === 'GET' && !grantId) {
         await this.assertWorkspaceFolderCapability(appId);
-        return { grants: await (this.options.listFolderGrants?.(appId) ?? Promise.resolve([])) };
+        return { grants: await this.options.listFolderGrants!(appId) };
       }
       if (((method === 'DELETE' && !isRevoke) || (method === 'POST' && isRevoke)) && grantId) {
         await this.assertWorkspaceFolderCapability(appId);
-        return await (this.options.revokeFolderGrant?.(appId, grantId) ?? Promise.resolve({ revoked: false }));
+        return await this.options.revokeFolderGrant!(appId, grantId);
       }
       throw new BridgeError(404, 'desktop_runtime_route_not_found');
     }
@@ -566,10 +566,6 @@ export class DesktopRuntimeBridge {
     const runId = match[3] ? decodeURIComponent(match[3]) : '';
     const isCancel = pathname.endsWith('/cancel');
 
-    if (method === 'POST' && !threadId && !runId) {
-      throw new BridgeError(410, REMOVED_FORGER_APP_BRIDGE_MESSAGE);
-    }
-
     if (method === 'POST' && threadId && !runId && !isCancel) {
       throw new BridgeError(410, REMOVED_FORGER_APP_BRIDGE_MESSAGE);
     }
@@ -709,24 +705,21 @@ export class DesktopRuntimeBridge {
       };
     }
 
-    if (actionMatch) {
-      if (method !== 'POST') {
-        throw new BridgeError(404, 'desktop_runtime_route_not_found');
-      }
-      const body = parseJsonBody(bodyText);
-      const connectionId = cleanString(body.connectionId);
-      return {
-        handled: true,
-        result: await service.callFromApp(appId, {
-          type: decodeURIComponent(actionMatch[2]).trim(),
-          actionId: decodeURIComponent(actionMatch[3]).trim(),
-          input: isRecord(body.input) ? body.input : {},
-          ...(connectionId ? { connectionId } : {}),
-        }),
-      };
+    const action = actionMatch as RegExpMatchArray;
+    if (method !== 'POST') {
+      throw new BridgeError(404, 'desktop_runtime_route_not_found');
     }
-
-    throw new BridgeError(404, 'desktop_runtime_route_not_found');
+    const body = parseJsonBody(bodyText);
+    const connectionId = cleanString(body.connectionId);
+    return {
+      handled: true,
+      result: await service.callFromApp(appId, {
+        type: decodeURIComponent(action[2]).trim(),
+        actionId: decodeURIComponent(action[3]).trim(),
+        input: isRecord(body.input) ? body.input : {},
+        ...(connectionId ? { connectionId } : {}),
+      }),
+    };
   }
 
   private async routeAudio(appId: string, method: string, pathname: string, bodyText: string): Promise<{ handled: boolean; result?: unknown }> {
@@ -1003,7 +996,7 @@ export class DesktopRuntimeBridge {
         userMessage: 'Audio transcription canceled.',
       });
     }
-    return this.publicAudioFileTranscriptionJob(this.audioFileTranscriptionJobs.get(jobId) ?? job);
+    return this.publicAudioFileTranscriptionJob(this.audioFileTranscriptionJobs.get(jobId)!);
   }
 
   private updateAudioFileTranscriptionJob(jobId: string, patch: Partial<AudioFileTranscriptionJob>): void {

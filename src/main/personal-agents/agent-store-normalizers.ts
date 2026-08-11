@@ -142,7 +142,9 @@ export const normalizeConnectionGrants = (value: unknown): PersonalAgentConnecti
           type: grant.type,
           actions: [...new Set([...existing.actions, ...grant.actions])],
           multiple: existing.multiple || grant.multiple,
-          ...(existing.connectionIds ?? grant.connectionIds ? { connectionIds: [...new Set([...(existing.connectionIds ?? []), ...(grant.connectionIds ?? [])])] } : {}),
+          ...(existing.connectionIds && grant.connectionIds
+            ? { connectionIds: [...new Set([...existing.connectionIds, ...grant.connectionIds])] }
+            : {}),
         }
       : grant);
   }

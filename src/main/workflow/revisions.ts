@@ -80,10 +80,9 @@ export const createWorkflowRevision = (
 
 /** Review deliberately performs no discovery, execution, provider lookup, or preflight. */
 export const reviewWorkflowDefinition = (workflow: Workflow): WorkflowReviewReport => {
-  const issues: string[] = [];
   return {
-    status: issues.length === 0 ? 'ready' : 'blocked',
-    issues,
+    status: 'ready',
+    issues: [],
     definitionHash: workflowDefinitionHash(workflow),
   };
 };

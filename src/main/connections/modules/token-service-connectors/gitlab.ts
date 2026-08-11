@@ -10,7 +10,8 @@ const listAction = (id: string, name: string, path: (input: Record<string, unkno
   run: async ({ input, secrets }) => {
     const suffix = path(input); if (!suffix) return fail('gitlab_project_required');
     const qs = new URLSearchParams({ per_page: String(input.limit ?? 25) }); if (clean(input.state)) qs.set('state', clean(input.state));
-    return { success: true, data: { [key]: Array.isArray(await api(secrets, `${suffix}?${qs.toString()}`)) ? await api(secrets, `${suffix}?${qs.toString()}`) : [] } };
+    const data = await api(secrets, `${suffix}?${qs.toString()}`);
+    return { success: true, data: { [key]: Array.isArray(data) ? data : [] } };
   },
 });
 const issuePath = (input: Record<string, unknown>) => {

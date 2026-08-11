@@ -92,15 +92,15 @@ export function CatalogView({
     setReviewDialogApp(null);
   };
   const continueInstall = async (trustDecision: SocialUserAppReviewState) => {
-    if (!reviewDialogApp) return;
+    const appId = reviewDialogApp!.id;
     if (trustDecision !== 'reviewed') {
-      onInstall(reviewDialogApp.id, trustDecision);
+      onInstall(appId, trustDecision);
       closeReviewDialog();
       return;
     }
     setReviewDialogBusy(true);
     try {
-      await onInstall(reviewDialogApp.id, trustDecision);
+      await onInstall(appId, trustDecision);
       closeReviewDialog();
     } finally {
       setReviewDialogBusy(false);
@@ -122,6 +122,7 @@ export function CatalogView({
           <Select
             size="small"
             value={statusFilter}
+            inputProps={{ 'aria-label': t.sections.catalog.statusFilterLabel }}
             onChange={(event) => onStatusFilterChange(event.target.value as 'all' | 'installed' | 'not_installed')}
             sx={{ minWidth: 180 }}
           >
@@ -233,9 +234,6 @@ export function CatalogView({
                 ]}
                 installProgress={installProgress}
                 onPrimaryAction={() => {
-                  if (isInstalling) {
-                    return;
-                  }
                   if (isConflict) {
                     onResolveConflict(app.id);
                     return;
@@ -256,17 +254,15 @@ export function CatalogView({
                     onOpen(app.id);
                     return;
                   }
-                  if (!isInstalled) {
-                    if (isSocialCatalogApp) {
-                      if (!signedIn) {
-                        setSocialDownloadAccountDialogOpen(true);
-                        return;
-                      }
-                      setReviewDialogApp(app);
+                  if (isSocialCatalogApp) {
+                    if (!signedIn) {
+                      setSocialDownloadAccountDialogOpen(true);
                       return;
                     }
-                    onInstall(app.id);
+                    setReviewDialogApp(app);
+                    return;
                   }
+                  onInstall(app.id);
                 }}
                 secondaryActionLabel={isConflict ? t.actions.restoreUserVersion : app.updateAvailable ? t.actions.update : undefined}
                 onSecondaryAction={

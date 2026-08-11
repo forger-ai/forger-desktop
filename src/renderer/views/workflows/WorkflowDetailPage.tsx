@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useMemo, useState, type ReactNode } from 'react';
 import {
   Alert,
   Box,
@@ -102,6 +102,8 @@ export function WorkflowDetailPage({
   const [restoreRevision, setRestoreRevision] = useState<WorkflowRevisionSummary | null>(null);
   const [confirmNewRun, setConfirmNewRun] = useState(false);
   const [focusNodeId, setFocusNodeId] = useState<string | null>(null);
+  const restoreRevisionDialogProps = restoreRevision ? { open: true } : null;
+  const confirmNewRunDialogProps = confirmNewRun ? { open: true } : null;
   const pendingApprovalRun = selectedRun?.status === 'waiting_approval'
     ? selectedRun
     : runs.find((run) => run.status === 'waiting_approval');
@@ -122,13 +124,59 @@ export function WorkflowDetailPage({
     setParamsOpen(true);
   };
   const cancelParams = () => {
-    if (paramsSnapshot) onDraftChange((current) => ({ ...current, ...paramsSnapshot }));
+    onDraftChange((current) => ({ ...current, ...paramsSnapshot! }));
     setParamsOpen(false);
   };
   const saveParams = () => {
     onSave();
     setParamsOpen(false);
   };
+  const closeRestoreRevisionDialog = () => setRestoreRevision(null);
+  const closeConfirmNewRunDialog = () => setConfirmNewRun(false);
+
+  let restoreRevisionDialog: ReactNode = null;
+  if (restoreRevisionDialogProps) {
+    restoreRevisionDialog = (
+      <Dialog {...restoreRevisionDialogProps} onClose={busy ? undefined : closeRestoreRevisionDialog} maxWidth="xs" fullWidth>
+        <DialogTitle>{copy.restoreRevisionTitle}</DialogTitle>
+        <DialogContent>
+          <Typography variant="body2" color="text.secondary">{copy.restoreRevisionWarning}</Typography>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={closeRestoreRevisionDialog} disabled={busy}>{copy.cancel}</Button>
+          <Button
+            variant="contained"
+            disabled={busy}
+            onClick={() => {
+              onRestoreRevision(restoreRevision!);
+              setRestoreRevision(null);
+              setRevisionsOpen(false);
+            }}
+          >
+            {copy.restoreAsDraft}
+          </Button>
+        </DialogActions>
+      </Dialog>
+    );
+  }
+
+  let confirmNewRunDialog: ReactNode = null;
+  if (confirmNewRunDialogProps) {
+    confirmNewRunDialog = (
+      <Dialog {...confirmNewRunDialogProps} onClose={closeConfirmNewRunDialog} maxWidth="xs" fullWidth>
+        <DialogTitle>{copy.startNewRun}</DialogTitle>
+        <DialogContent>
+          <Typography variant="body2" color="text.secondary">{copy.newRunEffectsWarning}</Typography>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={closeConfirmNewRunDialog}>{copy.cancel}</Button>
+          <Button color="warning" variant="contained" onClick={() => { setConfirmNewRun(false); onRunNow(); }}>
+            {copy.startNewRun}
+          </Button>
+        </DialogActions>
+      </Dialog>
+    );
+  }
 
   return (
     <Stack sx={{ height: '100%', minHeight: 0 }} spacing={1.5}>
@@ -280,7 +328,7 @@ export function WorkflowDetailPage({
                       primary={new Date(run.startedAt).toLocaleString()}
                       secondary={copy.runTriggers[run.trigger]}
                     />
-                    <Chip size="small" color={STATUS_COLORS[run.status] ?? 'default'} label={copy.statusLabels[run.status]} />
+                    <Chip size="small" color={STATUS_COLORS[run.status]} label={copy.statusLabels[run.status]} />
                   </ListItemButton>
                 ))}
               </List>
@@ -324,39 +372,8 @@ export function WorkflowDetailPage({
         onRestore={(revision) => setRestoreRevision(revision)}
       />
 
-      <Dialog open={Boolean(restoreRevision)} onClose={busy ? undefined : () => setRestoreRevision(null)} maxWidth="xs" fullWidth>
-        <DialogTitle>{copy.restoreRevisionTitle}</DialogTitle>
-        <DialogContent>
-          <Typography variant="body2" color="text.secondary">{copy.restoreRevisionWarning}</Typography>
-        </DialogContent>
-        <DialogActions>
-          <Button onClick={() => setRestoreRevision(null)} disabled={busy}>{copy.cancel}</Button>
-          <Button
-            variant="contained"
-            disabled={busy}
-            onClick={() => {
-              if (restoreRevision) onRestoreRevision(restoreRevision);
-              setRestoreRevision(null);
-              setRevisionsOpen(false);
-            }}
-          >
-            {copy.restoreAsDraft}
-          </Button>
-        </DialogActions>
-      </Dialog>
-
-      <Dialog open={confirmNewRun} onClose={() => setConfirmNewRun(false)} maxWidth="xs" fullWidth>
-        <DialogTitle>{copy.startNewRun}</DialogTitle>
-        <DialogContent>
-          <Typography variant="body2" color="text.secondary">{copy.newRunEffectsWarning}</Typography>
-        </DialogContent>
-        <DialogActions>
-          <Button onClick={() => setConfirmNewRun(false)}>{copy.cancel}</Button>
-          <Button color="warning" variant="contained" onClick={() => { setConfirmNewRun(false); onRunNow(); }}>
-            {copy.startNewRun}
-          </Button>
-        </DialogActions>
-      </Dialog>
+      {restoreRevisionDialog}
+      {confirmNewRunDialog}
 
       <Dialog open={paramsOpen} onClose={cancelParams} fullWidth maxWidth="sm">
         <DialogTitle>{copy.editParams}</DialogTitle>

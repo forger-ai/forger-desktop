@@ -84,7 +84,7 @@ export const toAppAgentThreadSummary = (conversation: AppCodexConversation | nul
     desktop_thread_id: conversation.conversationId,
     title: conversation.title,
     status: conversation.activeRun?.status ?? 'idle',
-    ...(conversation.activeRun ? { active_run: toAppAgentRunSummary(conversation.conversationId, conversation.activeRun, conversation.messages) ?? undefined } : {}),
+    ...(conversation.activeRun ? { active_run: toAppAgentRunSummary(conversation.conversationId, conversation.activeRun, conversation.messages)! } : {}),
     messages: conversation.messages.map((message) => ({
       id: message.messageId,
       role: message.role,

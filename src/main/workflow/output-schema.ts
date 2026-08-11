@@ -142,110 +142,94 @@ const enumValueEquals = (left: unknown, right: unknown): boolean => {
         .map(([key, nested]) => [key, stable(nested)]),
     );
   };
-  try {
-    return JSON.stringify(stable(left)) === JSON.stringify(stable(right));
-  } catch {
-    return false;
-  }
+  return JSON.stringify(stable(left)) === JSON.stringify(stable(right));
 };
 
 const validateSchemaValue = (
   value: unknown,
   schema: Record<string, unknown>,
   path: string,
-  depth: number,
-  schemaAncestors: Set<object>,
+  _depth: number,
 ): string[] => {
-  if (depth > WORKFLOW_STRUCTURED_VALUE_LIMITS.maxDepth) {
-    return [`${path} excede la profundidad permitida`];
+  if (Array.isArray(schema.enum) && !schema.enum.some((candidate) => enumValueEquals(candidate, value))) {
+    return [`${path} no coincide con un valor permitido`];
   }
-  if (schemaAncestors.has(schema)) {
-    return [`${path} usa un esquema circular`];
-  }
-  schemaAncestors.add(schema);
-  try {
-    if (Array.isArray(schema.enum) && !schema.enum.some((candidate) => enumValueEquals(candidate, value))) {
-      return [`${path} no coincide con un valor permitido`];
+  const expectedType = typeof schema.type === 'string' ? schema.type : undefined;
+  if (expectedType === 'object') {
+    if (!isRecord(value)) return [`${path} debe ser un objeto`];
+    const required = Array.isArray(schema.required)
+      ? schema.required.filter((item): item is string => typeof item === 'string')
+      : [];
+    const errors: string[] = [];
+    for (const key of required) {
+      if (!Object.prototype.hasOwnProperty.call(value, key) || value[key] === undefined) {
+        errors.push(`${path}.${key} es requerido`);
+      }
     }
-    const expectedType = typeof schema.type === 'string' ? schema.type : undefined;
-    if (expectedType === 'object') {
-      if (!isRecord(value)) return [`${path} debe ser un objeto`];
-      const required = Array.isArray(schema.required)
-        ? schema.required.filter((item): item is string => typeof item === 'string')
-        : [];
-      const errors: string[] = [];
-      for (const key of required) {
-        if (!Object.prototype.hasOwnProperty.call(value, key) || value[key] === undefined) {
-          errors.push(`${path}.${key} es requerido`);
+    const properties = isRecord(schema.properties) ? schema.properties : {};
+    for (const [key, propertySchema] of Object.entries(properties)) {
+      if (
+        !Object.prototype.hasOwnProperty.call(value, key)
+        || value[key] === undefined
+        || !isRecord(propertySchema)
+      ) {
+        continue;
+      }
+      errors.push(...validateSchemaValue(value[key], propertySchema, `${path}.${key}`, _depth + 1));
+    }
+    if (schema.additionalProperties === false) {
+      for (const key of Object.keys(value)) {
+        if (!Object.prototype.hasOwnProperty.call(properties, key)) {
+          errors.push(`${path}.${key} no esta permitido`);
         }
       }
-      const properties = isRecord(schema.properties) ? schema.properties : {};
-      for (const [key, propertySchema] of Object.entries(properties)) {
-        if (
-          !Object.prototype.hasOwnProperty.call(value, key)
-          || value[key] === undefined
-          || !isRecord(propertySchema)
-        ) {
-          continue;
-        }
-        errors.push(...validateSchemaValue(value[key], propertySchema, `${path}.${key}`, depth + 1, schemaAncestors));
-      }
-      if (schema.additionalProperties === false) {
-        for (const key of Object.keys(value)) {
-          if (!Object.prototype.hasOwnProperty.call(properties, key)) {
-            errors.push(`${path}.${key} no esta permitido`);
-          }
-        }
-      }
-      return errors;
     }
-    if (expectedType === 'array') {
-      if (!Array.isArray(value)) return [`${path} debe ser una lista`];
-      const errors: string[] = [];
-      if (typeof schema.minItems === 'number' && value.length < schema.minItems) {
-        errors.push(`${path} contiene menos elementos de los permitidos`);
-      }
-      if (typeof schema.maxItems === 'number' && value.length > schema.maxItems) {
-        errors.push(`${path} contiene mas elementos de los permitidos`);
-      }
-      if (isRecord(schema.items)) {
-        value.forEach((item, index) => {
-          errors.push(...validateSchemaValue(item, schema.items as Record<string, unknown>, `${path}[${index}]`, depth + 1, schemaAncestors));
-        });
-      }
-      return errors;
-    }
-    if (expectedType === 'null') {
-      return value === null ? [] : [`${path} debe ser nulo`];
-    }
-    if (expectedType === 'integer') {
-      return typeof value === 'number' && Number.isInteger(value)
-        ? []
-        : [`${path} debe ser un entero`];
-    }
-    if (expectedType === 'number') {
-      return typeof value === 'number' && Number.isFinite(value)
-        ? []
-        : [`${path} debe ser un numero`];
-    }
-    if (expectedType === 'string') {
-      if (typeof value !== 'string') return [`${path} debe ser texto`];
-      const errors: string[] = [];
-      if (typeof schema.minLength === 'number' && value.length < schema.minLength) {
-        errors.push(`${path} es mas corto de lo permitido`);
-      }
-      if (typeof schema.maxLength === 'number' && value.length > schema.maxLength) {
-        errors.push(`${path} es mas largo de lo permitido`);
-      }
-      return errors;
-    }
-    if (expectedType === 'boolean' && typeof value !== 'boolean') {
-      return [`${path} debe ser booleano`];
-    }
-    return [];
-  } finally {
-    schemaAncestors.delete(schema);
+    return errors;
   }
+  if (expectedType === 'array') {
+    if (!Array.isArray(value)) return [`${path} debe ser una lista`];
+    const errors: string[] = [];
+    if (typeof schema.minItems === 'number' && value.length < schema.minItems) {
+      errors.push(`${path} contiene menos elementos de los permitidos`);
+    }
+    if (typeof schema.maxItems === 'number' && value.length > schema.maxItems) {
+      errors.push(`${path} contiene mas elementos de los permitidos`);
+    }
+    if (isRecord(schema.items)) {
+      value.forEach((item, index) => {
+        errors.push(...validateSchemaValue(item, schema.items as Record<string, unknown>, `${path}[${index}]`, _depth + 1));
+      });
+    }
+    return errors;
+  }
+  if (expectedType === 'null') {
+    return value === null ? [] : [`${path} debe ser nulo`];
+  }
+  if (expectedType === 'integer') {
+    return typeof value === 'number' && Number.isInteger(value)
+      ? []
+      : [`${path} debe ser un entero`];
+  }
+  if (expectedType === 'number') {
+    return typeof value === 'number' && Number.isFinite(value)
+      ? []
+      : [`${path} debe ser un numero`];
+  }
+  if (expectedType === 'string') {
+    if (typeof value !== 'string') return [`${path} debe ser texto`];
+    const errors: string[] = [];
+    if (typeof schema.minLength === 'number' && value.length < schema.minLength) {
+      errors.push(`${path} es mas corto de lo permitido`);
+    }
+    if (typeof schema.maxLength === 'number' && value.length > schema.maxLength) {
+      errors.push(`${path} es mas largo de lo permitido`);
+    }
+    return errors;
+  }
+  if (expectedType === 'boolean' && typeof value !== 'boolean') {
+    return [`${path} debe ser booleano`];
+  }
+  return [];
 };
 
 /** Validates the bounded JSON-Schema subset accepted by workflow contracts. */
@@ -258,7 +242,7 @@ export const validateOutputAgainstSchema = (
   if (limitErrors.length > 0) return limitErrors;
   const schemaErrors = validateWorkflowStructuredValueLimits(schema);
   if (schemaErrors.length > 0) return ['workflow_output_schema_unsafe'];
-  return validateSchemaValue(value, schema, path, 0, new Set());
+  return validateSchemaValue(value, schema, path, 0);
 };
 
 const redactReceiptValue = (
@@ -298,12 +282,12 @@ const redactReceiptValue = (
 /** Produces a bounded, secret-redacted value suitable for persisted run history. */
 export const createWorkflowValueReceipt = (value: Record<string, unknown>): Record<string, unknown> => {
   const redacted = redactReceiptValue(value, 0, { keys: 0 }) as Record<string, unknown>;
-  const bytes = serializedByteLength(redacted);
-  if (bytes !== null && bytes <= WORKFLOW_VALUE_RECEIPT_MAX_BYTES) return redacted;
-  const serialized = JSON.stringify(redacted) ?? '';
+  const bytes = serializedByteLength(redacted) as number;
+  if (bytes <= WORKFLOW_VALUE_RECEIPT_MAX_BYTES) return redacted;
+  const serialized = JSON.stringify(redacted) as string;
   let previewLength = Math.min(serialized.length, WORKFLOW_VALUE_RECEIPT_MAX_BYTES / 2);
   let receipt: Record<string, unknown> = { _truncated: true, preview: serialized.slice(0, previewLength) };
-  while ((serializedByteLength(receipt) ?? Infinity) > WORKFLOW_VALUE_RECEIPT_MAX_BYTES && previewLength > 0) {
+  while ((serializedByteLength(receipt) as number) > WORKFLOW_VALUE_RECEIPT_MAX_BYTES) {
     previewLength = Math.floor(previewLength * 0.8);
     receipt = { _truncated: true, preview: serialized.slice(0, previewLength) };
   }

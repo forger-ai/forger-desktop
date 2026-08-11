@@ -21,8 +21,8 @@ export function MarkdownMessage({ content }: { content: string }) {
         minWidth: 0,
         overflowWrap: 'anywhere',
         wordBreak: 'break-word',
-        '& > :first-child': { mt: 0 },
-        '& > :last-child': { mb: 0 },
+        '& > :first-of-type': { mt: 0 },
+        '& > :last-of-type': { mb: 0 },
         '& h1, & h2, & h3, & h4': {
           mt: 1.2,
           mb: 0.9,

@@ -27,7 +27,7 @@ export const emptyDraft = (): WorkflowDraft => ({
 
 export const draftFromWorkflow = (workflow: Workflow): WorkflowDraft => ({
   id: workflow.id,
-  revision: workflow.revision,
+  ...(workflow.revision !== undefined ? { revision: workflow.revision } : {}),
   name: workflow.name,
   description: workflow.description ?? '',
   trigger: workflow.trigger,

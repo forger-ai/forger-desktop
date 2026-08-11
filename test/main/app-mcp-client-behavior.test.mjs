@@ -5,6 +5,7 @@ import test from 'node:test';
 
 const require = createRequire(import.meta.url);
 const { Server } = require('@modelcontextprotocol/sdk/server/index.js');
+const { Client } = require('@modelcontextprotocol/sdk/client/index.js');
 const { StreamableHTTPServerTransport } = require('@modelcontextprotocol/sdk/server/streamableHttp.js');
 const { CallToolRequestSchema, ListToolsRequestSchema } = require('@modelcontextprotocol/sdk/types.js');
 
@@ -41,7 +42,7 @@ const declaredTool = (name, overrides = {}) => ({
   annotations: overrides.annotations ?? annotations(),
 });
 
-const startMcpFixture = async ({ tools, token = 'fixture-token', onCall }) => {
+const startMcpFixture = async ({ tools, token = 'fixture-token', onCall, delayMs = 0, nextCursor, onListTools }) => {
   const requests = [];
   const protocols = new Set();
   const server = http.createServer(async (request, response) => {
@@ -60,6 +61,9 @@ const startMcpFixture = async ({ tools, token = 'fixture-token', onCall }) => {
       response.end('unauthorized');
       return;
     }
+    if (delayMs > 0) {
+      await new Promise((resolve) => setTimeout(resolve, delayMs));
+    }
 
     // Stateless MCP creates one protocol/transport pair per HTTP exchange.
     // This is a real Streamable HTTP loopback fixture, not a mocked SDK client.
@@ -68,7 +72,10 @@ const startMcpFixture = async ({ tools, token = 'fixture-token', onCall }) => {
       { capabilities: { tools: {} } },
     );
     protocols.add(protocol);
-    protocol.setRequestHandler(ListToolsRequestSchema, async () => ({ tools }));
+    protocol.setRequestHandler(ListToolsRequestSchema, async ({ params }) => {
+      if (onListTools) return onListTools(params ?? {});
+      return { tools, ...(nextCursor ? { nextCursor } : {}) };
+    });
     protocol.setRequestHandler(CallToolRequestSchema, async ({ params }, extra) => await onCall(params, extra));
     const transport = new StreamableHTTPServerTransport({
       sessionIdGenerator: undefined,
@@ -175,6 +182,22 @@ test('AppMcpClient discovers only fully contracted actions and derives stable sa
   }
 });
 
+test('AppMcpClient accepts the MCP annotation title fallback and explicit timeout', async () => {
+  const AppMcpClient = loadAppMcpClient();
+  const tool = declaredTool('annotation.title');
+  delete tool.title;
+  tool.annotations.title = 'Annotation title';
+  const fixture = await startMcpFixture({ tools: [tool] });
+  const client = new AppMcpClient({ url: fixture.url, token: fixture.token, timeoutMs: 25 });
+  try {
+    const [action] = await client.listActions();
+    assert.equal(action.title, 'Annotation title');
+  } finally {
+    await client.close();
+    await fixture.close();
+  }
+});
+
 test('AppMcpClient discovers only schemas covered by the workflow validator subset', async () => {
   const AppMcpClient = loadAppMcpClient();
   const nestedOutput = (valueSchema) => schema({ value: valueSchema });
@@ -238,14 +261,29 @@ test('AppMcpClient discovers only schemas covered by the workflow validator subs
         additionalProperties: false,
       }),
     }),
-    declaredTool('invalid.tuple-array', {
+    declaredTool('invalid.nested-array-item', {
       outputSchema: nestedOutput({
         type: 'array',
-        items: [{ type: 'string' }, { type: 'number' }],
+        items: { type: 'string', pattern: '^unsupported$' },
       }),
     }),
     declaredTool('invalid.root-object', {
       inputSchema: { type: 'object', properties: {} },
+    }),
+    declaredTool('invalid.object-enum-value', {
+      outputSchema: nestedOutput({ type: 'object', enum: ['not-an-object'], properties: {}, additionalProperties: false }),
+    }),
+    declaredTool('invalid.array-enum-value', {
+      outputSchema: nestedOutput({ type: 'array', enum: [{ not: 'an-array' }], items: { type: 'string' } }),
+    }),
+    declaredTool('invalid.schema-title-type', {
+      outputSchema: nestedOutput({ type: 'string', title: 42 }),
+    }),
+    declaredTool('invalid.schema-description-type', {
+      outputSchema: nestedOutput({ type: 'string', description: 42 }),
+    }),
+    declaredTool('invalid.duplicate-required', {
+      outputSchema: nestedOutput({ type: 'object', properties: {}, required: ['same', 'same'], additionalProperties: false }),
     }),
   ];
   const fixture = await startMcpFixture({
@@ -258,6 +296,30 @@ test('AppMcpClient discovers only schemas covered by the workflow validator subs
       (await client.listActions()).map((action) => action.toolName),
       ['valid.nested'],
     );
+  } finally {
+    await client.close();
+    await fixture.close();
+  }
+});
+
+test('AppMcpClient validates enum values for every supported schema type', async () => {
+  const AppMcpClient = loadAppMcpClient();
+  const typed = schema({
+    string: { type: 'string', enum: ['text'] },
+    integer: { type: 'integer', enum: [2] },
+    number: { type: 'number', enum: [2.5] },
+    boolean: { type: 'boolean', enum: [true] },
+    nullValue: { type: 'null', enum: [null] },
+    object: { type: 'object', enum: [{ ok: true }], properties: {}, additionalProperties: false },
+    array: { type: 'array', enum: [[]], items: { type: 'string' } },
+    minOnly: { type: 'string', minLength: 1 },
+    maxOnly: { type: 'string', maxLength: 5 },
+    titled: { type: 'string', title: 'Title', description: 'Description' },
+  });
+  const fixture = await startMcpFixture({ tools: [declaredTool('typed.enums', { outputSchema: typed })] });
+  const client = new AppMcpClient({ url: fixture.url, token: fixture.token, timeoutMs: 1_000 });
+  try {
+    assert.deepEqual((await client.listActions()).map((action) => action.toolName), ['typed.enums']);
   } finally {
     await client.close();
     await fixture.close();
@@ -304,6 +366,37 @@ test('AppMcpClient returns only structuredContent objects and rejects legacy tex
   }
 });
 
+test('AppMcpClient rejects MCP tool errors and closes a connection that finishes after close', async () => {
+  const AppMcpClient = loadAppMcpClient();
+  const fixture = await startMcpFixture({
+    tools: [declaredTool('error.tool')],
+    delayMs: 40,
+    onCall: async () => ({ content: [{ type: 'text', text: 'failed' }], isError: true }),
+  });
+  const client = new AppMcpClient({ url: fixture.url, token: fixture.token, timeoutMs: 1_000 });
+  try {
+    const pending = client.listActions();
+    await client.close();
+    await assert.rejects(pending, /closed/);
+  } finally {
+    await client.close();
+    await fixture.close();
+  }
+
+  const errorFixture = await startMcpFixture({
+    tools: [declaredTool('error.tool')],
+    onCall: async () => ({ content: [{ type: 'text', text: 'failed' }], isError: true }),
+  });
+  const errorClient = new AppMcpClient({ url: errorFixture.url, token: errorFixture.token, timeoutMs: 1_000 });
+  try {
+    await errorClient.listActions();
+    await assert.rejects(errorClient.callAction({ toolName: 'error.tool', input: {} }), /app_mcp_action_failed/);
+  } finally {
+    await errorClient.close();
+    await errorFixture.close();
+  }
+});
+
 test('AppMcpClient bounds calls with both an explicit timeout and an AbortSignal', async () => {
   const AppMcpClient = loadAppMcpClient();
   const tools = [declaredTool('slow.wait')];
@@ -336,5 +429,153 @@ test('AppMcpClient bounds calls with both an explicit timeout and an AbortSignal
   } finally {
     await client.close();
     await fixture.close();
+  }
+});
+
+test('AppMcpClient rejects every unsafe schema shape and non-object tool result', async () => {
+  const AppMcpClient = loadAppMcpClient();
+  const tools = [
+    declaredTool('bad.enum-type', { outputSchema: schema({ value: { type: 'string', enum: [1] } }) }),
+    declaredTool('bad.required', { outputSchema: schema({ value: { type: 'object', properties: {}, required: ['missing'], additionalProperties: false } }) }),
+    declaredTool('bad.array-bounds', { outputSchema: schema({ value: { type: 'array', items: { type: 'string' }, minItems: 3, maxItems: 1 } }) }),
+    declaredTool('bad.array-min', { outputSchema: schema({ value: { type: 'array', items: { type: 'string' }, minItems: -1 } }) }),
+    declaredTool('bad.string-bounds', { outputSchema: schema({ value: { type: 'string', minLength: 3, maxLength: 1 } }) }),
+    declaredTool('bad.string-min', { outputSchema: schema({ value: { type: 'string', minLength: -1 } }) }),
+    declaredTool('bad.open-object', { outputSchema: schema({ value: { type: 'object', properties: {} } }) }),
+    declaredTool('oversized.schema', { outputSchema: { ...schema({}), description: 'x'.repeat(300_000) } }),
+  ];
+  const fixture = await startMcpFixture({ tools, onCall: async () => ({ content: [], structuredContent: [] }) });
+  const client = new AppMcpClient({ url: fixture.url, token: fixture.token, timeoutMs: 1_000 });
+  try {
+    assert.deepEqual(await client.listActions(), []);
+    await assert.rejects(client.callAction({ toolName: 'bad.enum-type', input: {} }), /app_mcp_structured_content_required|MCP error/);
+  } finally {
+    await client.close();
+    await fixture.close();
+  }
+});
+
+test('AppMcpClient validates loopback boundaries, bounded inputs, fallbacks, and duplicate discovery', async () => {
+  const AppMcpClient = loadAppMcpClient();
+  assert.throws(() => new AppMcpClient({ url: 'http://[invalid/mcp', token: 't' }), /app_mcp_url_invalid/);
+  for (const url of [
+    'http://127.0.0.1:0/mcp',
+    'http://127.0.0.1:65536/mcp',
+    'http://127.0.0.1:1/other',
+    'http://user:pass@127.0.0.1:1/mcp',
+    'http://127.0.0.1:1/mcp#hash',
+    'http://127.0.0.2:1/mcp',
+  ]) {
+    assert.throws(() => new AppMcpClient({ url, token: 't' }), /loopback|invalid/);
+  }
+  const duplicateFixture = await startMcpFixture({
+    tools: [declaredTool('same'), declaredTool('same')],
+    onCall: async () => ({ content: [], structuredContent: { ok: true } }),
+  });
+  const client = new AppMcpClient({ url: duplicateFixture.url, token: duplicateFixture.token, timeoutMs: 1_000 });
+  try {
+    await assert.rejects(client.listActions(), /duplicate_action/);
+    const cyclic = {}; cyclic.self = cyclic;
+    await assert.rejects(client.callAction({ toolName: 'same', input: cyclic }), /action_input_invalid/);
+  } finally {
+    await client.close();
+    await duplicateFixture.close();
+  }
+});
+
+test('AppMcpClient covers bounded discovery, schema serialization failures, and connection cleanup', async () => {
+  const AppMcpClient = loadAppMcpClient();
+  const invalidInputClient = new AppMcpClient({ url: 'http://127.0.0.1:1/mcp', token: 't', timeoutMs: 1_000 });
+  const defaultTimeoutClient = new AppMcpClient({ url: 'http://127.0.0.1:1/mcp', token: 't' });
+  const unsafeInput = JSON.parse('{"__proto__":true}');
+  await assert.rejects(invalidInputClient.callAction({ toolName: 'x', input: unsafeInput }), /action_input_invalid/);
+  const throwingInput = { ok: true };
+  Object.defineProperty(throwingInput, 'toJSON', { enumerable: false, value: () => { throw new Error('serialize'); } });
+  await assert.rejects(invalidInputClient.callAction({ toolName: 'x', input: throwingInput }), /action_input_invalid/);
+  await assert.rejects(invalidInputClient.listActions(), /ECONNREFUSED|fetch|connect|timeout/i);
+  await invalidInputClient.close();
+  await defaultTimeoutClient.close();
+  const customPrototype = Object.create({ inherited: true });
+  await assert.rejects(defaultTimeoutClient.callAction({ toolName: 'x', input: customPrototype }), /action_input_invalid/);
+  await assert.rejects(defaultTimeoutClient.callAction({ toolName: 'x', input: () => undefined }), /action_input_invalid/);
+  assert.throws(() => new AppMcpClient({ url: 'http://127.0.0.1:1/mcp', token: '   ' }), /app_mcp_token_required/);
+  const closedClient = new AppMcpClient({ url: 'http://127.0.0.1:1/mcp', token: 'token' });
+  await closedClient.close();
+  await assert.rejects(closedClient.listActions(), /app_mcp_client_closed/);
+});
+
+test('AppMcpClient enforces discovery page, cursor, and tool-count limits', async () => {
+  const AppMcpClient = loadAppMcpClient();
+  const duplicateCursorFixture = await startMcpFixture({
+    tools: [],
+    onListTools: async () => ({ tools: [], nextCursor: 'same' }),
+  });
+  const duplicateCursorClient = new AppMcpClient({
+    url: duplicateCursorFixture.url,
+    token: duplicateCursorFixture.token,
+    timeoutMs: 1_000,
+  });
+  try {
+    await assert.rejects(duplicateCursorClient.listActions(), /cursor_invalid/);
+  } finally {
+    await duplicateCursorClient.close();
+    await duplicateCursorFixture.close();
+  }
+
+  const pageFixture = await startMcpFixture({
+    tools: [],
+    onListTools: async ({ cursor }) => {
+      const next = cursor ? `page-${Number(cursor.split('-')[1]) + 1}` : 'page-1';
+      return { tools: [], nextCursor: next };
+    },
+  });
+  const pageClient = new AppMcpClient({ url: pageFixture.url, token: pageFixture.token, timeoutMs: 1_000 });
+  try {
+    await assert.rejects(pageClient.listActions(), /cursor_invalid/);
+  } finally {
+    await pageClient.close();
+    await pageFixture.close();
+  }
+
+  const tooManyFixture = await startMcpFixture({
+    tools: Array.from({ length: 101 }, (_, index) => declaredTool(`tool-${index}`)),
+  });
+  const tooManyClient = new AppMcpClient({ url: tooManyFixture.url, token: tooManyFixture.token, timeoutMs: 1_000 });
+  try {
+    await assert.rejects(tooManyClient.listActions(), /discovery_limit_exceeded/);
+  } finally {
+    await tooManyClient.close();
+    await tooManyFixture.close();
+  }
+});
+
+test('AppMcpClient rejects malformed tool contracts at the client boundary', async () => {
+  const AppMcpClient = loadAppMcpClient();
+  const originalConnect = Client.prototype.connect;
+  const originalListTools = Client.prototype.listTools;
+  const originalClose = Client.prototype.close;
+  Client.prototype.connect = async function connect() {};
+  Client.prototype.close = async function close() {};
+  Client.prototype.listTools = async function listTools() {
+    return {
+      tools: [
+        Object.assign(declaredTool('bad-input'), { inputSchema: null }),
+        declaredTool('bad-type', { outputSchema: schema({ value: { type: 'date' } }) }),
+        declaredTool('bad-extra-key', { outputSchema: schema({ value: { type: 'string', pattern: 'unsupported' } }) }),
+        declaredTool('bad-required', {
+          outputSchema: schema({ value: { type: 'object', properties: { same: { type: 'string' } }, required: ['same', 'same'], additionalProperties: false } }),
+        }),
+        declaredTool('bad-array-items', { outputSchema: schema({ value: { type: 'array', items: null } }) }),
+      ],
+    };
+  };
+  const client = new AppMcpClient({ url: 'http://127.0.0.1:1/mcp', token: 'token' });
+  try {
+    assert.deepEqual(await client.listActions(), []);
+  } finally {
+    await client.close();
+    Client.prototype.connect = originalConnect;
+    Client.prototype.listTools = originalListTools;
+    Client.prototype.close = originalClose;
   }
 });

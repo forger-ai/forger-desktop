@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useId, useMemo, useState } from 'react';
 import FeedbackRounded from '@mui/icons-material/FeedbackRounded';
 import {
   Alert,
@@ -24,6 +24,9 @@ interface FeedbackViewProps {
 }
 
 export function FeedbackView({ apps, t, desktopVersion, onSubmitFeedback }: FeedbackViewProps) {
+  const targetLabelId = useId();
+  const appLabelId = useId();
+  const kindLabelId = useId();
   const appOptions = useMemo(
     () => apps.filter((app) => app.status !== 'not_installed' || app.catalogStatus === 'beta' || app.catalogStatus === 'production' || app.catalogStatus === 'coming'),
     [apps],
@@ -39,10 +42,6 @@ export function FeedbackView({ apps, t, desktopVersion, onSubmitFeedback }: Feed
   const appTargetInvalid = target === 'app' && !appId;
 
   const submit = async () => {
-    if (bodyInvalid || appTargetInvalid || busy) {
-      return;
-    }
-
     setBusy(true);
     try {
       const result = await onSubmitFeedback({
@@ -82,8 +81,9 @@ export function FeedbackView({ apps, t, desktopVersion, onSubmitFeedback }: Feed
             </Stack>
             <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1.5}>
               <FormControl size="small" fullWidth>
-                <InputLabel>{t.sections.feedback.targetLabel}</InputLabel>
+                <InputLabel id={targetLabelId}>{t.sections.feedback.targetLabel}</InputLabel>
                 <Select
+                  labelId={targetLabelId}
                   label={t.sections.feedback.targetLabel}
                   value={target}
                   onChange={(event) => {
@@ -97,8 +97,9 @@ export function FeedbackView({ apps, t, desktopVersion, onSubmitFeedback }: Feed
               </FormControl>
               {target === 'app' ? (
                 <FormControl size="small" fullWidth>
-                  <InputLabel>{t.sections.feedback.appLabel}</InputLabel>
+                  <InputLabel id={appLabelId}>{t.sections.feedback.appLabel}</InputLabel>
                   <Select
+                    labelId={appLabelId}
                     label={t.sections.feedback.appLabel}
                     value={appId}
                     onChange={(event) => {
@@ -116,8 +117,9 @@ export function FeedbackView({ apps, t, desktopVersion, onSubmitFeedback }: Feed
               ) : null}
             </Stack>
             <FormControl size="small" fullWidth>
-              <InputLabel>{t.sections.feedback.kindLabel}</InputLabel>
+              <InputLabel id={kindLabelId}>{t.sections.feedback.kindLabel}</InputLabel>
               <Select
+                labelId={kindLabelId}
                 label={t.sections.feedback.kindLabel}
                 value={kind}
                 onChange={(event) => {

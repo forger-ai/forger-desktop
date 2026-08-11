@@ -548,7 +548,7 @@ export class ConnectionsService {
       return storedGrant;
     }
     if (declaration.actions.includes('*')) {
-      return storedGrant.requestedActions.includes('*') ? storedGrant : undefined;
+      return undefined;
     }
     const declarationGrant = this.buildGrantSnapshot(declaration, { granted: true });
     const declarationActions = new Set(resolveGrantActions(declarationGrant, this.getActionCatalog()));
@@ -614,11 +614,6 @@ export class ConnectionsService {
       catalog[module.definition.type] = module.definition.actions.map((action) => action.id);
     }
     return catalog;
-  }
-
-  private hashForType(type: string): string {
-    const actions = this.getActionCatalog()[type] ?? [];
-    return `${type}:${actions.join('|')}`;
   }
 
   private getContext(): ConnectionContext {

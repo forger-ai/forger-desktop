@@ -184,7 +184,7 @@ export const parseAntigravityOutput = (
     .join('\n')
     .trim();
   const toolEvents = [...combined.matchAll(/(?:MCP tool|Calling MCP tool|Llamando herramienta MCP)[:\s]+([A-Za-z0-9_.:-]+)/g)]
-    .map((match) => ({ type: 'mcp_tool_call', label: match[1] ?? 'mcp_tool_call' }));
+    .map((match) => ({ type: 'mcp_tool_call', label: match[1] }));
 
   return {
     assistantText,

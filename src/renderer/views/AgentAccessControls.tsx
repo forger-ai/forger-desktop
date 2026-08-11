@@ -77,7 +77,7 @@ export function AgentAccessControls({
   ).filter((option) => getRuntimeSupportedEfforts(runtimeProvider, draft.runtime.model).includes(option.value as AgentEffort));
   const runtimeModelValue = runtimeModelOptions.some((option) => option.realModelName === draft.runtime.model)
     ? draft.runtime.model
-    : runtimeModelOptions[0]?.realModelName ?? draft.runtime.model;
+    : runtimeModelOptions[0].realModelName;
   const runtimeEffortValue = normalizeRuntimeEffortForModel(runtimeProvider, draft.runtime.model, draft.runtime.effort);
   const peerOptions = grantOptions.peerAgents.filter((peer) => peer.agentId !== activeAgentId);
 
@@ -335,6 +335,7 @@ function ToolAccessControl({
         <Stack direction="row" spacing={1} alignItems="center" sx={{ width: '100%', minWidth: 0 }}>
           <Checkbox
             size="small"
+            slotProps={{ input: { 'aria-label': tool.name } }}
             checked={allSelected}
             indeterminate={partiallySelected}
             disabled={!tool.configured || actionIds.length === 0}
@@ -430,6 +431,7 @@ function ConnectionAccessControl({
         <Stack direction="row" spacing={1} alignItems="center" sx={{ width: '100%', minWidth: 0 }}>
           <Checkbox
             size="small"
+            slotProps={{ input: { 'aria-label': connection.displayName } }}
             checked={allSelected}
             indeterminate={partiallySelected}
             disabled={!connection.configured || actionIds.length === 0}
@@ -455,6 +457,7 @@ function ConnectionAccessControl({
                 multiple
                 label={t.agents.connectionInstances}
                 value={selectedConnectionIds}
+                displayEmpty
                 renderValue={(selected) => {
                   if ((selected as string[]).length === 0) return t.agents.connectionAllInstances;
                   return (selected as string[])
@@ -465,8 +468,7 @@ function ConnectionAccessControl({
                     .join(', ');
                 }}
                 onChange={(event) => {
-                  const value = event.target.value;
-                  setConnectionIds(typeof value === 'string' ? value.split(',') : value as string[]);
+                  setConnectionIds(event.target.value as string[]);
                 }}
               >
                 {connection.instances.map((instance) => (

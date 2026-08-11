@@ -92,12 +92,16 @@ export class AntigravityCliAdapter {
         assistantText: output.assistantText,
         conversationId: output.conversationId,
       });
+      await mcpConfig?.cleanup().catch(() => undefined);
       return output;
     } catch (error) {
-      input.onEvent?.({ type: 'failed', provider: this.key, runId: input.runId, error: error instanceof Error ? error : new Error(String(error)) });
-      throw error;
-    } finally {
+      try {
+        input.onEvent?.({ type: 'failed', provider: this.key, runId: input.runId, error: error instanceof Error ? error : new Error(String(error)) });
+      } catch {
+        // Event observers must not replace the provider failure returned to the caller.
+      }
       await mcpConfig?.cleanup().catch(() => undefined);
+      throw error;
     }
   }
 }

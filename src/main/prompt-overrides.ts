@@ -173,7 +173,7 @@ export class PromptOverridesStore {
       return {
         ...template,
         ...(validation.valid ? { prompt: override.prompt } : {}),
-        ...runtimeFieldsForPrompt(override.runtime, override.model, override.reasoningEffort),
+        ...runtimeFieldsForPrompt(override.runtime, override.reasoningEffort),
       };
     });
   }
@@ -224,7 +224,7 @@ export class PromptOverridesStore {
       return {
         ...agent,
         ...(validation.valid ? { initialPrompt: override.prompt } : {}),
-        ...runtimeFieldsForPrompt(override.runtime, override.model, override.reasoningEffort),
+        ...runtimeFieldsForPrompt(override.runtime, override.reasoningEffort),
       };
     });
   }
@@ -522,12 +522,10 @@ const normalizePromptRuntimeInput = (input: AppPromptReviewInput): AgentRuntime 
 
 const runtimeFieldsForPrompt = (
   runtime?: AgentRuntime,
-  legacyModel?: string,
   legacyReasoningEffort?: CodexReasoningEffort,
 ): Pick<AppAgent, 'model' | 'reasoningEffort' | 'runtime'> => {
   if (!runtime) {
     return {
-      ...(legacyModel ? { model: legacyModel } : {}),
       ...(legacyReasoningEffort ? { reasoningEffort: legacyReasoningEffort } : {}),
     };
   }

@@ -73,16 +73,16 @@ export const topologicalOrder = (nodes: WorkflowNode[], edges: WorkflowEdge[]): 
   const incoming = new Map<string, number>(nodes.map((node) => [node.id, 0]));
   const outgoing = new Map<string, string[]>(nodes.map((node) => [node.id, []]));
   for (const edge of edges) {
-    incoming.set(edge.to, (incoming.get(edge.to) ?? 0) + 1);
+    incoming.set(edge.to, incoming.get(edge.to)! + 1);
     outgoing.get(edge.from)?.push(edge.to);
   }
-  const queue = nodes.filter((node) => (incoming.get(node.id) ?? 0) === 0).map((node) => node.id);
+  const queue = nodes.filter((node) => incoming.get(node.id) === 0).map((node) => node.id);
   const order: string[] = [];
   while (queue.length > 0) {
     const current = queue.shift() as string;
     order.push(current);
-    for (const next of outgoing.get(current) ?? []) {
-      const remaining = (incoming.get(next) ?? 0) - 1;
+    for (const next of outgoing.get(current)!) {
+      const remaining = incoming.get(next)! - 1;
       incoming.set(next, remaining);
       if (remaining === 0) {
         queue.push(next);

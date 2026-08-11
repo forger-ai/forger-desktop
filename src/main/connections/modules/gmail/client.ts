@@ -104,8 +104,7 @@ const buildQueryPath = (
       query.set(key, String(value));
     }
   }
-  const raw = query.toString();
-  return raw ? `${resource}?${raw}` : resource;
+  return `${resource}?${query.toString()}`;
 };
 
 const headersFromPayload = (payload: Record<string, unknown>): Record<string, string> => {
@@ -239,7 +238,7 @@ const threadSummaryFromValue = (value: unknown): GmailThreadSummary => {
     ...splitAddresses(latestDecoded.to),
   ]));
   return {
-    threadId: String(thread.id ?? latestDecoded.threadId ?? ''),
+    threadId: String(thread.id ?? latestDecoded.threadId),
     ...(latestDecoded.id ? { latestMessageId: latestDecoded.id } : {}),
     ...(typeof thread.historyId === 'string' ? { historyId: thread.historyId } : {}),
     ...(latestDecoded.subject ? { subject: latestDecoded.subject } : {}),

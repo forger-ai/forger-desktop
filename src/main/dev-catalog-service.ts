@@ -443,8 +443,8 @@ export class DevCatalogService {
       const assetMatch = /^\/assets\/([^/]+)\/(.+)$/.exec(requestUrl.pathname);
       if (assetMatch) {
         await this.handleAsset(
-          decodeURIComponent(assetMatch[1] ?? ''),
-          decodeURIComponent(assetMatch[2] ?? ''),
+          decodeURIComponent(assetMatch[1]),
+          decodeURIComponent(assetMatch[2]),
           response,
         );
         return;
@@ -452,7 +452,7 @@ export class DevCatalogService {
 
       const downloadMatch = /^\/download\/([^/]+)\.zip$/.exec(requestUrl.pathname);
       if (downloadMatch) {
-        await this.handleDownload(decodeURIComponent(downloadMatch[1] ?? ''), response);
+        await this.handleDownload(decodeURIComponent(downloadMatch[1]), response);
         return;
       }
 

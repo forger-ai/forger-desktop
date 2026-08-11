@@ -477,15 +477,19 @@ export class WorkflowNodeRuntime {
         signal: controller.signal,
       });
       if (!result || typeof result !== 'object' || Array.isArray(result)) {
+        active.actionAbortControllers.delete(controller);
         return { status: 'failed', input: nodeRunInput, error: 'workflow_app_action_output_schema_invalid' };
       }
       const output = result as Record<string, unknown>;
       if (validateWorkflowStructuredValueLimits(output).length > 0) {
+        active.actionAbortControllers.delete(controller);
         return { status: 'failed', input: nodeRunInput, error: 'workflow_app_action_output_limits_exceeded' };
       }
       if (validateOutputAgainstSchema(output, node.action.outputSchema).length > 0) {
+        active.actionAbortControllers.delete(controller);
         return { status: 'failed', input: nodeRunInput, error: 'workflow_app_action_output_schema_invalid' };
       }
+      active.actionAbortControllers.delete(controller);
       return { status: 'succeeded', input: nodeRunInput, output };
     } catch (error) {
       const message = error instanceof Error ? error.message : '';
@@ -494,6 +498,7 @@ export class WorkflowNodeRuntime {
         : message.startsWith('workflow_app_action_')
           ? message
           : 'workflow_app_action_call_failed';
+      active.actionAbortControllers.delete(controller);
       return {
         status: active.canceled ? 'canceled' : 'failed',
         input: nodeRunInput,
@@ -501,8 +506,6 @@ export class WorkflowNodeRuntime {
           ? { error: stableError }
           : {}),
       };
-    } finally {
-      active.actionAbortControllers.delete(controller);
     }
   }
 
@@ -720,6 +723,16 @@ export class WorkflowNodeRuntime {
           this.backgroundFailures.push(error);
         });
     };
+    const cleanup = (): void => {
+      this.nodeContexts.delete(nodeRunKey);
+      this.nodeCompletions.delete(nodeRunKey);
+      if (forgerMcpSession) {
+        this.options.releaseForgerMcpSession?.(forgerMcpSession.token);
+      }
+      if (appMcpListening) {
+        this.options.releaseAppMcps?.(nodeRunKey);
+      }
+    };
     emitActivity(activity);
     const inputContext = this.buildAgentInputContext(context);
     let nodeRunInput: Record<string, unknown> = {
@@ -814,9 +827,11 @@ export class WorkflowNodeRuntime {
       if (completion) {
         if (completion.status === 'failed') {
           emitActivity(finalizeAgentRunActivity(activity, 'failed', new Date().toISOString(), completion.reason));
+          cleanup();
           return { status: 'failed', input: nodeRunInput, error: completion.reason ?? 'workflow_node_reported_failure' };
         }
         emitActivity(finalizeAgentRunActivity(activity, 'completed', new Date().toISOString()));
+        cleanup();
         return {
           status: 'succeeded',
           input: nodeRunInput,
@@ -840,6 +855,7 @@ export class WorkflowNodeRuntime {
           new Date().toISOString(),
           (result.stderr || result.stdout || 'workflow_agent_exec_failed').trim().slice(0, 2_000),
         ));
+        cleanup();
         return {
           status: 'failed',
           input: nodeRunInput,
@@ -847,6 +863,7 @@ export class WorkflowNodeRuntime {
         };
       }
       emitActivity(finalizeAgentRunActivity(activity, 'completed', new Date().toISOString()));
+      cleanup();
       return {
         status: 'succeeded',
         input: nodeRunInput,
@@ -860,20 +877,12 @@ export class WorkflowNodeRuntime {
         new Date().toISOString(),
         error instanceof Error ? error.message : 'workflow_agent_exec_failed',
       ));
+      cleanup();
       return {
         status: 'failed',
         input: nodeRunInput,
         error: error instanceof Error ? error.message : 'workflow_agent_exec_failed',
       };
-    } finally {
-      this.nodeContexts.delete(nodeRunKey);
-      this.nodeCompletions.delete(nodeRunKey);
-      if (forgerMcpSession) {
-        this.options.releaseForgerMcpSession?.(forgerMcpSession.token);
-      }
-      if (appMcpListening) {
-        this.options.releaseAppMcps?.(nodeRunKey);
-      }
     }
   }
 

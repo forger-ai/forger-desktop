@@ -55,7 +55,7 @@ export function DevicesView({ account, t }: DevicesViewProps) {
   }, []);
 
   const openEditName = () => {
-    setDeviceNameDraft(currentDevice?.name ?? t.sections.devices.fallbackDesktopName);
+    setDeviceNameDraft(currentDevice!.name);
     setEditNameOpen(true);
   };
 
@@ -97,10 +97,10 @@ export function DevicesView({ account, t }: DevicesViewProps) {
   };
 
   const unlinkMobileDevice = async () => {
-    if (!unlinkAuthorizationId) return;
+    const authorizationId = unlinkAuthorizationId!;
     setBusy(true);
     try {
-      setState(await window.forger.unlinkMobileDeviceFromDesktop(unlinkAuthorizationId));
+      setState(await window.forger.unlinkMobileDeviceFromDesktop(authorizationId));
       setUnlinkAuthorizationId(null);
     } finally {
       setBusy(false);

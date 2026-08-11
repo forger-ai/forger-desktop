@@ -13,7 +13,7 @@ import {
   Typography,
   useTheme,
 } from '@mui/material';
-import { useEffect, useMemo, useState } from 'react';
+import { Children, isValidElement, useEffect, useMemo, useState, type ReactNode } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { ExternalMarkdownLink } from '@renderer/components/ExternalMarkdownLink';
@@ -34,15 +34,22 @@ const slugifyHeading = (value: string) =>
     .replace(/[^a-z0-9]+/g, '-')
     .replace(/^-+|-+$/g, '') || 'section';
 
+const headingText = (node: ReactNode): string => Children.toArray(node)
+  .map((child) => isValidElement<{ children?: ReactNode }>(child)
+    ? headingText(child.props.children)
+    : String(child))
+  .join('');
+
 export function DocsView({ locale, onOpenExternalUrl }: DocsViewProps) {
   const theme = useTheme();
   const lang: ForgerDocsLanguage = locale === 'es' ? 'es' : 'en';
   const docs = forgerDocsBundle.docs[lang] as readonly ForgerDocEntry[];
-  const [selectedSlug, setSelectedSlug] = useState<string>(docs[0]?.slug ?? '');
+  const firstDoc = docs[0]!;
+  const [selectedSlug, setSelectedSlug] = useState<string>(firstDoc.slug);
   const [query, setQuery] = useState('');
-  const [expandedSlugs, setExpandedSlugs] = useState<Set<string>>(() => new Set([docs[0]?.slug ?? '']));
+  const [expandedSlugs, setExpandedSlugs] = useState<Set<string>>(() => new Set([firstDoc.slug]));
   const [pendingHeadingId, setPendingHeadingId] = useState<string | null>(null);
-  const selectedDoc = docs.find((doc) => doc.slug === selectedSlug) ?? docs[0];
+  const selectedDoc = docs.find((doc) => doc.slug === selectedSlug) ?? firstDoc;
   const normalizedQuery = query.trim().toLowerCase();
   const filteredDocs = useMemo(
     () =>
@@ -196,9 +203,9 @@ export function DocsView({ locale, onOpenExternalUrl }: DocsViewProps) {
               <ReactMarkdown
                 remarkPlugins={[remarkGfm]}
                 components={{
-                  h2: ({ children }) => <h2 id={slugifyHeading(String(children))}>{children}</h2>,
-                  h3: ({ children }) => <h3 id={slugifyHeading(String(children))}>{children}</h3>,
-                  h4: ({ children }) => <h4 id={slugifyHeading(String(children))}>{children}</h4>,
+                  h2: ({ children }) => <h2 id={slugifyHeading(headingText(children))}>{children}</h2>,
+                  h3: ({ children }) => <h3 id={slugifyHeading(headingText(children))}>{children}</h3>,
+                  h4: ({ children }) => <h4 id={slugifyHeading(headingText(children))}>{children}</h4>,
                   a: ({ href, children }) => (
                     <ExternalMarkdownLink href={href} onOpenExternalUrl={onOpenExternalUrl}>
                       {children}

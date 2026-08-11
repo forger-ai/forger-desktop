@@ -149,7 +149,7 @@ export class AppAgentConversationManager {
       updatedAt: now,
       messages: [],
       threadId: null,
-      metadata: Object.keys(metadata).length > 0 ? metadata : undefined,
+      metadata,
     };
     this.conversations.set(conversation.conversationId, conversation);
     await this.persistApp(appId);
@@ -622,7 +622,7 @@ export class AppAgentConversationManager {
             `Provider thread ${lostThreadId} is unavailable. Starting a fresh provider thread for this Vibe conversation.`,
           ].slice(-40);
           run.activity = addStatusActivityItem(
-            run.activity ?? this.createActivityForRun(run, conversation),
+            run.activity!,
             `Provider thread ${lostThreadId} is unavailable. Starting a fresh provider thread for this Vibe conversation.`,
           );
           run.updatedAt = new Date().toISOString();

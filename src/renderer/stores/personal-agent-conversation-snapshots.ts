@@ -6,7 +6,7 @@ const isTerminalRunStatus = (status: PersonalAgentRunStatus | undefined): boolea
 const conversationFreshness = (conversation: PersonalAgentConversation): string => {
   const runUpdatedAt = conversation.activeRun?.updatedAt ?? '';
   const messageCreatedAt = conversation.messages.at(-1)?.createdAt ?? '';
-  return [conversation.updatedAt, runUpdatedAt, messageCreatedAt].sort().at(-1) ?? '';
+  return [conversation.updatedAt, runUpdatedAt, messageCreatedAt].sort().at(-1)!;
 };
 
 export const newerConversation = (

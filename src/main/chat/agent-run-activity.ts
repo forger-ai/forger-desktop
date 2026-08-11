@@ -244,7 +244,7 @@ const parseProviderItems = (
     return parseClaudeItems(stream, text, now);
   }
   if (provider === 'antigravity') {
-    return parseAntigravityItems(stream, text, now);
+    return parseAntigravityItems(text, now);
   }
   return parseCodexItems(stream, text, now);
 };
@@ -337,10 +337,7 @@ const parseClaudeItems = (stream: OutputStream, text: string, now: string): Agen
   return items;
 };
 
-const parseAntigravityItems = (stream: OutputStream, text: string, now: string): AgentRunActivityItem[] => {
-  if (stream === 'meta') {
-    return [];
-  }
+const parseAntigravityItems = (text: string, now: string): AgentRunActivityItem[] => {
   const items: AgentRunActivityItem[] = [];
   for (const [index, line] of text.split(/\r?\n/).map((entry) => entry.trim()).filter(Boolean).entries()) {
     if (looksLikeStructuredFragment(line)) {
@@ -616,7 +613,8 @@ const countItems = (items: AgentRunActivityItem[]) => ({
 const emptyCounts = () => countItems([]);
 
 const latestSummary = (items: AgentRunActivityItem[]): string =>
-  items[items.length - 1]?.summary ?? '';
+  // Callers sanitize or synthesize at least one item before deriving a summary.
+  items[items.length - 1]!.summary;
 
 const activityItemId = (runId: string, index: number, kind: AgentRunActivityItemKind): string =>
   `${runId}:${kind}:${Date.now()}:${index}`;

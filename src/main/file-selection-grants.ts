@@ -283,8 +283,7 @@ export class FileSelectionGrantStore {
       try {
         for (const record of records) {
           await this.validateFileIdentity(record);
-          const noFollow = typeof constants.O_NOFOLLOW === 'number' ? constants.O_NOFOLLOW : 0;
-          const fileHandle = await fs.open(record.realPath, constants.O_RDONLY | noFollow).catch(() => null);
+          const fileHandle = await fs.open(record.realPath, constants.O_RDONLY | constants.O_NOFOLLOW).catch(() => null);
           if (!fileHandle) {
             throw new Error('file_selection_changed');
           }

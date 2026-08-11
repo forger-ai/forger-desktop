@@ -54,6 +54,6 @@ test('personal agent chat exposes explicit and generic-failure conversation repo
   assert.match(agentsViewSource, /runErrorIsGeneric = runErrorMessage === t\.agents\.runErrorGeneric/);
   assert.match(agentsViewSource, /autoReportedRunIdsRef\.current\.has\(activeRun\.id\)/);
   assert.match(agentsViewSource, /onNotifyForger\(\{ agent: activeAgent, conversation, run: activeRun, auto: true \}\)/);
-  assert.match(controllerSource, /source: 'personal_agent_conversation'/);
+  assert.match(controllerSource, /source:\s*["']personal_agent_conversation["']/);
   assert.match(controllerSource, /personal_agent_run_failed/);
 });

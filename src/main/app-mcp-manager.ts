@@ -158,9 +158,10 @@ export class AppMcpManager {
       return { servers: [], failures };
     }
     return {
-      servers: results.flatMap((result) => 'config' in result
-        ? [{ appId: result.appId, config: toStrictConfig(result.appId, result.config) }]
-        : []),
+      servers: results.map((result) => {
+        const success = result as Extract<AppMcpListenResult, { config: AppMcpServerConfig }>;
+        return { appId: success.appId, config: toStrictConfig(success.appId, success.config) };
+      }),
       failures: [],
     };
   }
@@ -253,9 +254,6 @@ export class AppMcpManager {
     if (state.status === 'shutting_down' && state.stopPromise) {
       await state.stopPromise.catch(() => undefined);
     }
-    if (state.status === 'up' && state.secretsFingerprint !== resolvedSecrets.fingerprint) {
-      await this.restartForSecretsChange(state);
-    }
     if (state.status === 'up' && state.url && state.token && state.tokenEnvVar) {
       return this.toConfig(state);
     }
@@ -295,9 +293,7 @@ export class AppMcpManager {
         resolvedSecrets.env,
       );
       await this.options.ensureSqliteDatabaseParent(config.environment);
-      const pathEntries = this.options.getPathEntries
-        ? await this.options.getPathEntries(record.appId)
-        : [path.dirname(venv.python), ...this.options.getRuntimePathEntries(pythonRuntime)];
+      const pathEntries = await this.resolvePathEntries(record.appId, venv.python, pythonRuntime);
       await this.options.appendInstallLog('app_mcp:start', {
         appId: record.appId,
         command: config.command,
@@ -380,17 +376,14 @@ export class AppMcpManager {
         state.tokenEnvVar = undefined;
         state.secretsFingerprint = undefined;
         state.status = 'down';
+        state.startPromise = undefined;
         return null;
       }
       state.status = 'up';
       await this.options.appendInstallLog('app_mcp:ready', { appId: record.appId, url: config.url });
+      state.startPromise = undefined;
       return this.toConfig(state);
     } catch (error) {
-      await this.options.appendInstallLog('app_mcp:start_failed', {
-        appId: record.appId,
-        error: this.options.serializeErrorForInstallLog(error),
-      });
-      this.options.onMcpStartFailed?.({ appId: record.appId, runId, error });
       if (state.process) {
         await this.options.terminateProcess(state.process).catch(() => undefined);
       }
@@ -400,10 +393,20 @@ export class AppMcpManager {
       state.tokenEnvVar = undefined;
       state.secretsFingerprint = undefined;
       state.status = 'down';
-      return null;
-    } finally {
       state.startPromise = undefined;
+      await this.options.appendInstallLog('app_mcp:start_failed', {
+        appId: record.appId,
+        error: this.options.serializeErrorForInstallLog(error),
+      });
+      this.options.onMcpStartFailed?.({ appId: record.appId, runId, error });
+      return null;
     }
+  }
+
+  private async resolvePathEntries(appId: string, venvPython: string, runtime: RuntimeBinarySet): Promise<string[]> {
+    return this.options.getPathEntries
+      ? await this.options.getPathEntries(appId)
+      : [path.dirname(venvPython), ...this.options.getRuntimePathEntries(runtime)];
   }
 
   private buildProcessConfig(

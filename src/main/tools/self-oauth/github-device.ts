@@ -19,12 +19,12 @@ export const runGitHubDeviceOAuthFlow = async (
     if (!response.ok || data.error || !data.device_code || !data.verification_uri) {
       throw new OAuthConnectionError(data.error_description || data.error || 'GitHub device authorization failed.', `${options.toolId}_oauth_device_code_failed`);
     }
-    return data;
+    // Preserve the validation as a type-level contract for the polling phase.
+    return { ...data, device_code: data.device_code, verification_uri: data.verification_uri };
   });
 
   const deviceCode = device.device_code;
   const verificationUri = device.verification_uri_complete ?? device.verification_uri;
-  if (!deviceCode || !verificationUri) throw new OAuthConnectionError('GitHub device authorization failed.', `${options.toolId}_oauth_device_code_failed`);
 
   await context.secretsStore.setToolSecret(options.toolId, OAUTH_CLIENT_ID_SECRET, options.clientId);
   await context.openExternalUrl(verificationUri);

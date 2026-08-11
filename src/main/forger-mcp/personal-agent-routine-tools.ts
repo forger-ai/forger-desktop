@@ -71,7 +71,11 @@ export const executePersonalAgentRoutineTool = async (
       return await executeDeleteRoutine(session, args, options);
     }
   } catch (error) {
-    const diagnostic = buildFailureDiagnostic({ error, fallbackCode: 'personal_agent_routine_failed' });
+    const diagnostic = buildFailureDiagnostic({
+      error,
+      technicalCode: error instanceof Error ? error.message : undefined,
+      fallbackCode: 'personal_agent_routine_failed',
+    });
     return {
       success: false,
       userMessage: personalAgentRoutineErrorMessage(diagnostic.technicalCode),

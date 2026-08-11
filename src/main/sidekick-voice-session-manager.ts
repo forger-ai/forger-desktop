@@ -440,7 +440,7 @@ export class SidekickVoiceSessionManager {
   }
 
   private createSession(sidekickId: string): ActiveVoiceSession {
-    let resolveCaptureDone = (): void => undefined;
+    let resolveCaptureDone: (() => void) | undefined;
     const captureDone = new Promise<void>((resolve) => {
       resolveCaptureDone = resolve;
     });
@@ -465,7 +465,7 @@ export class SidekickVoiceSessionManager {
       pcmChunks: [],
       pcmWork: Promise.resolve(),
       captureDone,
-      resolveCaptureDone,
+      resolveCaptureDone: resolveCaptureDone!,
       captureRequested: false,
       playbackStarted: false,
       followUpTurns: 0,
@@ -533,12 +533,12 @@ export class SidekickVoiceSessionManager {
 
   private resetCaptureState(session: ActiveVoiceSession): void {
     this.clearCaptureTimers(session);
-    let resolveCaptureDone = (): void => undefined;
+    let resolveCaptureDone: (() => void) | undefined;
     const captureDone = new Promise<void>((resolve) => {
       resolveCaptureDone = resolve;
     });
     session.captureDone = captureDone;
-    session.resolveCaptureDone = resolveCaptureDone;
+    session.resolveCaptureDone = resolveCaptureDone!;
     session.captureRequested = false;
     session.acceptingPcm = false;
     session.heardSpeech = false;

@@ -238,13 +238,9 @@ export function AgentsView({ t, intelligenceProviderConfigured, providerOptions 
     setAgents(nextAgents);
     setAgentGroups(nextGroups);
     setSidekickNames(Object.fromEntries((sidekickState?.sidekicks ?? []).map((sidekick) => [sidekick.sidekickId, sidekick.name])));
-    setActiveAgentId((current) => {
-      if (!current) return null;
-      return nextAgents.some((agent) => agent.id === current) ? current : null;
-    });
   }, []);
 
-  const loadAgentDetail = useCallback(async (agentId: string, preferredConversationId?: string) => {
+  const loadAgentDetail = useCallback(async (agentId: string) => {
     const [nextConversations, nextWorkspaceEntries, nextRoutines] = await Promise.all([
       window.forger.personalAgentConversationsList({ agentId }).catch(() => []),
       window.forger.personalAgentWorkspaceList({ agentId }).catch(() => []),
@@ -258,7 +254,7 @@ export function AgentsView({ t, intelligenceProviderConfigured, providerOptions 
         const refreshed = nextConversations.find((item) => item.id === current.id);
         return refreshed ? newerConversation(current, refreshed) : current;
       }
-      return nextConversations.find((item) => item.id === preferredConversationId) ?? nextConversations[0] ?? null;
+      return nextConversations[0] ?? null;
     });
   }, []);
 
@@ -429,7 +425,6 @@ export function AgentsView({ t, intelligenceProviderConfigured, providerOptions 
   };
 
   const handleCreate = async () => {
-    if (!name.trim() || busy) return;
     setBusyAction('create');
     setError(null);
     try {
@@ -465,12 +460,11 @@ export function AgentsView({ t, intelligenceProviderConfigured, providerOptions 
   };
 
   const handleSaveAccess = async () => {
-    if (!activeAgent || busy || !settingsDraftReady) return;
     setBusyAction('access');
     setError(null);
     try {
       let updated = await window.forger.personalAgentUpdatePermissions({
-        agentId: activeAgent.id,
+        agentId: activeAgent!.id,
         permissionMode: settingsAccessDraft.permissionMode,
         networkAccess: settingsAccessDraft.networkAccess,
         canSpawnAgents: settingsAccessDraft.canSpawnAgents,
@@ -480,9 +474,9 @@ export function AgentsView({ t, intelligenceProviderConfigured, providerOptions 
         connectionGrants: settingsAccessDraft.connectionGrants,
         peerAgentGrants: settingsAccessDraft.peerAgentGrants,
       });
-      if ((activeAgent.groupId ?? null) !== settingsAccessDraft.groupId) {
+      if ((activeAgent!.groupId ?? null) !== settingsAccessDraft.groupId) {
         updated = await window.forger.personalAgentUpdateGroup({
-          agentId: activeAgent.id,
+          agentId: activeAgent!.id,
           groupId: settingsAccessDraft.groupId,
         });
       }
@@ -546,9 +540,6 @@ export function AgentsView({ t, intelligenceProviderConfigured, providerOptions 
     setError(null);
     try {
       await window.forger.personalAgentsDelete({ agentId: agent.id });
-      if (activeAgentId === agent.id) {
-        setActiveAgentId(null);
-      }
       await loadAgents();
     } catch (deleteError) {
       setError(deleteError instanceof Error ? deleteError.message : t.agents.deleteError);
@@ -576,18 +567,17 @@ export function AgentsView({ t, intelligenceProviderConfigured, providerOptions 
   };
 
   const handleSaveFile = async () => {
-    if (!activeAgent || !openFile || !fileDirty || busy) return;
     setBusyAction('file');
     setError(null);
     try {
       const saved = await window.forger.personalAgentWorkspaceFileWrite({
-        agentId: activeAgent.id,
-        relativePath: openFile.relativePath,
+        agentId: activeAgent!.id,
+        relativePath: openFile!.relativePath,
         content: fileDraft,
       });
       setOpenFile(saved);
       setFileDraft(saved.content);
-      await loadAgentDetail(activeAgent.id, conversation?.id);
+      await loadAgentDetail(activeAgent!.id);
     } catch (fileError) {
       setError(fileError instanceof Error ? fileError.message : t.agents.fileSaveError);
     } finally {
@@ -596,13 +586,12 @@ export function AgentsView({ t, intelligenceProviderConfigured, providerOptions 
   };
 
   const handleStartConversation = async () => {
-    if (!activeAgent || busy) return;
     setBusyAction('start');
     setError(null);
     try {
       const started = await window.forger.personalAgentStartConversation({
-        agentId: activeAgent.id,
-        title: activeAgent.name,
+        agentId: activeAgent!.id,
+        title: activeAgent!.name,
       });
       setConversation(started);
       setConversations((current) => upsertConversation(current, started));
@@ -614,13 +603,12 @@ export function AgentsView({ t, intelligenceProviderConfigured, providerOptions 
   };
 
   const handleWakeAgent = async () => {
-    if (!activeAgent || !isBlankAgent || busy) return;
     setBusyAction('wake');
     setError(null);
     try {
       const started = await window.forger.personalAgentStartConversation({
-        agentId: activeAgent.id,
-        title: activeAgent.name,
+        agentId: activeAgent!.id,
+        title: activeAgent!.name,
         initialMessage: t.agents.wakeAgentMessage,
       });
       setConversation(started);
@@ -633,7 +621,6 @@ export function AgentsView({ t, intelligenceProviderConfigured, providerOptions 
   };
 
   const handlePickFiles = async () => {
-    if (busy) return;
     const picked = await window.forger.filesPickForChat();
     setPendingFiles((current) => { const seen = new Set(current.map((file) => file.grantId)); return [...current, ...picked.filter((file) => !seen.has(file.grantId))]; });
   };
@@ -651,11 +638,10 @@ export function AgentsView({ t, intelligenceProviderConfigured, providerOptions 
   };
 
   const handleCancelWakeup = async () => {
-    if (!conversation || !wakeupIsActive || busy) return;
     setBusyAction('cancelWakeup');
     setError(null);
     try {
-      await window.forger.personalAgentWakeupCancel({ conversationId: conversation.id });
+      await window.forger.personalAgentWakeupCancel({ conversationId: conversation!.id });
     } catch (cancelError) {
       setError(cancelError instanceof Error ? cancelError.message : t.agents.wakeupCancelError);
     } finally {
@@ -739,7 +725,7 @@ export function AgentsView({ t, intelligenceProviderConfigured, providerOptions 
       });
       setRoutineDialogOpen(false);
       resetRoutineForm();
-      await loadAgentDetail(activeAgent.id, conversation?.id);
+      await loadAgentDetail(activeAgent.id);
     } catch (routineError) {
       setError(routineError instanceof Error ? routineError.message : t.agents.routines.saveError);
     } finally {
@@ -748,7 +734,6 @@ export function AgentsView({ t, intelligenceProviderConfigured, providerOptions 
   };
 
   const handleToggleRoutine = async (routine: PersonalAgentRoutine) => {
-    if (busy) return;
     const authorizationText = window.prompt(t.agents.routines.changeAuthPrompt);
     if (!authorizationText?.trim()) return;
     setBusyAction('routine');
@@ -776,9 +761,7 @@ export function AgentsView({ t, intelligenceProviderConfigured, providerOptions 
     try {
       await window.forger.personalAgentRoutinesDelete({ routineId: routine.id, authorizationText });
       setRoutines((current) => current.filter((item) => item.id !== routine.id));
-      if (activeAgent) {
-        await loadAgentDetail(activeAgent.id, conversation?.id);
-      }
+      await loadAgentDetail(activeAgent!.id);
     } catch (routineError) {
       setError(routineError instanceof Error ? routineError.message : t.agents.routines.deleteError);
     } finally {
@@ -851,17 +834,14 @@ export function AgentsView({ t, intelligenceProviderConfigured, providerOptions 
   };
 
   const handleMessagesScroll = () => {
-    const container = messagesScrollRef.current;
-    if (!container) {
-      return;
-    }
+    const container = messagesScrollRef.current!;
     const distanceFromBottom = container.scrollHeight - container.scrollTop - container.clientHeight;
     shouldStickToBottomRef.current = distanceFromBottom < 96;
   };
 
   const renderAccessChips = (agent: PersonalAgent) => (
     <Stack direction="row" spacing={0.75} flexWrap="wrap" useFlexGap>
-      <Chip size="small" label={`${providerOptions.find((option) => option.value === (agent.runtime?.provider ?? 'codex'))?.label ?? agent.runtime?.provider ?? 'Codex'} · ${agent.runtime?.model ?? CODEX_MODEL_OPTIONS[0]?.displayModelName ?? 'gpt-5.2'}`} />
+      <Chip size="small" label={`${providerOptions.find((option) => option.value === (agent.runtime?.provider ?? 'codex'))?.label ?? agent.runtime?.provider ?? 'Codex'} · ${agent.runtime?.model ?? CODEX_MODEL_OPTIONS[0]!.displayModelName}`} />
       <Chip size="small" label={agent.permissionMode === 'unsafe' ? t.agents.expandedPermission : t.agents.standardPermission} />
       <Chip size="small" label={agent.networkAccess ? t.agents.internetOn : t.agents.internetOff} />
       <Chip size="small" label={agent.appIds.length > 0 ? t.agents.appsCount(agent.appIds.length) : t.agents.noAppsAccess} />
@@ -1144,11 +1124,7 @@ export function AgentsView({ t, intelligenceProviderConfigured, providerOptions 
         <Typography variant="subtitle2" noWrap>{t.agents.peerThreadsTitle}</Typography>
       </Stack>
       <Box sx={{ flex: 1, minHeight: 0, overflow: 'auto', p: 0.75 }}>
-        {peerThreads.length > 0 ? renderPeerThreadRows(peerThreads) : (
-          <Typography variant="body2" color="text.secondary" sx={{ p: 1 }}>
-            {t.agents.peerThreadsEmpty}
-          </Typography>
-        )}
+        {renderPeerThreadRows(peerThreads)}
       </Box>
     </Paper>
   );
@@ -1191,7 +1167,7 @@ export function AgentsView({ t, intelligenceProviderConfigured, providerOptions 
               size="small"
               color="inherit"
               startIcon={<CloseRounded />}
-              disabled={busyAction === 'cancelWakeup'}
+              disabled={busy}
               onClick={() => void handleCancelWakeup()}
             >
               {t.actions.cancel}
@@ -1400,7 +1376,7 @@ export function AgentsView({ t, intelligenceProviderConfigured, providerOptions 
                     <IconButton
                       size="small"
                       aria-label={t.sections.chat.notifyForger}
-                      onClick={() => onNotifyForger({ agent: activeAgent, conversation, run: activeRun ?? conversation.activeRun })}
+                      onClick={() => onNotifyForger({ agent: activeAgent, conversation, run: activeRun })}
                       sx={{
                         width: 32,
                         height: 32,
@@ -1454,18 +1430,18 @@ export function AgentsView({ t, intelligenceProviderConfigured, providerOptions 
                 </Stack>
               ) : visibleMessages.length ? (
                 <Stack spacing={2} sx={{ p: 1.5, minWidth: 0 }}>
-                  {visibleMessages.map((item) => renderMessage(item, { contextMessages: conversation?.messages ?? [] }))}
+                  {visibleMessages.map((item) => renderMessage(item, { contextMessages: conversation!.messages }))}
                   {runIsActive ? (
                     <Box sx={{ width: '78%', maxWidth: '78%', minWidth: 0 }}>
                       <AgentRunActivityReceipt
                         t={t}
                         activity={activeRun?.activity}
                         mode="live"
-                        progressMessages={activeRun?.progress.map((entry) => ({
+                        progressMessages={activeRun!.progress.map((entry) => ({
                           id: entry.id,
                           message: entry.message,
                           createdAt: entry.createdAt,
-                        })) ?? []}
+                        }))}
                         emptyLabel={t.agents.firstRunLoading}
                       />
                     </Box>
@@ -1483,14 +1459,18 @@ export function AgentsView({ t, intelligenceProviderConfigured, providerOptions 
                         t={t}
                         activity={activeRun?.activity}
                         mode="live"
-                        progressMessages={activeRun?.progress.map((entry) => ({
+                        progressMessages={activeRun!.progress.map((entry) => ({
                           id: entry.id,
                           message: entry.message,
                           createdAt: entry.createdAt,
-                        })) ?? []}
+                        }))}
                         emptyLabel={t.agents.firstRunLoading}
                       />
                     </Box>
+                  ) : runErrorMessage ? (
+                    <Typography variant="body2" color="error" sx={{ width: '78%', maxWidth: '78%', overflowWrap: 'anywhere', wordBreak: 'break-word' }}>
+                      {runErrorMessage}
+                    </Typography>
                   ) : (
                     <Stack spacing={1} alignItems="center">
                       {(busyAction === 'wake' || busyAction === 'start') ? <CircularProgress size={22} /> : null}

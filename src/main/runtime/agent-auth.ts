@@ -468,7 +468,7 @@ const readCodexAppServerRateLimits = async (
     child.stdout.on('data', (chunk: Buffer | string) => {
       stdoutBuffer += chunk.toString();
       const lines = stdoutBuffer.split(/\r?\n/);
-      stdoutBuffer = lines.pop() ?? '';
+      stdoutBuffer = lines.pop()!;
       for (const line of lines) {
         handleResponse(line);
       }
@@ -2176,7 +2176,7 @@ const startAntigravityAuthSession = async (
       clearSilenceTimer();
       const session = activeAntigravityAuthSessions.get(sessionId);
       activeAntigravityAuthSessions.delete(sessionId);
-      if (session?.completed) {
+      if (!session || session.completed) {
         return;
       }
       void appendInstallLog('antigravity_auth:session_exit', {

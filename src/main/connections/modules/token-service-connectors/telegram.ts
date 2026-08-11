@@ -10,6 +10,9 @@ const api = async (token: string, method: string, payload?: Record<string, unkno
   return data.result;
 };
 
+const isApiFailure = (value: unknown): value is ReturnType<typeof fail> =>
+  record(value).success === false;
+
 const mapped = (
   id: string,
   name: string,
@@ -25,6 +28,7 @@ const mapped = (
     for (const key of required) if (!clean(input[key])) return fail(`telegram_${key}_required`);
     const payload = Object.fromEntries(Object.entries(map).map(([from, to]) => [to, clean(input[from])]));
     const result = await api(secrets.bot_token, method, payload);
+    if (isApiFailure(result)) return result;
     return output === 'deleted'
       ? { success: true, data: { deleted: result === true } }
       : { success: true, data: { [output]: result } };
@@ -37,6 +41,7 @@ const actions: TokenConnectorActionDefinition[] = [
     inputSchema: schema({ offset: { type: 'number' }, limit: { type: 'number' } }), outputSchema: arraySchema('updates'),
     run: async ({ input, secrets }) => {
       const updates = await api(secrets.bot_token, 'getUpdates', { offset: input.offset, limit: input.limit ?? 25 });
+      if (isApiFailure(updates)) return updates;
       return { success: true, data: { updates: list(updates) } };
     },
   },
@@ -52,7 +57,11 @@ export const telegramToolModule = moduleFrom({
   id: 'telegram', name: 'Telegram', description: 'Opera un bot de Telegram con token local.',
   secrets: [secret('bot_token', 'Bot token de Telegram', 'Token entregado por BotFather.')],
   validate: async (secrets) => {
-    const bot = record(await api(secrets.bot_token, 'getMe'));
+    const result = await api(secrets.bot_token, 'getMe');
+    if (isApiFailure(result)) {
+      return { ok: false, technicalCode: result.technicalCode };
+    }
+    const bot = record(result);
     return { ok: true, data: { subject: String(bot.id ?? ''), username: clean(bot.username) || clean(bot.first_name) } };
   },
   actions,

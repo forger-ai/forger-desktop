@@ -471,10 +471,8 @@ export const getAgentToolPackages = (locale?: string | null): AgentToolPackageDe
       name: chromeExtensionCopy.name,
       description: chromeExtensionCopy.description,
       tools: toolPackage.tools.map((tool) => {
-        const actionCopy = (chromeExtensionCopy.actions as Partial<Record<AgentToolId, { name: string; description: string }>>)[tool.id];
-        return actionCopy
-          ? { ...tool, name: actionCopy.name, description: actionCopy.description }
-          : tool;
+        const actionCopy = (chromeExtensionCopy.actions as Record<AgentToolId, { name: string; description: string }>)[tool.id];
+        return { ...tool, name: actionCopy.name, description: actionCopy.description };
       }),
     };
   });
