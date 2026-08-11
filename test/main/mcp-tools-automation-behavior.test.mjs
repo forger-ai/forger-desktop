@@ -46,7 +46,7 @@ const wait = (ms) => new Promise((resolveWait) => {
   setTimeout(resolveWait, ms);
 });
 
-const waitFor = async (predicate, { attempts = 200, delayMs = 20 } = {}) => {
+const waitFor = async (predicate, { attempts = 500, delayMs = 20 } = {}) => {
   for (let attempt = 0; attempt < attempts; attempt += 1) {
     if (await predicate()) {
       return true;
