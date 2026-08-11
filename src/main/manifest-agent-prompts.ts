@@ -50,7 +50,7 @@ export const renderManifestAgentPrompt = ({
       renderVariable(name, variables[name], declaration, appRoot),
     ]),
   );
-  return template.body.replace(PLACEHOLDER_PATTERN, (_match, name: string) => renderedVariables[name] ?? '').trim();
+  return template.body.replace(PLACEHOLDER_PATTERN, (_match, name: string) => renderedVariables[name]).trim();
 };
 
 export const resolvePromptTemplate = (agent: AppAgent, kind: ManifestAgentPromptKind): AppAgentPromptTemplate => {

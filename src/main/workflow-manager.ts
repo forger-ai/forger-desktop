@@ -87,10 +87,12 @@ export class WorkflowManager {
           .filter((revision) => revision.workflowId === normalized.id)
           .sort((left, right) => right.revision - left.revision);
         if (revisions.length === 0) {
+          const migrationAppliedAt = new Map([[normalized.revisionId, normalized.updatedAt]])
+            .get(normalized.appliedRevisionId as string);
           const migrated = createWorkflowRevision(normalized, {
             id: normalized.revisionId,
             applied: normalized.appliedRevisionId === normalized.revisionId,
-            ...(normalized.appliedRevisionId === normalized.revisionId ? { appliedAt: normalized.updatedAt } : {}),
+            appliedAt: migrationAppliedAt,
           });
           revisions = [migrated];
           await this.store.saveRevisions(normalized.id, revisions);
@@ -119,24 +121,48 @@ export class WorkflowManager {
     if (this.disposePromise) return this.disposePromise;
     this.disposed = true;
     this.disposePromise = (async () => {
+      const failures: unknown[] = [];
+      const settledPromises = new Set<Promise<unknown>>();
+      const settle = async (promises: Iterable<Promise<unknown>>): Promise<void> => {
+        const pending = [...promises].filter((promise) => {
+          if (settledPromises.has(promise)) return false;
+          settledPromises.add(promise);
+          return true;
+        });
+        const results = await Promise.allSettled(pending);
+        for (const result of results) {
+          if (result.status === 'rejected') {
+            if (result.reason instanceof AggregateError) failures.push(...result.reason.errors);
+            else failures.push(result.reason);
+          }
+        }
+      };
       for (const timer of this.timers.values()) clearTimeout(timer);
       this.timers.clear();
 
       for (const active of this.activeRuns.values()) this.cancelActiveRun(active);
-      await Promise.allSettled([...this.workflowOperationTails.values()]);
+      await settle(this.workflowOperationTails.values());
       for (const active of this.activeRuns.values()) this.cancelActiveRun(active);
-      await Promise.allSettled([...this.runTasks.values()]);
-      await Promise.allSettled([...this.inFlightOperations]);
-      await Promise.allSettled([...this.workflowOperationTails.values()]);
+      await settle(this.runTasks.values());
+      await settle(this.inFlightOperations);
+      await settle(this.workflowOperationTails.values());
       for (const active of this.activeRuns.values()) this.cancelActiveRun(active);
-      await Promise.allSettled([...this.runTasks.values()]);
-      await Promise.allSettled(
+      await settle(this.runTasks.values());
+      await settle(
         [...this.activeRuns.keys()].map(async (runId) => {
           await Promise.resolve().then(() => this.options.releaseAppActions?.(runId));
         }),
       );
-      await this.nodeRuntime.flushActivityPersistence().catch(() => undefined);
+      try {
+        await this.nodeRuntime.flushActivityPersistence();
+      } catch (error) {
+        if (error instanceof AggregateError) failures.push(...error.errors);
+        else failures.push(error);
+      }
       this.activeRuns.clear();
+      if (failures.length > 0) {
+        throw new AggregateError(failures, 'workflow_dispose_failed');
+      }
     })();
     return this.disposePromise;
   }
@@ -1041,7 +1067,7 @@ export class WorkflowManager {
 
   private trackOperation<T>(operation: Promise<T>): Promise<T> {
     this.inFlightOperations.add(operation);
-    void operation.finally(() => this.inFlightOperations.delete(operation)).catch(() => undefined);
+    operation.finally(() => this.inFlightOperations.delete(operation)).catch(() => undefined);
     return operation;
   }
 
@@ -1058,8 +1084,8 @@ export class WorkflowManager {
       if (!['succeeded', 'failed', 'skipped'].includes(nodeRun.status)) nodeRun.status = 'canceled';
     }
     await this.withWorkflowLock(workflowId, async () => {
-      const workflow = this.workflows.get(workflowId);
-      if (workflow) this.workflows.set(workflowId, { ...workflow, running: false });
+      const workflow = this.workflows.get(workflowId) as Workflow;
+      this.workflows.set(workflowId, { ...workflow, running: false });
       await this.persistRunUnlocked(workflowId, run);
     });
   }

@@ -90,12 +90,14 @@ const emptyRemoteActivity = (): RemoteActivitySnapshot => ({
 const AppSelect = ({
   apps,
   selectedAppId,
+  labelId,
   inactiveLabel,
   onSelect,
   getAppMeta,
 }: {
   apps: AppSummary[];
   selectedAppId: string | null;
+  labelId: string;
   inactiveLabel: string;
   onSelect: (appId: string | null) => void;
   getAppMeta: (appId: string) => { name: string; description: string };
@@ -103,6 +105,7 @@ const AppSelect = ({
   const theme = useTheme();
   return (
     <Select
+      labelId={labelId}
       value={selectedAppId ?? ''}
       onChange={(event) => onSelect(event.target.value || null)}
       size="small"
@@ -324,10 +327,6 @@ export function Topbar({
     activity.kind === 'app' && activity.state !== 'closed';
 
   const handleStopRemoteActivity = async (activity: RemoteActivityItem) => {
-    if (!canStopRemoteActivity(activity) || stoppingRemoteActivityIds.has(activity.id)) {
-      return;
-    }
-
     setStoppingRemoteActivityIds((current) => new Set(current).add(activity.id));
     try {
       await window.forger.stopRemoteNetworkShare(activity.targetId);
@@ -370,12 +369,13 @@ export function Topbar({
 
           {currentView === 'datos' ? (
             <Stack direction="row" spacing={1.25} alignItems="center">
-              <Typography variant="body2" color="text.secondary">
+              <Typography id="active-data-app-label" variant="body2" color="text.secondary">
                 {t.sections.datos.activeAppLabel}
               </Typography>
               <AppSelect
                 apps={dataApps}
                 selectedAppId={selectedDataAppId}
+                labelId="active-data-app-label"
                 inactiveLabel={t.sections.datos.inactiveApp}
                 onSelect={onSelectDataApp}
                 getAppMeta={getAppMeta}

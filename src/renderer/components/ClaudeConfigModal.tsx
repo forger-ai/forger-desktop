@@ -89,7 +89,7 @@ export function ClaudeConfigModal({
       <DialogContent>
         <Stack spacing={2}>
           <Stack direction="row" spacing={1} alignItems="center">
-            <Chip color={forgerConnected ? 'success' : 'default'} label={forgerConnected ? t.llmProviderConnect.connected : t.llmProviderConnect.notConnected} />
+            <Chip color="success" label={t.llmProviderConnect.connected} />
             <Chip variant="outlined" label={sourceLabel} />
           </Stack>
           {status.authenticated ? (

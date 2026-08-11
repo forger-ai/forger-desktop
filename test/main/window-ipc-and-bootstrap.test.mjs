@@ -16,6 +16,12 @@ const loadWindowModule = async (BrowserWindow) =>
     return require('../../dist-electron/main/ipc/window.js');
   });
 
+const loadMicrophonePermissions = async (systemPreferences) =>
+  await withMockedElectron({ systemPreferences }, (require) => {
+    clearDistModule('main/ipc/microphone-permissions.js');
+    return require('../../dist-electron/main/ipc/microphone-permissions.js');
+  });
+
 const withPlatform = async (platform, callback) => {
   const descriptor = Object.getOwnPropertyDescriptor(process, 'platform');
   Object.defineProperty(process, 'platform', { value: platform });
@@ -214,7 +220,11 @@ test('window bootstrap creates the main BrowserWindow with secure renderer defau
   const externalUrls = [];
   const openedPaths = [];
   const reportPath = path.resolve('report.txt');
+  const otherReportPath = path.resolve('other-report.txt');
+  const thirdReportPath = path.resolve('third-report.txt');
   const reportUrl = pathToFileURL(reportPath).toString();
+  const otherReportUrl = pathToFileURL(otherReportPath).toString();
+  const thirdReportUrl = pathToFileURL(thirdReportPath).toString();
   let mainWindow = null;
   let friendWindows = [];
 
@@ -293,8 +303,44 @@ test('window bootstrap creates the main BrowserWindow with secure renderer defau
   );
   assert.deepEqual(mainWindow.webContents.openHandler({ url: 'https://example.com/popup' }), { action: 'deny' });
   assert.deepEqual(mainWindow.webContents.openHandler({ url: reportUrl }), { action: 'deny' });
+  mainWindow.currentUrl = reportUrl;
+  assert.deepEqual(mainWindow.webContents.openHandler({ url: 'javascript:alert(1)' }), { action: 'deny' });
+  assert.deepEqual(mainWindow.webContents.openHandler({ url: reportUrl }), { action: 'deny' });
+  assert.deepEqual(mainWindow.webContents.openHandler({ url: otherReportUrl }), { action: 'deny' });
+  const sameFileNavigation = [];
+  mainWindow.webContents.events.get('will-navigate')(
+    { preventDefault: () => sameFileNavigation.push('prevented') },
+    reportUrl,
+  );
+  const differentFileNavigation = [];
+  mainWindow.webContents.events.get('will-navigate')(
+    { preventDefault: () => differentFileNavigation.push('prevented') },
+    thirdReportUrl,
+  );
+  assert.deepEqual(sameFileNavigation, []);
+  assert.deepEqual(differentFileNavigation, ['prevented']);
+  mainWindow.currentUrl = 'http://127.0.0.1:5173/';
   assert.deepEqual(mainWindow.webContents.openHandler({ url: 'javascript:alert(1)' }), { action: 'deny' });
   assert.deepEqual(mainWindow.webContents.openHandler({ url: 'http://127.0.0.1:5173/help' }), { action: 'deny' });
+  mainWindow.currentUrl = 'not-a-url';
+  assert.deepEqual(mainWindow.webContents.openHandler({ url: 'not-a-url' }), { action: 'deny' });
+  const malformedNavigation = [];
+  mainWindow.webContents.events.get('will-navigate')(
+    { preventDefault: () => malformedNavigation.push('prevented') },
+    'not-a-url',
+  );
+  assert.deepEqual(malformedNavigation, ['prevented']);
+  mainWindow.currentUrl = 'http://127.0.0.1:5173/help';
+  const childWindowClosed = [];
+  mainWindow.webContents.events.get('did-create-window')({
+    isDestroyed: () => false,
+    close: () => childWindowClosed.push('close'),
+  });
+  mainWindow.webContents.events.get('did-create-window')({
+    isDestroyed: () => true,
+    close: () => childWindowClosed.push('destroyed-close'),
+  });
+  assert.deepEqual(childWindowClosed, ['close']);
 
   assert.equal(constructedWindows.length, 1);
   assert.equal(constructedWindows[0].options.frame, false);
@@ -327,12 +373,60 @@ test('window bootstrap creates the main BrowserWindow with secure renderer defau
   assert.deepEqual(externalNavigation, ['prevented']);
   assert.deepEqual(internalNavigation, []);
   assert.deepEqual(externalUrls, ['https://example.com/docs', 'https://example.com/popup']);
-  assert.deepEqual(openedPaths, [reportPath]);
+  assert.deepEqual(openedPaths, [reportPath, otherReportPath, thirdReportPath]);
   assert.equal(mainWindow.currentUrl, 'http://127.0.0.1:5173/help');
 
   const replacementWindow = createWindowDouble();
   mainWindow = replacementWindow;
   assert.equal(registeredMainDeps.getMainWindow(), replacementWindow);
+});
+
+test('microphone permissions normalize every platform and native response safely', async () => {
+  await withPlatform('linux', async () => {
+    const module = await loadMicrophonePermissions({
+      getMediaAccessStatus: () => 'granted',
+      askForMediaAccess: async () => true,
+    });
+    assert.equal(module.getMicrophonePermissionStatus(), 'unsupported');
+    assert.equal(await module.requestMicrophonePermission(), 'unsupported');
+  });
+
+  await withPlatform('darwin', async () => {
+    let currentStatus = 'not-determined';
+    let askedFor = null;
+    const systemPreferences = {
+      getMediaAccessStatus: (mediaType) => {
+        askedFor = mediaType;
+        return currentStatus;
+      },
+      askForMediaAccess: async (mediaType) => {
+        askedFor = mediaType;
+        return true;
+      },
+    };
+    const module = await loadMicrophonePermissions(systemPreferences);
+    for (const status of ['not-determined', 'granted', 'denied', 'restricted', 'unknown']) {
+      currentStatus = status;
+      assert.equal(module.getMicrophonePermissionStatus(), status);
+      assert.equal(askedFor, 'microphone');
+    }
+    currentStatus = 'unexpected-native-status';
+    assert.equal(module.getMicrophonePermissionStatus(), 'unknown');
+    assert.equal(await module.requestMicrophonePermission(), 'granted');
+
+    systemPreferences.askForMediaAccess = async () => false;
+    currentStatus = 'denied';
+    assert.equal(await module.requestMicrophonePermission(), 'denied');
+  });
+
+  await withPlatform('darwin', async () => {
+    const module = await loadMicrophonePermissions({
+      getMediaAccessStatus: undefined,
+      askForMediaAccess: undefined,
+    });
+    assert.equal(module.getMicrophonePermissionStatus(), 'unsupported');
+    assert.equal(await module.requestMicrophonePermission(), 'unsupported');
+  });
 });
 
 test('window bootstrap keeps native frames portable and ignores empty pending deep-link flushes', async () => {
@@ -401,6 +495,12 @@ test('window bootstrap keeps native frames portable and ignores empty pending de
     assert.equal(constructedWindows[0].options.titleBarStyle, undefined);
     assert.equal(constructedWindows[0].options.trafficLightPosition, undefined);
     assert.deepEqual(focusCalls, []);
+
+    await withPlatform('darwin', async () => {
+      await controller.createWindow();
+      assert.equal(constructedWindows[1].options.titleBarStyle, 'hidden');
+      assert.deepEqual(constructedWindows[1].options.trafficLightPosition, { x: 14, y: 16 });
+    });
   });
 });
 

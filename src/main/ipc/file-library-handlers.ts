@@ -144,12 +144,15 @@ export const registerFileLibraryIpcHandlers = ({
         appId: input.appId,
       });
       await lease.commit();
+      await Promise.allSettled(openedFiles.map((file) => file.fileHandle.close()));
       return imported;
     } catch (error) {
-      await lease.rollback();
-      throw error;
-    } finally {
+      const [rollback] = await Promise.allSettled([Promise.resolve().then(() => lease.rollback())]);
       await Promise.allSettled(openedFiles.map((file) => file.fileHandle.close()));
+      if (rollback.status === 'rejected') {
+        throw rollback.reason;
+      }
+      throw error;
     }
   });
   ipcMain.handle(IPC_CHANNELS.filesMove, async (_event, input: FilesMoveInput) => await getFileLibrary().moveFiles(input));

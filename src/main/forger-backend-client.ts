@@ -787,7 +787,7 @@ export class ForgerBackendClient {
     for (const asset of input.assets) {
       form.append('asset_paths[]', asset.path);
       const body = asset.data.buffer.slice(asset.data.byteOffset, asset.data.byteOffset + asset.data.byteLength) as ArrayBuffer;
-      form.append('assets[]', new Blob([body], { type: asset.type }), asset.path.split('/').pop() ?? 'asset');
+      form.append('assets[]', new Blob([body], { type: asset.type }), asset.path.split('/').pop() || 'asset');
     }
     const response = await fetch(`${this.options.backendBaseUrl}/api/v1/me/remote_tunnel_sessions/${input.sessionId}/upload_frontend`, {
       method: 'POST',

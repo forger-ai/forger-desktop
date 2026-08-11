@@ -291,7 +291,7 @@ export class SidekickVoiceRuntime {
     signal: AbortSignal;
   }): Promise<SidekickVoiceAgentOutcome> {
     const manager = this.deps.getPersonalAgentConversationManager();
-    let resolveRunSettled: () => void = () => undefined;
+    let resolveRunSettled!: () => void;
     const runSettled = new Promise<void>((resolve) => {
       resolveRunSettled = resolve;
     });
@@ -456,8 +456,8 @@ export class SidekickVoiceRuntime {
     cancel: () => void;
   } {
     let settled = false;
-    let resolveStarted = (): void => undefined;
-    let rejectStarted = (_error: unknown): void => undefined;
+    let resolveStarted!: () => void;
+    let rejectStarted!: (error: unknown) => void;
     const promise = new Promise<void>((resolve, reject) => {
       resolveStarted = resolve;
       rejectStarted = reject;

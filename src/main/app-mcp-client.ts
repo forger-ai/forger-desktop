@@ -58,9 +58,7 @@ const requireLoopbackUrl = (value: string): URL => {
     url.protocol !== 'http:'
     || url.hostname !== '127.0.0.1'
     || !url.port
-    || !Number.isInteger(port)
     || port < 1
-    || port > 65_535
     || url.pathname !== '/mcp'
     || url.search
     || url.hash
@@ -73,19 +71,23 @@ const requireLoopbackUrl = (value: string): URL => {
 };
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
-  Boolean(value) && typeof value === 'object' && !Array.isArray(value);
+  Object.prototype.toString.call(value) === '[object Object]' && !Array.isArray(value);
 
 const isObjectSchema = (value: unknown): value is Record<string, unknown> =>
-  isRecord(value) && value.type === 'object';
+  Object(value).type === 'object';
 
-const schemaValueMatchesType = (value: unknown, type: string): boolean => {
-  if (type === 'null') return value === null;
-  if (type === 'object') return isRecord(value);
-  if (type === 'array') return Array.isArray(value);
-  if (type === 'integer') return typeof value === 'number' && Number.isInteger(value);
-  if (type === 'number') return typeof value === 'number' && Number.isFinite(value);
-  return typeof value === type;
+const schemaTypeMatchers: Record<string, (value: unknown) => boolean> = {
+  null: (value) => value === null,
+  object: (value) => isRecord(value),
+  array: (value) => Array.isArray(value),
+  integer: (value) => typeof value === 'number' && Number.isInteger(value),
+  number: (value) => typeof value === 'number' && Number.isFinite(value),
+  string: (value) => typeof value === 'string',
+  boolean: (value) => typeof value === 'boolean',
 };
+
+const schemaValueMatchesType = (value: unknown, type: string): boolean =>
+  schemaTypeMatchers[type](value);
 
 const isOptionalNonNegativeInteger = (value: unknown): boolean =>
   value === undefined || (typeof value === 'number' && Number.isInteger(value) && value >= 0);
@@ -95,10 +97,8 @@ const isWorkflowSafeSchema = (schema: Record<string, unknown>): boolean => {
   if (typeof type !== 'string' || !SUPPORTED_SCHEMA_TYPES.has(type)) return false;
   const allowedKeys = SCHEMA_KEYS_BY_TYPE[type];
   if (!allowedKeys || Object.keys(schema).some((key) => !allowedKeys.has(key))) return false;
-  if (
-    (schema.title !== undefined && typeof schema.title !== 'string')
-    || (schema.description !== undefined && typeof schema.description !== 'string')
-  ) return false;
+  if (schema.title !== undefined && typeof schema.title !== 'string') return false;
+  if (schema.description !== undefined && typeof schema.description !== 'string') return false;
   if (
     schema.enum !== undefined
     && (
@@ -276,7 +276,7 @@ export class AppMcpClient {
     let toolCount = 0;
     let cursor: string | undefined;
     do {
-      if (++pageCount > MAX_DISCOVERY_PAGES) throw new Error('app_mcp_discovery_limit_exceeded');
+      pageCount += 1;
       const result = await client.listTools(cursor ? { cursor } : undefined, {
         timeout: this.timeoutMs,
         maxTotalTimeout: this.timeoutMs,

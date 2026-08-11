@@ -103,8 +103,8 @@ export function FriendsView({ account, accountBusy = false, onOpenFriendChat, on
   const panelId = 'social-launcher-panel';
   const topbar = variant === 'topbar';
   const [open, setOpen] = useState(false);
-  const [activeTab, setActiveTab] = useState<SocialTab>(() => readLastSessionTab() ?? 'friends');
-  const [lastSessionTab, setLastSessionTab] = useState<SocialTab | null>(() => readLastSessionTab());
+  const [activeTab, setActiveTab] = useState<SocialTab>(() => readLastSessionTab()!);
+  const [lastSessionTab, setLastSessionTab] = useState<SocialTab>(() => readLastSessionTab()!);
   const [friendships, setFriendships] = useState<CloudFriendship[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -138,6 +138,7 @@ export function FriendsView({ account, accountBusy = false, onOpenFriendChat, on
     () => sortFriends(friendships.filter((entry) => entry.status === 'accepted')),
     [friendships],
   );
+  const shareRecipient = accepted.find((entry) => entry.friend.id === Number(shareRecipientId))?.friend;
   const pendingIncoming = useMemo(
     () => friendships.filter((entry) => entry.status === 'pending' && entry.addresseeId === accountUserId),
     [accountUserId, friendships],
@@ -170,9 +171,7 @@ export function FriendsView({ account, accountBusy = false, onOpenFriendChat, on
 
   const syncLastTab = (value: SocialTab) => {
     setLastSessionTab(value);
-    if (typeof window !== 'undefined') {
-      window.sessionStorage.setItem(LAST_SOCIAL_TAB_KEY, value);
-    }
+    window.sessionStorage.setItem(LAST_SOCIAL_TAB_KEY, value);
   };
 
   const mergeFriendship = useCallback((friendship: CloudFriendship) => {
@@ -184,10 +183,7 @@ export function FriendsView({ account, accountBusy = false, onOpenFriendChat, on
   }, []);
 
   const mergeCloudMessageActivity = useCallback((message: CloudMessage, unread = false) => {
-    const currentUserId = accountUserId;
-    if (!currentUserId) {
-      return;
-    }
+    const currentUserId = accountUserId!;
     const friendId = message.sender.id === currentUserId ? message.recipient.id : message.sender.id;
     const activityAt = message.createdAt || message.updatedAt || new Date().toISOString();
     setFriendships((current) => current.map((entry) => {
@@ -240,11 +236,6 @@ export function FriendsView({ account, accountBusy = false, onOpenFriendChat, on
   }, [accountUserId, resetSocialState]);
 
   const loadFriends = useCallback(async ({ silent = false }: { silent?: boolean } = {}) => {
-    if (!account.authenticated || !account.user?.confirmed) {
-      resetSocialState();
-      return;
-    }
-
     if (!silent || !hasLoadedOnce) {
       setLoading(true);
     }
@@ -266,13 +257,9 @@ export function FriendsView({ account, accountBusy = false, onOpenFriendChat, on
         setLoading(false);
       }
     }
-  }, [account.authenticated, account.user?.confirmed, accountUserId, hasLoadedOnce, resetSocialState]);
+  }, [hasLoadedOnce]);
 
   const loadSocialApps = useCallback(async () => {
-    if (!account.authenticated || !account.user?.confirmed) {
-      setSocialApps([]);
-      return;
-    }
     setSocialAppsLoading(true);
     setSocialAppsError(null);
     try {
@@ -283,7 +270,7 @@ export function FriendsView({ account, accountBusy = false, onOpenFriendChat, on
     } finally {
       setSocialAppsLoading(false);
     }
-  }, [account.authenticated, account.user?.confirmed]);
+  }, []);
 
   useEffect(() => {
     if (!open) {
@@ -325,10 +312,7 @@ export function FriendsView({ account, accountBusy = false, onOpenFriendChat, on
       }
 
       if (event.type === 'cloud_message' || event.type === 'ephemeral_cloud_message') {
-        const currentUserId = accountUserId;
-        if (!currentUserId) {
-          return;
-        }
+        const currentUserId = accountUserId!;
         const message = event.message;
         const friendId = message.sender.id === currentUserId ? message.recipient.id : message.sender.id;
         const knownFriendship = friendships.some((entry) => entry.friend.id === friendId);
@@ -352,19 +336,13 @@ export function FriendsView({ account, accountBusy = false, onOpenFriendChat, on
     }
   }, [activeTab, open, pendingIncoming]);
 
-  useEffect(() => {
-    if (!open && unseenPendingRequestCount > 0 && !lastSessionTab) {
-      setActiveTab('requests');
-    }
-  }, [lastSessionTab, open, unseenPendingRequestCount]);
-
   const handleToggle = () => {
     if (open) {
       setOpen(false);
       return;
     }
 
-    const nextTab = unseenPendingRequestCount > 0 ? 'requests' : (lastSessionTab ?? 'friends');
+    const nextTab = unseenPendingRequestCount > 0 ? 'requests' : lastSessionTab;
     setActiveTab(nextTab);
     setOpen(true);
   };
@@ -381,10 +359,6 @@ export function FriendsView({ account, accountBusy = false, onOpenFriendChat, on
   };
 
   const handleOpenChat = async (friendship: CloudFriendship) => {
-    if (openingFriendIds.has(friendship.friend.id)) {
-      return;
-    }
-
     setOpeningFriendIds((current) => new Set(current).add(friendship.friend.id));
     setRowErrors((current) => {
       const next = { ...current };
@@ -415,36 +389,24 @@ export function FriendsView({ account, accountBusy = false, onOpenFriendChat, on
 
   const openShareAppDialog = (app: SocialUserApp) => {
     setShareAppDialog({ open: true, app });
-    setShareRecipientId((current) => current || String(accepted[0]?.friend.id ?? ''));
+    setShareRecipientId((current) => current || String(accepted[0].friend.id));
     setShareAppError(null);
   };
 
   const closeShareAppDialog = () => {
-    if (sharingAppId !== null) {
-      return;
-    }
     setShareAppDialog({ open: false, app: null });
     setShareAppError(null);
   };
 
-  const handleShareAppWithFriend = async () => {
-    const app = shareAppDialog.app;
-    const recipientUserId = Number(shareRecipientId);
-    if (!app || !Number.isFinite(recipientUserId) || sharingAppId !== null) {
-      return;
-    }
-
+  const handleShareAppWithFriend = async (app: SocialUserApp, recipient: CloudFriendUser) => {
     setSharingAppId(app.id);
     setShareAppError(null);
     try {
       await window.forger.sendCloudAppShareMessage({
-        recipientUserId,
+        recipientUserId: recipient.id,
         userAppId: app.id,
       });
-      const friend = accepted.find((entry) => entry.friend.id === recipientUserId)?.friend;
-      const label = friend
-        ? `${app.name} enviada a @${friend.username}.`
-        : `${app.name} enviada.`;
+      const label = `${app.name} enviada a @${recipient.username}.`;
       onNotify?.(label, 'success');
       setShareAppDialog({ open: false, app: null });
       setShareRecipientId('');
@@ -501,8 +463,9 @@ export function FriendsView({ account, accountBusy = false, onOpenFriendChat, on
     setAddFriendFeedback(null);
     try {
       const results = await window.forger.searchFriends(username);
-      setFriendSearchResults(results.filter((result) => result.id !== accountUserId));
-      if (results.length === 0) {
+      const visibleResults = results.filter((result) => result.id !== accountUserId);
+      setFriendSearchResults(visibleResults);
+      if (visibleResults.length === 0) {
         setAddFriendFeedback(`No encontramos a @${username}.`);
       }
     } catch (err) {
@@ -513,10 +476,6 @@ export function FriendsView({ account, accountBusy = false, onOpenFriendChat, on
   };
 
   const handleSendFriendRequest = async (user: CloudFriendUser) => {
-    if (friendRequestSendingId) {
-      return;
-    }
-
     setFriendRequestSendingId(user.id);
     setAddFriendError(null);
     setAddFriendFeedback(null);
@@ -539,10 +498,6 @@ export function FriendsView({ account, accountBusy = false, onOpenFriendChat, on
   const handleUsernameSubmit = async (event?: SyntheticEvent) => {
     event?.preventDefault();
     const nextUsername = profileUsername.trim().replace(/^@/, '');
-    if (!nextUsername || accountBusy || usernameChangeBlocked) {
-      return;
-    }
-
     setProfileUsernameError(null);
     const success = await onUpdateUsername?.(nextUsername);
     if (success) {
@@ -1141,7 +1096,7 @@ export function FriendsView({ account, accountBusy = false, onOpenFriendChat, on
               </Grow>
             )}
           </Popper>
-          <Dialog open={shareAppDialog.open} onClose={closeShareAppDialog} maxWidth="xs" fullWidth>
+          <Dialog open={shareAppDialog.open} onClose={sharingAppId === null ? closeShareAppDialog : undefined} maxWidth="xs" fullWidth>
             <DialogTitle>Enviar app por chat</DialogTitle>
             <DialogContent>
               <Stack spacing={2} sx={{ pt: 1 }}>
@@ -1173,8 +1128,8 @@ export function FriendsView({ account, accountBusy = false, onOpenFriendChat, on
               <Button disabled={sharingAppId !== null} onClick={closeShareAppDialog}>Cancelar</Button>
               <Button
                 variant="contained"
-                disabled={sharingAppId !== null || !shareRecipientId || accepted.length === 0}
-                onClick={() => void handleShareAppWithFriend()}
+                disabled={sharingAppId !== null || !shareAppDialog.app || !shareRecipient}
+                onClick={() => void handleShareAppWithFriend(shareAppDialog.app!, shareRecipient!)}
               >
                 {sharingAppId !== null ? 'Enviando...' : 'Enviar'}
               </Button>

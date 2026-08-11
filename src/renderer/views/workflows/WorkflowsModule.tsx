@@ -239,29 +239,29 @@ export function WorkflowsModule({ t, view, selectedWorkflowId, isPinned, onBackT
   const dirty = draft ? signatureOf(draft) !== baseline : false;
 
   const onDraftChange = useCallback((updater: (current: WorkflowDraft) => WorkflowDraft) => {
-    setDraft((current) => (current ? updater(current) : current));
+    // This callback is only mounted with an initialized editor/detail draft.
+    setDraft((current) => updater(current!));
   }, []);
 
   const saveDraft = useCallback(async () => {
-    if (!draft) {
-      return;
-    }
-    if (!draft.name.trim()) {
+    // Save is only exposed while an initialized draft is mounted.
+    const currentDraft = draft!;
+    if (!currentDraft.name.trim()) {
       setBanner({ severity: 'error', message: copy.nameRequired });
       return;
     }
-    if (draft.nodes.length === 0) {
+    if (currentDraft.nodes.length === 0) {
       setBanner({ severity: 'error', message: copy.nodesRequired });
       return;
     }
-    if (draft.nodes.some((node) => node.type === 'app_action' && (!node.appId || !node.toolName))) {
+    if (currentDraft.nodes.some((node) => node.type === 'app_action' && (!node.appId || !node.toolName))) {
       setBanner({ severity: 'error', message: copy.appActionSelectionRequired });
       return;
     }
     setBusy(true);
     try {
-      const wasCreate = !draft.id;
-      const saved = await getDesktopApi().workflowsUpsert(draftToUpsertInput(draft));
+      const wasCreate = !currentDraft.id;
+      const saved = await getDesktopApi().workflowsUpsert(draftToUpsertInput(currentDraft));
       await refreshWorkflows();
       const savedDraft = draftFromWorkflow(saved);
       setDraft(savedDraft);
@@ -292,10 +292,8 @@ export function WorkflowsModule({ t, view, selectedWorkflowId, isPinned, onBackT
   }, [draft, copy, refreshWorkflows, onOpenDetail, loadRuns, loadRevisions]);
 
   const discardDraft = useCallback(() => {
-    if (!selectedWorkflow) {
-      return;
-    }
-    const next = draftFromWorkflow(selectedWorkflow);
+    // Discard is only exposed from a mounted detail view with a selected workflow.
+    const next = draftFromWorkflow(selectedWorkflow!);
     setDraft(next);
     setBaseline(signatureOf(next));
     setBanner(null);
@@ -392,22 +390,24 @@ export function WorkflowsModule({ t, view, selectedWorkflowId, isPinned, onBackT
   }, [refreshWorkflows]);
 
   const approveNode = useCallback(async (nodeId: string, approved: boolean) => {
-    if (!selectedRunIdRef.current) {
+    const runId = selectedRunIdRef.current;
+    if (!runId) {
       return;
     }
-    await getDesktopApi().workflowsApproveNode({ runId: selectedRunIdRef.current, nodeId, approved });
+    await getDesktopApi().workflowsApproveNode({ runId, nodeId, approved });
     if (selectedWorkflowIdRef.current) {
-      await loadRuns(selectedWorkflowIdRef.current, selectedRunIdRef.current ?? undefined);
+      await loadRuns(selectedWorkflowIdRef.current, runId);
     }
   }, [loadRuns]);
 
   const cancelRun = useCallback(async () => {
-    if (!selectedRunIdRef.current) {
+    const runId = selectedRunIdRef.current;
+    if (!runId) {
       return;
     }
-    await getDesktopApi().workflowsCancelRun(selectedRunIdRef.current);
+    await getDesktopApi().workflowsCancelRun(runId);
     if (selectedWorkflowIdRef.current) {
-      await loadRuns(selectedWorkflowIdRef.current, selectedRunIdRef.current ?? undefined);
+      await loadRuns(selectedWorkflowIdRef.current, runId);
     }
   }, [loadRuns]);
 

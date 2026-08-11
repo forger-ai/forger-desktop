@@ -369,7 +369,12 @@ const definition: OfficialToolDefinition = {
   changelog: ['Base inicial para conexion OAuth y acciones Gmail.'],
 };
 
-const toToolResult = (error: unknown, fallbackMessage: string, fallbackCode: string): CallOfficialToolResult => {
+type GmailToolFailureResult = CallOfficialToolResult & {
+  success: false;
+  userMessage: string;
+};
+
+const toToolResult = (error: unknown, fallbackMessage: string, fallbackCode: string): GmailToolFailureResult => {
   if (error instanceof GmailOAuthError) {
     return {
       success: false,
@@ -625,7 +630,7 @@ const configure = async (
     const result = toToolResult(error, copy.tools.gmailConnectFailed, 'gmail_oauth_failed');
     return {
       success: false,
-      userMessage: result.userMessage ?? copy.tools.gmailConnectFailed,
+      userMessage: result.userMessage,
       technicalCode: result.technicalCode,
     };
   }

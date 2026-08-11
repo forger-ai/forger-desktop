@@ -80,15 +80,11 @@ const safeUrlSummary = (value?: string): Record<string, string> | undefined => {
   if (!value) {
     return undefined;
   }
-  try {
-    const parsed = new URL(value);
-    return compactRecord({
-      host: parsed.hostname,
-      path: parsed.pathname,
-    }) as Record<string, string>;
-  } catch {
-    return undefined;
-  }
+  const parsed = new URL(value);
+  return compactRecord({
+    host: parsed.hostname,
+    path: parsed.pathname,
+  }) as Record<string, string>;
 };
 
 const errorCauseField = (error: unknown, key: 'code' | 'name'): string | undefined => {
@@ -301,7 +297,7 @@ const getInstallerFilename = (asset: DesktopUpdateAsset, version: string): strin
     deb: 'deb',
     appimage: 'AppImage',
   };
-  const fallbackExtension = extensionByKind[asset.kind.toLowerCase()] ?? 'bin';
+  const fallbackExtension = extensionByKind[asset.kind.toLowerCase()]!;
   const safeBasename = basename && !basename.includes('..') ? basename : `forger-desktop-${version}.${fallbackExtension}`;
   return safeBasename.endsWith(`.${fallbackExtension}`) ? safeBasename : `${safeBasename}.${fallbackExtension}`;
 };

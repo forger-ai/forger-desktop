@@ -121,7 +121,7 @@ export class WorkflowStore {
   private runStoragePath(fileName: string): string {
     const root = path.resolve(this.runsRoot());
     const target = path.resolve(root, fileName);
-    const rootWithSeparator = root.endsWith(path.sep) ? root : `${root}${path.sep}`;
+    const rootWithSeparator = `${root}${path.sep}`;
     if (target !== root && !target.startsWith(rootWithSeparator)) {
       throw new Error('workflow_run_path_outside_storage');
     }
@@ -139,8 +139,8 @@ export class WorkflowStore {
   private revisionFilePath(workflowId: string): string {
     const root = path.resolve(this.revisionsRoot());
     const target = path.resolve(root, `${workflowId}.json`);
-    const rootWithSeparator = root.endsWith(path.sep) ? root : `${root}${path.sep}`;
-    if (!target.startsWith(rootWithSeparator)) {
+    const relative = path.relative(root, target);
+    if (relative.startsWith('..') || path.isAbsolute(relative)) {
       throw new Error('workflow_revision_path_outside_storage');
     }
     return target;

@@ -51,6 +51,9 @@ const toResult = (error: unknown, fallbackCode: string): CallOfficialToolResult 
     : error instanceof Error ? error.message : fallbackCode,
 });
 
+export const getSlackConnectionStatus = async (): Promise<CallOfficialToolResult> =>
+  ({ success: true, data: { connected: true } });
+
 export const slackToolModule: InternalToolModule = createTokenConnectorModule({
   id: SLACK_TOOL_ID,
   name: 'Slack',
@@ -103,7 +106,7 @@ export const slackToolModule: InternalToolModule = createTokenConnectorModule({
         },
         required: ['connected'],
       },
-      run: async () => ({ success: true, data: { connected: true } }),
+      run: getSlackConnectionStatus,
     },
     {
       id: 'slack.list_channels',

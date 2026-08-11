@@ -250,7 +250,7 @@ const sanitizeSharedFiles = async (
     await deps.fs.mkdir(privateDataRoot, { recursive: true });
     return deps.fs.realpath(privateDataRoot);
   });
-  for (const fileRef of input ?? []) {
+  for (const fileRef of input) {
     const candidatePath = deps.path.isAbsolute(fileRef.path) ? fileRef.path : deps.path.join(privateDataRoot, fileRef.path);
     const realPath = await deps.fs.realpath(candidatePath).catch(() => null);
     if (!realPath || !deps.ensurePathInside(dataRootReal, realPath)) {
@@ -259,7 +259,7 @@ const sanitizeSharedFiles = async (
     sharedFiles.push({
       ...fileRef,
       path: realPath,
-      relativePath: fileRef.relativePath ?? deps.path.relative(privateDataRoot, realPath).replace(/\\/g, '/'),
+      relativePath: fileRef.relativePath ?? deps.path.relative(dataRootReal, realPath).replace(/\\/g, '/'),
       name: fileRef.name ?? deps.path.basename(realPath),
     });
   }

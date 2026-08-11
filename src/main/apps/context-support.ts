@@ -116,11 +116,11 @@ const buildStackSkillTemplates = (_stack: AppManifestStack, _hasAppMcp = false, 
   buildInstalledAppContextSkillTemplates(allowedOfficialToolActions);
 
 const readFrontmatterField = (frontmatter: string, fieldName: 'name' | 'description'): string | null => {
-  const match = frontmatter.match(new RegExp(`^${fieldName}:\\s*(.*)$`, 'm'));
+  const match = frontmatter.match(new RegExp(`^${fieldName}:[ \\t]*(.*)$`, 'm'));
   if (!match) {
     return null;
   }
-  const value = match[1]?.trim() ?? '';
+  const value = match[1].trim();
   if (!value) {
     return null;
   }

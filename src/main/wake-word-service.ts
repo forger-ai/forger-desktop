@@ -171,12 +171,14 @@ export class WakeWordServiceManager {
     this.port = port;
     this.token = token;
     child.on('exit', (code) => {
+      if (this.child !== child) return;
       this.lastError = code === 0 || code === null ? undefined : `wake_word_server_exited_${code}`;
       this.child = null;
       this.port = null;
       this.token = null;
     });
     child.on('error', (error) => {
+      if (this.child !== child) return;
       this.lastError = error.message || 'wake_word_spawn_failed';
       this.child = null;
       this.port = null;

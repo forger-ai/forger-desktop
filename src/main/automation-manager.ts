@@ -379,7 +379,7 @@ export class AutomationManager {
         : parseCodexAssistantMessages(result.stdout, result.stderr);
       if (parsedMessages.length > 0) {
         userMessages = parsedMessages;
-        latestUserMessage = parsedMessages[parsedMessages.length - 1] ?? latestUserMessage;
+        latestUserMessage = parsedMessages[parsedMessages.length - 1];
       }
       run = {
         ...run,
@@ -782,8 +782,7 @@ const sanitizeMissedRunWindowMinutes = (value: unknown, frequency: AutomationFre
 
 const parseTimeOfDay = (value: string | undefined): [number, number] => {
   const formatted = formatTimeOfDay(value);
-  const [hour, minute] = formatted.split(':').map((part) => Number(part));
-  return [hour ?? 9, minute ?? 0];
+  return [Number(formatted.slice(0, 2)), Number(formatted.slice(3, 5))];
 };
 
 const formatTimeOfDay = (value: string | undefined): string => {

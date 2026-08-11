@@ -78,6 +78,10 @@ export function BackgroundTasksListView({ t, tasks, backLabel, onBack, onOpenTas
               <ListItemButton onClick={() => onOpenTask(task.id)} sx={{ alignItems: 'flex-start', gap: 1.5, py: 1.5 }}>
                 <Box sx={{ pt: 0.25 }}>{backgroundTaskIcon(task)}</Box>
                 <ListItemText
+                  slotProps={{
+                    primary: { component: 'div' },
+                    secondary: { component: 'div' },
+                  }}
                   primary={
                     <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap" useFlexGap>
                       <Typography fontWeight={700}>{task.title}</Typography>

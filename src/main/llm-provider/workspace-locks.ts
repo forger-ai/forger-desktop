@@ -12,14 +12,15 @@ export const withWorkspaceLock = async <T>(
   const current = new Promise<void>((resolve) => {
     release = resolve;
   });
-  locks.set(normalized, previous.then(() => current, () => current));
+  const queued = previous.then(() => current);
+  locks.set(normalized, queued);
 
-  await previous.catch(() => undefined);
+  await previous;
   try {
     return await callback();
   } finally {
     release();
-    if (locks.get(normalized) === current) {
+    if (locks.get(normalized) === queued) {
       locks.delete(normalized);
     }
   }
@@ -31,8 +32,9 @@ export const acquireWorkspaceLock = async (key: string): Promise<() => void> => 
   const current = new Promise<void>((resolve) => {
     release = resolve;
   });
-  locks.set(normalized, previous.then(() => current, () => current));
-  await previous.catch(() => undefined);
+  const queued = previous.then(() => current);
+  locks.set(normalized, queued);
+  await previous;
 
   let released = false;
   return () => {
@@ -41,7 +43,7 @@ export const acquireWorkspaceLock = async (key: string): Promise<() => void> => 
     }
     released = true;
     release();
-    if (locks.get(normalized) === current) {
+    if (locks.get(normalized) === queued) {
       locks.delete(normalized);
     }
   };

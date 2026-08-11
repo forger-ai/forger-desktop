@@ -132,6 +132,7 @@ const readRecentLogLines = async (input: {
   source: AppInstallLogExcerpt['source'];
 }): Promise<AppInstallLogExcerpt | null> => {
   let handle: fs.FileHandle | null = null;
+  let excerpt: AppInstallLogExcerpt | null = null;
   try {
     const stats = await input.fs.stat(input.logPath);
     const bytesToRead = Math.min(stats.size, MAX_APP_ERROR_LOG_BYTES);
@@ -141,12 +142,12 @@ const readRecentLogLines = async (input: {
     const { bytesRead } = await handle.read(buffer, 0, bytesToRead, start);
     const rawLines = buffer.subarray(0, bytesRead).toString('utf8').split(/\r?\n/).filter((line) => line.trim().length > 0);
     const lines = (start > 0 ? rawLines.slice(1) : rawLines).slice(-MAX_APP_ERROR_LOG_LINES).map(truncateLogLine);
-    return lines.length > 0 ? { source: input.source, bytesRead, truncatedFromStart: start > 0, lines } : null;
+    excerpt = lines.length > 0 ? { source: input.source, bytesRead, truncatedFromStart: start > 0, lines } : null;
   } catch {
-    return null;
-  } finally {
-    await handle?.close().catch(() => undefined);
+    excerpt = null;
   }
+  await handle?.close().catch(() => undefined);
+  return excerpt;
 };
 
 export const summarizeDesktopErrorReportAttachments = (
@@ -161,6 +162,7 @@ export const readRecentAppInstallLogLines = async (input: {
 }): Promise<AppInstallLogExcerpt | null> => {
   const logPath = input.getInstallLogPath();
   let handle: fs.FileHandle | null = null;
+  let excerpt: AppInstallLogExcerpt | null = null;
   try {
     const stats = await input.fs.stat(logPath);
     const bytesToRead = Math.min(stats.size, MAX_APP_ERROR_LOG_BYTES);
@@ -187,19 +189,20 @@ export const readRecentAppInstallLogLines = async (input: {
       }
     }
     if (lines.length === 0) {
-      return null;
+      excerpt = null;
+    } else {
+      excerpt = {
+        source: 'install.log',
+        bytesRead,
+        truncatedFromStart: start > 0,
+        lines: lines.reverse(),
+      };
     }
-    return {
-      source: 'install.log',
-      bytesRead,
-      truncatedFromStart: start > 0,
-      lines: lines.reverse(),
-    };
   } catch {
-    return null;
-  } finally {
-    await handle?.close().catch(() => undefined);
+    excerpt = null;
   }
+  await handle?.close().catch(() => undefined);
+  return excerpt;
 };
 
 const buildAppInstallLogAttachment = (input: {
@@ -260,7 +263,8 @@ const readChatRunLogLines = async (input: {
 };
 
 const safeFilenameSegment = (value: string): string => {
-  const safe = path.basename(value.split(/[\\/]/).pop() ?? '').replace(/[^a-zA-Z0-9._-]/g, '_');
+  // Splitting a string always yields at least one segment.
+  const safe = path.basename(value.split(/[\\/]/).pop()!).replace(/[^a-zA-Z0-9._-]/g, '_');
   return safe || 'run';
 };
 

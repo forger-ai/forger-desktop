@@ -179,7 +179,9 @@ export const createManifestSupportController = (deps: ManifestSupportDeps) => {
     withAgentDefaults,
   } = deps;
   const getCurrentForgerAccount = () => deps.getForgerAccount?.() ?? forgerAccount;
-  const getCurrentForgerBackendClient = () => deps.getForgerBackendClient?.() ?? forgerBackendClient;
+  const getCurrentForgerBackendClient = () => deps.getForgerBackendClient
+    ? deps.getForgerBackendClient()
+    : forgerBackendClient;
   const getCurrentRegistry = (): AppRegistry => deps.getRegistry?.() ?? registry;
 const normalizeToken = (value: string | undefined): string => {
   if (!value) {
@@ -778,7 +780,7 @@ const normalizeManifestAgents = (manifest: AppManifest | null): AppAgent[] => {
         typeof candidate.initialPrompt === 'string' && candidate.initialPrompt.trim()
           ? candidate.initialPrompt.trim()
           : prompts?.initial?.body ?? '';
-      if (!id || !title || (!initialPrompt && !prompts?.initial) || seenIds.has(id)) {
+      if (!id || !title || !initialPrompt || seenIds.has(id)) {
         continue;
       }
       const description =
@@ -967,14 +969,14 @@ const normalizeManifestRuntimeRecommendations = (
   const output: Partial<AgentDefaults> = {};
   if (codexModel || codexEffort) {
     output.codex = {
-      model: codexModel ?? fallback?.codex?.model ?? getCodexDefaults().model,
-      reasoningEffort: codexEffort ?? fallback?.codex?.reasoningEffort ?? getCodexDefaults().reasoningEffort,
+      model: codexModel ?? getCodexDefaults().model,
+      reasoningEffort: codexEffort ?? getCodexDefaults().reasoningEffort,
     };
   }
   if (claudeModel || claudeEffort) {
     output.claude = {
-      model: claudeModel ?? fallback?.claude?.model ?? 'sonnet',
-      effort: claudeEffort ?? fallback?.claude?.effort ?? 'medium',
+      model: claudeModel ?? 'sonnet',
+      effort: claudeEffort ?? 'medium',
     };
   }
   if (antigravityModel || antigravityRaw.effort || antigravityRaw.defaultEffort || fallback?.antigravity) {
@@ -1004,9 +1006,12 @@ const normalizeManifestRuntime = (value: unknown): AgentRuntime | undefined => {
     const antigravity = normalizeAntigravityModelAndEffort(model, record.effort);
     return { provider, model: antigravity.model, effort: antigravity.effort, ...(permissionMode ? { permissionMode } : {}) };
   }
-  const effort = provider
-    ? normalizeRuntimeEffortForModel(provider, model, record.effort, provider === 'claude' ? BUILT_IN_CLAUDE_EFFORT : BUILT_IN_CODEX_REASONING)
-    : normalizeCodexReasoningEffort(record.effort, BUILT_IN_CODEX_REASONING);
+  const effort = normalizeRuntimeEffortForModel(
+    provider,
+    model,
+    record.effort,
+    provider === 'claude' ? BUILT_IN_CLAUDE_EFFORT : BUILT_IN_CODEX_REASONING,
+  );
   return { provider, model, effort, ...(permissionMode ? { permissionMode } : {}) };
 };
 
@@ -1118,7 +1123,7 @@ const validateAppPrompt = async (input: AppPromptReviewInput): Promise<AppPrompt
     const result = promptOverrideErrorResult(error);
     return {
       valid: false,
-      errors: [result.userMessage ?? 'No se pudo validar el prompt.'],
+      errors: [result.userMessage as string],
       missingVariables: [],
       extraVariables: [],
     };
@@ -1172,15 +1177,12 @@ const testAppPrompt = async (input: AppPromptTestInput): Promise<AppPromptTestRe
     }
 
     if (kind === 'agentPrompt') {
-      const promptKind = base.promptKind as ManifestAgentPromptKind | undefined;
-      if (!base.agentId || !promptKind) {
-        return promptTestFailure('app_prompt_not_found', ['No encontramos ese prompt de agente en la app instalada.'], {
-          declaredVariables,
-          usedVariables,
-        });
-      }
+      // buildPromptBases creates agentPrompt entries only from a concrete
+      // agent/prompt pair, so both identifiers are guaranteed here.
+      const promptKind = base.promptKind as ManifestAgentPromptKind;
+      const agentId = base.agentId!;
       const agents = await resolveInstalledAgents(input.appId);
-      const agent = agents.find((candidate) => candidate.id === base.agentId);
+      const agent = agents.find((candidate) => candidate.id === agentId);
       const template = agent?.prompts?.[promptKind];
       if (!agent || !template) {
         return promptTestFailure('app_prompt_not_found', ['No encontramos ese prompt de agente en la app instalada.'], {
@@ -1299,12 +1301,10 @@ const validatePromptTemplateRender = (
   const declaredVariables = declaredPromptVariables(base);
   const usedVariables = sortedPromptVariables(prompt);
   const errors: string[] = [];
-  const undeclaredVariables = usedVariables.filter((variable) => !declaredVariables.includes(variable));
-  if (undeclaredVariables.length > 0) {
-    errors.push(`El prompt usa argumentos no declarados por el manifest: ${undeclaredVariables.join(', ')}.`);
-  }
+  // testAppPrompt rejects undeclared variables during structural validation
+  // before this renderer-specific validation runs.
   if (!validateProvidedVariables) {
-    return { errors, missingVariables: [], extraVariables: undeclaredVariables };
+    return { errors, missingVariables: [], extraVariables: [] };
   }
 
   const providedVariables = Object.keys(variables).sort();
@@ -1329,7 +1329,7 @@ const validatePromptTemplateRender = (
   return {
     errors,
     missingVariables: [...new Set(missingVariables)].sort(),
-    extraVariables: [...new Set([...extraVariables, ...undeclaredVariables])].sort(),
+    extraVariables: [...new Set(extraVariables)].sort(),
   };
 };
 

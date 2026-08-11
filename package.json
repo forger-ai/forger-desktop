@@ -34,7 +34,7 @@
     "test:resources": "python -m unittest discover -s test/resources -p '*_test.py'",
     "test:coverage": "npm run test:coverage:electron:strict && npm run test:coverage:renderer",
     "test:coverage:electron:report": "npm run build:electron && c8 --reporter=text node --test --test-force-exit test/contracts/*.test.mjs test/main/*.test.mjs scripts/test-automation-approval-policy.mjs scripts/test-app-agent-runtime-contract.mjs",
-    "test:coverage:electron:strict": "npm run build:electron && c8 --check-coverage --lines=88 --statements=88 --branches=83 --functions=89 --reporter=text node --test --test-force-exit test/contracts/*.test.mjs test/main/*.test.mjs scripts/test-automation-approval-policy.mjs scripts/test-app-agent-runtime-contract.mjs",
+    "test:coverage:electron:strict": "npm run build:electron && c8 --check-coverage --lines=100 --statements=100 --branches=100 --functions=100 --reporter=text node --test --test-force-exit test/contracts/*.test.mjs test/main/*.test.mjs scripts/test-automation-approval-policy.mjs scripts/test-app-agent-runtime-contract.mjs",
     "test:coverage:renderer": "vitest run --coverage",
     "test:automation-approval": "npm run build:electron && node ./scripts/test-automation-approval-policy.mjs",
     "test:app-agent-runtime-contract": "npm run build:electron && node ./scripts/test-app-agent-runtime-contract.mjs",

@@ -98,12 +98,12 @@ To inspect Electron coverage without applying the gate:
 npm run test:coverage:electron:report
 ```
 
-The strict Electron gate builds once, runs the full Electron suite and the two special runtime checks through `c8`, and enforces these initial floors:
+The strict Electron gate builds once, runs the full Electron suite and the two special runtime checks through `c8`, and enforces 100% global coverage:
 
-- 88% lines
-- 88% statements
-- 83% branches
-- 89% functions
+- 100% lines
+- 100% statements
+- 100% branches
+- 100% functions
 
 Run it directly with:
 
@@ -117,15 +117,16 @@ The `c8` config keeps exclusions minimal:
 
 - `dist-electron/main/index.js`, because it is an Electron entrypoint that only imports startup wiring.
 - `dist-electron/main/core/main-process.js`, because it is the Electron composition root: controller factories, dependency wiring, pass-through wrappers, and import-time lifecycle registration. Its behavior-bearing controllers, IPC handlers, lifecycle module, and a composition smoke test remain covered.
+- `dist-electron/main/core/main-lifecycle.js`, `main-lifecycle-shutdown.js`, and `remote-session-events.js`, because they are registration/composition glue around the behavior-bearing services. Their public composition is exercised by lifecycle and shutdown smoke tests; service, IPC, and runtime behavior remains included and must meet the gate.
 - Compiled type-only files such as `dist-electron/shared/types/**/*.js`, `dist-electron/main/**/types.js`, and `dist-electron/main/**/*-types.js`.
 - `dist-electron/shared/types.js`, because it is the shared type barrel and re-export glue.
 
-Renderer coverage uses V8 over the real `src/renderer` tree. It excludes only declaration files and the generated documentation bundle. Untested screens stay visible as zero coverage; the initial global floors intentionally record the small honest baseline rather than hiding those files:
+Renderer coverage uses V8 over the real `src/renderer` tree. It excludes only declaration files and the generated documentation bundle. Every included renderer file remains visible in the report, and the global gate requires:
 
-- 1.11% lines
-- 0.84% statements
-- 1.10% branches
-- 0.49% functions
+- 100% lines
+- 100% statements
+- 100% branches
+- 100% functions
 
 Run it with:
 

@@ -1229,6 +1229,7 @@ test('manifest support lazy services build memory/tool contexts, prompt successe
     forgerAccount: { authenticated: true, token: 'token' },
   }).controller;
   oauthController.getOfficialToolsService();
+  oauthController.getOfficialToolsService();
   const oauthOptions = serviceInstances.at(-1).options;
   await oauthOptions.openExternalUrl('https://accounts.google.test');
   assert.deepEqual(openedUrls, ['https://accounts.google.test']);

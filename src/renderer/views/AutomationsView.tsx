@@ -365,6 +365,12 @@ export function AutomationsView({
   const runtimeModelOptions = selectedRuntimeControl.modelOptions;
   const runtimeEffortOptions = selectedRuntimeControl.effortOptionsForModel(form.runtimeModel);
   const runtimeEffortValue = selectedRuntimeControl.normalizeEffortForModel(form.runtimeModel, form.runtimeEffort);
+  const effectiveRuntimeModelOptions = form.runtimeModel && !runtimeModelOptions.some((option) => option.realModelName === form.runtimeModel)
+    ? [...runtimeModelOptions, { displayModelName: form.runtimeModel, realModelName: form.runtimeModel, defaultEffort: runtimeEffortValue }]
+    : runtimeModelOptions;
+  const effectiveRuntimeEffortOptions = !runtimeEffortOptions.some((option) => option.value === runtimeEffortValue)
+    ? [...runtimeEffortOptions, { label: runtimeEffortValue, value: runtimeEffortValue }]
+    : runtimeEffortOptions;
   const selectedMissedWindowOptions = missedWindowOptions(form.frequencyType);
 
   const runOutput = selectedRun?.userMessage?.trim()
@@ -426,7 +432,7 @@ export function AutomationsView({
                     <Stack direction="row" spacing={0.25}>
                       <Tooltip title={t.sections.automations.testRun}>
                         <span>
-                          <IconButton size="small" disabled={busy || automation.running} onClick={(event) => { event.stopPropagation(); onRunNow(automation.id); }}>
+                          <IconButton aria-label={t.sections.automations.testRun} size="small" disabled={busy || automation.running} onClick={(event) => { event.stopPropagation(); onRunNow(automation.id); }}>
                             <ScienceRounded fontSize="small" />
                           </IconButton>
                         </span>
@@ -434,6 +440,7 @@ export function AutomationsView({
                       <Tooltip title={automation.enabled ? t.sections.automations.pause : t.sections.automations.resume}>
                         <span>
                           <IconButton
+                            aria-label={automation.enabled ? t.sections.automations.pause : t.sections.automations.resume}
                             size="small"
                             disabled={busy}
                             onClick={(event) => {
@@ -450,12 +457,12 @@ export function AutomationsView({
                         </span>
                       </Tooltip>
                       <Tooltip title={t.sections.automations.edit}>
-                        <IconButton size="small" onClick={(event) => { event.stopPropagation(); openEdit(automation); }}>
+                        <IconButton aria-label={t.sections.automations.edit} size="small" onClick={(event) => { event.stopPropagation(); openEdit(automation); }}>
                           <EditRounded fontSize="small" />
                         </IconButton>
                       </Tooltip>
                       <Tooltip title={t.sections.automations.delete}>
-                        <IconButton size="small" color="error" onClick={(event) => { event.stopPropagation(); onDelete(automation.id); }}>
+                        <IconButton aria-label={t.sections.automations.delete} size="small" color="error" onClick={(event) => { event.stopPropagation(); onDelete(automation.id); }}>
                           <DeleteRounded fontSize="small" />
                         </IconButton>
                       </Tooltip>
@@ -536,7 +543,7 @@ export function AutomationsView({
                   <Typography variant="h6">{t.sections.automations.outputTitle}</Typography>
                   <Tooltip title={t.sections.automations.viewFullLog}>
                     <span>
-                      <IconButton size="small" disabled={runMessages.length === 0} onClick={() => setRunLogOpen(true)}>
+                      <IconButton aria-label={t.sections.automations.viewFullLog} size="small" disabled={runMessages.length === 0} onClick={() => setRunLogOpen(true)}>
                         <VisibilityRounded fontSize="small" />
                       </IconButton>
                     </span>
@@ -621,6 +628,7 @@ export function AutomationsView({
               <FormControl fullWidth>
                 <InputLabel>{t.sections.automations.frequency}</InputLabel>
                 <Select
+                  inputProps={{ 'aria-label': t.sections.automations.frequency }}
                   label={t.sections.automations.frequency}
                   value={form.frequencyType}
                   onChange={(event) => {
@@ -687,6 +695,7 @@ export function AutomationsView({
                 <FormControl fullWidth>
                   <InputLabel>{t.sections.automations.weeklyDay}</InputLabel>
                   <Select
+                    inputProps={{ 'aria-label': t.sections.automations.weeklyDay }}
                     label={t.sections.automations.weeklyDay}
                     value={form.weeklyDay}
                     onChange={(event) => setForm((current) => ({ ...current, weeklyDay: Number(event.target.value) }))}
@@ -704,6 +713,7 @@ export function AutomationsView({
               <FormControl fullWidth>
                 <InputLabel>{t.sections.automations.missedRunPolicy}</InputLabel>
                 <Select
+                  inputProps={{ 'aria-label': t.sections.automations.missedRunPolicy }}
                   label={t.sections.automations.missedRunPolicy}
                   value={form.missedRunPolicy}
                   onChange={(event) => setForm((current) => ({ ...current, missedRunPolicy: event.target.value as AutomationMissedRunPolicy }))}
@@ -717,6 +727,7 @@ export function AutomationsView({
                 <FormControl fullWidth>
                   <InputLabel>{t.sections.automations.missedRunWindow}</InputLabel>
                   <Select
+                    inputProps={{ 'aria-label': t.sections.automations.missedRunWindow }}
                     label={t.sections.automations.missedRunWindow}
                     value={form.missedRunWindowMinutes}
                     onChange={(event) => setForm((current) => ({ ...current, missedRunWindowMinutes: Number(event.target.value) }))}
@@ -739,6 +750,7 @@ export function AutomationsView({
                 <FormControl fullWidth>
                   <InputLabel>{t.sections.automations.provider}</InputLabel>
                   <Select
+                    inputProps={{ 'aria-label': t.sections.automations.provider }}
                     label={t.sections.automations.provider}
                     value={form.runtimeProvider}
                     onChange={(event) => {
@@ -761,15 +773,16 @@ export function AutomationsView({
                 <FormControl fullWidth disabled={form.runtimeProvider === 'auto'}>
                   <InputLabel>{t.sections.automations.model}</InputLabel>
                   <Select
+                    inputProps={{ 'aria-label': t.sections.automations.model }}
                     label={t.sections.automations.model}
                     value={form.runtimeModel}
                     onChange={(event) => {
                       const model = event.target.value;
-                      const option = runtimeModelOptions.find((entry) => entry.realModelName === model);
-                      setForm((current) => ({ ...current, runtimeModel: model, runtimeEffort: selectedRuntimeControl.normalizeEffortForModel(model, option?.defaultEffort ?? current.runtimeEffort) }));
+                      const option = effectiveRuntimeModelOptions.find((entry) => entry.realModelName === model)!;
+                      setForm((current) => ({ ...current, runtimeModel: model, runtimeEffort: selectedRuntimeControl.normalizeEffortForModel(model, option.defaultEffort) }));
                     }}
                   >
-                    {runtimeModelOptions.map((option) => (
+                    {effectiveRuntimeModelOptions.map((option) => (
                       <MenuItem key={option.realModelName} value={option.realModelName}>{option.displayModelName}</MenuItem>
                     ))}
                   </Select>
@@ -777,11 +790,12 @@ export function AutomationsView({
                 <FormControl fullWidth disabled={form.runtimeProvider === 'auto'}>
                   <InputLabel>{t.sections.automations.effort}</InputLabel>
                     <Select
+                      inputProps={{ 'aria-label': t.sections.automations.effort }}
                       label={t.sections.automations.effort}
                     value={runtimeEffortValue}
                     onChange={(event) => setForm((current) => ({ ...current, runtimeEffort: event.target.value as AgentEffort }))}
                   >
-                    {runtimeEffortOptions.map((option) => (
+                    {effectiveRuntimeEffortOptions.map((option) => (
                       <MenuItem key={option.value} value={option.value}>{option.label}</MenuItem>
                     ))}
                   </Select>
@@ -791,6 +805,7 @@ export function AutomationsView({
                 <FormControl fullWidth>
                   <InputLabel>{t.sections.automations.permissionMode}</InputLabel>
                   <Select
+                    inputProps={{ 'aria-label': t.sections.automations.permissionMode }}
                     label={t.sections.automations.permissionMode}
                     value={form.permissionMode}
                     onChange={(event) => setForm((current) => ({ ...current, permissionMode: event.target.value as AgentPermissionMode }))}

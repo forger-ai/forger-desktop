@@ -203,8 +203,8 @@ export const compactFileLabel = (name: string): string => name.length > 28 ? `${
 
 export const defaultPersonalAgentRuntime = (): AgentRuntime => ({
   provider: 'codex',
-  model: CODEX_MODEL_OPTIONS[0]?.realModelName ?? 'gpt-5.2',
-  effort: CODEX_MODEL_OPTIONS[0]?.defaultReasoningEffort ?? 'medium',
+  model: CODEX_MODEL_OPTIONS[0].realModelName,
+  effort: CODEX_MODEL_OPTIONS[0].defaultReasoningEffort,
 });
 
 export const visiblePeerThreadMessages = (messages: PersonalAgentMessage[]): PersonalAgentMessage[] => {
@@ -236,15 +236,15 @@ export const defaultRuntimeForProvider = (provider: AgentProvider): AgentRuntime
   if (provider === 'claude') {
     return {
       provider,
-      model: CLAUDE_MODEL_OPTIONS[0]?.realModelName ?? 'claude-sonnet-5',
-      effort: CLAUDE_MODEL_OPTIONS[0]?.defaultEffort ?? 'medium',
+      model: CLAUDE_MODEL_OPTIONS[0].realModelName,
+      effort: CLAUDE_MODEL_OPTIONS[0].defaultEffort,
     };
   }
   if (provider === 'antigravity') {
     return {
       provider,
-      model: ANTIGRAVITY_MODEL_OPTIONS[0]?.realModelName ?? 'gemini-3-pro',
-      effort: ANTIGRAVITY_MODEL_OPTIONS[0]?.defaultEffort ?? 'medium',
+      model: ANTIGRAVITY_MODEL_OPTIONS[0].realModelName,
+      effort: ANTIGRAVITY_MODEL_OPTIONS[0].defaultEffort,
     };
   }
   return defaultPersonalAgentRuntime();

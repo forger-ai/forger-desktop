@@ -56,7 +56,6 @@ export function LocalNetworkShareDialog({
   }, [link, open]);
 
   const copyLink = async () => {
-    if (!link) return;
     await navigator.clipboard.writeText(link);
     onCopied();
   };

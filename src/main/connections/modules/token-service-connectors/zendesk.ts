@@ -10,7 +10,7 @@ const listAction = (id: string, name: string, path: string, key: string, risk: '
   id, name, description: `${name} de Zendesk.`, risk,
   inputSchema: schema({ limit: { type: 'number' } }), outputSchema: arraySchema(key),
   run: async ({ input, secrets }) => {
-    const data = record(await api(secrets, `${path}${path.includes('?') ? '&' : '?'}per_page=${input.limit ?? 25}`));
+    const data = record(await api(secrets, `${path}?per_page=${input.limit ?? 25}`));
     return { success: true, data: { [key]: Array.isArray(data[key]) ? data[key] : [] } };
   },
 });

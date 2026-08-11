@@ -114,7 +114,8 @@ export const killServiceProcessesForMetadataRoot = (
       continue;
     }
     const pid = Number(match[1]);
-    const command = match[2] ?? '';
+    // The regular expression requires a non-empty command capture.
+    const command = match[2];
     if (!Number.isFinite(pid) || pid === currentPid) {
       continue;
     }

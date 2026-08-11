@@ -125,7 +125,7 @@ const formatTime = (sidekick: SidekickSummary): string | null => {
 const sidekickConversationFreshness = (conversation: PersonalAgentConversation): string => {
   const runUpdatedAt = conversation.activeRun?.updatedAt ?? '';
   const messageCreatedAt = conversation.messages.at(-1)?.createdAt ?? '';
-  return [conversation.updatedAt, runUpdatedAt, messageCreatedAt].sort().at(-1) ?? '';
+  return [conversation.updatedAt, runUpdatedAt, messageCreatedAt].sort().at(-1)!;
 };
 
 const freshestSidekickConversation = (
@@ -237,7 +237,6 @@ function SidekickIdleSection({
   const dirty = localKey !== remoteKey && localKey !== savedKey;
 
   const toggleScreen = (screen: SidekickIdleScreen) => {
-    if (screen === 'custom' && !hasImage) return;
     setScreens((current) => (
       current.includes(screen) ? current.filter((entry) => entry !== screen) : [...current, screen]
     ));
@@ -247,7 +246,6 @@ function SidekickIdleSection({
     setScreens((current) => {
       const index = current.indexOf(screen);
       const target = index + offset;
-      if (index < 0 || target < 0 || target >= current.length) return current;
       const next = [...current];
       [next[index], next[target]] = [next[target], next[index]];
       return next;
@@ -264,6 +262,9 @@ function SidekickIdleSection({
     };
     return options[seconds] ?? `${seconds}s`;
   };
+  const rotateOptions: readonly number[] = ROTATE_OPTIONS.includes(rotateSeconds as (typeof ROTATE_OPTIONS)[number])
+    ? ROTATE_OPTIONS
+    : [rotateSeconds, ...ROTATE_OPTIONS];
 
   return (
     <Stack spacing={1.5}>
@@ -316,7 +317,7 @@ function SidekickIdleSection({
           onChange={(event) => setRotateSeconds(Number(event.target.value))}
           disabled={busy}
         >
-          {ROTATE_OPTIONS.map((seconds) => (
+          {rotateOptions.map((seconds) => (
             <MenuItem key={seconds} value={seconds}>{rotateLabel(seconds)}</MenuItem>
           ))}
         </TextField>
@@ -360,7 +361,7 @@ function SidekickIdleSection({
             variant="outlined"
             startIcon={<ImageRounded />}
             disabled={busy}
-            onClick={() => fileInputRef.current?.click()}
+            onClick={() => fileInputRef.current!.click()}
             sx={{ alignSelf: 'flex-start' }}
           >
             {copy.idleUploadImage}
@@ -640,7 +641,6 @@ function SidekickRecordingItem({
   }, [audioUrl]);
 
   const loadAudio = async () => {
-    if (audioUrl || loading) return;
     setLoading(true);
     setError(null);
     try {
@@ -983,7 +983,7 @@ export function SidekicksView({ t }: SidekicksViewProps) {
     setBusy(true);
     setNotice(null);
     try {
-      const result = await window.forger.sidekicksConfigureUsb({ portPath: selectedPortPath || undefined, name, ssid, password });
+      const result = await window.forger.sidekicksConfigureUsb({ portPath: selectedPortPath, name, ssid, password });
       setState(result);
       if (result.success) {
         setPassword('');
@@ -1358,6 +1358,7 @@ export function SidekicksView({ t }: SidekicksViewProps) {
                 <ListItemText
                   primary={<Typography fontWeight={700}>{sidekick.name}</Typography>}
                   secondary={<Stack component="span" direction="row" spacing={0.75} useFlexGap flexWrap="wrap" sx={{ pt: 0.5 }}><Chip size="small" color={sidekick.status === 'online' ? 'success' : 'default'} label={sidekick.status === 'online' ? copy.statuses.online : copy.statuses.offline} />{sidekick.voicePhase !== 'idle' ? <Chip size="small" color={sidekick.voicePhase === 'error' ? 'error' : 'primary'} label={copy.voicePhases[sidekick.voicePhase]} /> : null}<SidekickBatteryChip sidekick={sidekick} copy={copy} /><Chip size="small" color={voiceReady(sidekick) ? 'success' : 'default'} variant="outlined" label={voiceReady(sidekick) ? copy.voiceReady : copy.voiceNeedsSetup} /></Stack>}
+                  secondaryTypographyProps={{ component: 'span' }}
                 />
                 <ChevronRightRounded color="action" />
               </ListItemButton>

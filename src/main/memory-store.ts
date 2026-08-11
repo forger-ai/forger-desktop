@@ -706,6 +706,6 @@ function normalizeCaller(value: unknown): MemoryAccess['caller'] {
 }
 
 function deriveTitle(body: string): string {
-  const firstLine = body.split(/\r?\n/).find((line) => line.trim()) ?? body;
-  return firstLine.trim().replace(/\s+/g, ' ').slice(0, MAX_TITLE_LENGTH) || 'Memory';
+  const firstLine = body.split(/\r?\n/, 1)[0]!;
+  return firstLine.trim().replace(/\s+/g, ' ').slice(0, MAX_TITLE_LENGTH);
 }

@@ -61,7 +61,7 @@ export const PermissionList = ({
                 checked={approvalEnabled}
                 disabled={busyToolId === tool.id}
                 onChange={(event) => onApprovalChange(tool.id, event.target.checked)}
-                inputProps={{ 'aria-label': t.sections.tools.approvalToggleLabel }}
+                slotProps={{ input: { 'aria-label': t.sections.tools.approvalToggleLabel } }}
               />
             </Stack>
           </Stack>
