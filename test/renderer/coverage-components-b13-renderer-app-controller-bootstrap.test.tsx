@@ -545,12 +545,41 @@ describe('RendererAppController chat, streaming, permissions, questions, and wak
     ...overrides,
   });
 
-  it('starts a new free-chat conversation and sends its first message with the selected runtime', async () => {
+  it('returns to mode selection, ignores background run focus, and starts the selected conversation', async () => {
+    const existingConversation = {
+      id: 'create-app-chat',
+      appId: 'forger',
+      mode: 'create_app',
+      targetAppId: null,
+      title: 'Create an app',
+      threadId: 'thread-create-app',
+      createdAt: '2026-08-10T12:00:00.000Z',
+      updatedAt: '2026-08-10T12:00:01.000Z',
+      messages: [{ id: 'user-create-app', role: 'user', content: 'Create an app' }],
+    };
+    chatPersistence.state = {
+      conversations: [existingConversation],
+      activeConversationByApp: { forger: existingConversation.id },
+      lastActiveConversationId: existingConversation.id,
+      activeRuns: [],
+      draftInputByConversationId: {},
+    };
     const bridge = installBridge({ getCodexAuthStatus: authenticatedStatus });
     const { result } = await renderController(bridge);
     act(() => result.current.handleStartNewConversation());
+    expect(result.current.activeConversationId).toBeNull();
+    expect(result.current.chatHistoryItems).toHaveLength(1);
+
+    act(() => bridge.emit('onChatRunUpdated', { run: run({
+      runId: 'background-create-run',
+      conversationId: existingConversation.id,
+      status: 'running',
+    }) }));
+    expect(result.current.activeConversationId).toBeNull();
+
+    await act(async () => result.current.handleSendMessage('Hello Forger', { mode: 'free_chat' }));
     expect(result.current.activeConversation?.mode).toBe('free_chat');
-    await act(async () => result.current.handleSendMessage('Hello Forger'));
+    expect(result.current.chatHistoryItems).toHaveLength(2);
     expect(bridge.call('chatStartRun')).toHaveBeenCalledWith(expect.objectContaining({
       chatMode: 'free_chat',
       prompt: 'Hello Forger',
@@ -570,8 +599,8 @@ describe('RendererAppController chat, streaming, permissions, questions, and wak
     });
     const { result } = await renderController(bridge);
     act(() => result.current.handleStartNewConversation());
+    await act(async () => result.current.handleSendMessage('Run it', { mode: 'free_chat' }));
     const conversationId = result.current.activeConversationId!;
-    await act(async () => result.current.handleSendMessage('Run it'));
     act(() => bridge.emit('onChatRunUpdated', { run: run({ runId: 'run-1', conversationId, progressLog: ['Working'] }) }));
     expect(result.current.activeConversationProgressLines).toEqual(['Working']);
     expect(result.current.activeConversationRunActive).toBe(true);
@@ -621,7 +650,7 @@ describe('RendererAppController chat, streaming, permissions, questions, and wak
     act(() => result.current.handleStartNewConversation());
     await act(async () => result.current.handleStagePastedChatFile({ name: 'paste.png', mimeType: 'image/png', dataBase64: 'eA==' }));
     act(() => result.current.handleMentionFile(mentioned));
-    await act(async () => result.current.handleSendMessage());
+    await act(async () => result.current.handleSendMessage(undefined, { mode: 'free_chat' }));
     expect(bridge.call('filesImport')).toHaveBeenCalledWith(expect.objectContaining({ grantIds: ['staged'] }));
     expect(bridge.call('filesReleaseSelections')).toHaveBeenCalledWith({ grantIds: ['staged'] });
     expect(bridge.call('chatStartRun')).toHaveBeenCalledWith(expect.objectContaining({
@@ -1135,7 +1164,7 @@ describe('RendererAppController failure recovery and edge conditions', () => {
       });
       const current = await renderController(bridge);
       act(() => current.result.current.handleStartNewConversation());
-      await act(async () => current.result.current.handleSendMessage('Hello'));
+      await act(async () => current.result.current.handleSendMessage('Hello', { mode: 'free_chat' }));
       expect(current.result.current.chatMessages.at(-1)?.content.toLowerCase()).toContain(expectedFragment);
       current.unmount();
     }
@@ -1146,6 +1175,7 @@ describe('RendererAppController failure recovery and edge conditions', () => {
     });
     const current = await renderController(bridge);
     act(() => current.result.current.handleStartNewConversation());
+    await act(async () => current.result.current.handleSendMessage('Hello', { mode: 'free_chat' }));
     const conversationId = current.result.current.activeConversationId!;
     const request = { requestId: 'question', chatId: conversationId, createdAt: '2026-08-10', questions: [] };
     act(() => bridge.emit('onChatRunUpdated', { run: { runId: 'question-run', appId: 'forger', prompt: '', conversationId, status: 'applied', createdAt: '2026-08-10', updatedAt: '2026-08-10', dangerMode: false, permissionMode: 'safe', questionRequest: request } }));
@@ -1242,7 +1272,7 @@ describe('RendererAppController failure recovery and edge conditions', () => {
     Object.defineProperty(window, 'forger', { configurable: true, value: undefined });
     expect(() => result.current.getDesktopApi()).toThrow('Bridge de Electron no disponible');
     act(() => result.current.handleStartNewConversation());
-    expect(result.current.activeConversationId).not.toBeNull();
+    expect(result.current.activeConversationId).toBeNull();
     Object.defineProperty(window, 'forger', { configurable: true, value: bridge.api });
   });
 
