@@ -916,6 +916,7 @@ export function useRendererAppController() {
     Set<string>
   >(new Set());
   const activeConversationIdRef = useRef<string | null>(activeConversationId);
+  const choosingChatModeRef = useRef(false);
   const selectedAppIdRef = useRef<string | null>(selectedAppId);
   const chatConversationsRef = useRef<ChatConversation[]>(chatConversations);
   const selectedAutomationIdRef = useRef<string | null>(null);
@@ -1956,6 +1957,9 @@ export function useRendererAppController() {
   }, [selectedAutomationRun]);
   useEffect(() => {
     activeConversationIdRef.current = activeConversationId;
+    if (activeConversationId) {
+      choosingChatModeRef.current = false;
+    }
   }, [activeConversationId]);
   useEffect(() => {
     selectedAppIdRef.current = selectedAppId;
@@ -1991,6 +1995,9 @@ export function useRendererAppController() {
     chatDraftsByConversation,
   ]);
   useEffect(() => {
+    if (choosingChatModeRef.current) {
+      return;
+    }
     if (
       activeConversationId &&
       chatConversations.some(
@@ -2257,8 +2264,9 @@ export function useRendererAppController() {
             : { ...current, [run.appId]: runConversationId },
         );
         if (
-          !currentActiveConversationId ||
-          currentActiveConversationId === runConversationId
+          !choosingChatModeRef.current &&
+          (!currentActiveConversationId ||
+            currentActiveConversationId === runConversationId)
         ) {
           setActiveConversationId(runConversationId);
         }
@@ -5085,6 +5093,8 @@ export function useRendererAppController() {
         messages: [],
       };
       targetConversationId = createdConversation.id;
+      choosingChatModeRef.current = false;
+      activeConversationIdRef.current = createdConversation.id;
       setChatConversations((current) => [createdConversation, ...current]);
       setActiveConversationId(createdConversation.id);
       setActiveConversationByApp((current) => ({
@@ -5644,6 +5654,8 @@ export function useRendererAppController() {
     setSelectedAppId(
       target.mode === "edit_app" ? (target.targetAppId ?? target.appId) : null,
     );
+    choosingChatModeRef.current = false;
+    activeConversationIdRef.current = target.id;
     setCurrentView("chat");
     setActiveConversationId(target.id);
     setActiveConversationByApp((current) => ({
@@ -5673,34 +5685,18 @@ export function useRendererAppController() {
     clearActiveRunState(undefined, conversationId);
   };
   const handleStartNewConversation = () => {
-    const chatScopeId = FREE_CHAT_APP_ID;
-    const now = new Date().toISOString();
-    const nextConversation: ChatConversation = {
-      id: makeConversationId(),
-      appId: chatScopeId,
-      mode: "free_chat",
-      targetAppId: null,
-      title: t.sections.chat.newConversationTitle,
-      threadId: null,
-      createdAt: now,
-      updatedAt: now,
-      messages: [],
-    };
     traceChatEvent({
       event: "chat_new_conversation_clicked",
-      appId: chatScopeId,
-      conversationId: nextConversation.id,
+      appId: FREE_CHAT_APP_ID,
+      conversationId: null,
       activeConversationId,
       messageCount: 0,
     });
-    setChatConversations((current) => [nextConversation, ...current]);
-    setActiveConversationId(nextConversation.id);
+    choosingChatModeRef.current = true;
+    activeConversationIdRef.current = null;
+    setActiveConversationId(null);
     setSelectedAppId(null);
-    setActiveConversationByApp((current) => ({
-      ...current,
-      [chatScopeId]: nextConversation.id,
-    }));
-    setChatDraft(nextConversation.id, "");
+    setChatDraft(FREE_CHAT_APP_ID, "");
     releaseChatFileSelections(pendingChatFiles);
     setPendingChatFiles([]);
     setMentionedChatFileIds([]);
@@ -5708,6 +5704,7 @@ export function useRendererAppController() {
   };
   const handleOpenFreeChatFromWake = () => {
     const chatScopeId = FREE_CHAT_APP_ID;
+    choosingChatModeRef.current = false;
     const existing = chatConversationsRef.current.find(
       (conversation) =>
         (conversation.mode ??
@@ -5716,6 +5713,7 @@ export function useRendererAppController() {
             : "edit_app")) === "free_chat",
     );
     if (existing) {
+      activeConversationIdRef.current = existing.id;
       setActiveConversationId(existing.id);
       setSelectedAppId(null);
       setActiveConversationByApp((current) => ({
@@ -5745,6 +5743,7 @@ export function useRendererAppController() {
       messageCount: 0,
     });
     setChatConversations((current) => [nextConversation, ...current]);
+    activeConversationIdRef.current = nextConversation.id;
     setActiveConversationId(nextConversation.id);
     setSelectedAppId(null);
     setActiveConversationByApp((current) => ({
