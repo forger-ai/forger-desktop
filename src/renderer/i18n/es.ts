@@ -1046,7 +1046,7 @@ export const es = { locale: 'es',
     backToSettings: 'Volver a Configuración',
     settingsRows: {
       llmProvider: 'Conecta Codex y Claude, y elige proveedor, modelos y permisos por defecto.',
-      privacySecurity: 'Administra la llave privada de Forger y el envío de métricas anónimas.',
+      privacySecurity: 'Administra la llave privada de Forger y la medición opcional.',
       appearance: 'Cambia idioma, tema visual e imagen del chat bot.',
       storage: 'Revisa el uso cloud por respaldos, aplicaciones subidas y otro storage.',
       speechToText: 'Instala y ejecuta transcripción local de audio con faster-whisper.',

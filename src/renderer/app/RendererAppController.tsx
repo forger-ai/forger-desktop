@@ -171,6 +171,7 @@ import {
   submitUsageEvent,
   usageAnalytics,
 } from "@renderer/usage-analytics";
+import { initializeCampaignMeasurement, MEASUREMENT_LINK_EVENT } from '@renderer/campaign-measurement';
 
 const AUTH_STATUS_POLL_INTERVAL_MS = 1500;
 const AUTH_STATUS_POLL_TIMEOUT_MS = 120000;
@@ -1656,6 +1657,7 @@ export function useRendererAppController() {
       settle(desktopApi.getCloudIdentity(), setCloudIdentity);
       settle(desktopApi.memoryList(), setMemories);
       submitForgerInstalledEvent({ surface: "startup", locale: t.locale });
+      if (typeof desktopApi.initializeCampaignMeasurement === 'function') void initializeCampaignMeasurement().catch(() => undefined);
       usageAnalytics.forgerOpened({ surface: "startup", locale: t.locale });
       const today = new Date().toISOString().slice(0, 10);
       const lastStartupCheck = window.localStorage.getItem(
@@ -1846,6 +1848,10 @@ export function useRendererAppController() {
       },
     );
     const unsubscribeDeepLink = desktopApi.onDeepLink((link) => {
+      if (link.kind === 'campaign') {
+        window.dispatchEvent(new CustomEvent(MEASUREMENT_LINK_EVENT, { detail: link.code }));
+        return;
+      }
       const socialProfileLink = link as typeof link & {
         kind: string;
         username?: string | null;

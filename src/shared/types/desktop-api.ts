@@ -1,4 +1,5 @@
 import type { AppSummary } from './catalog';
+import type { CampaignCode, CampaignMeasurementConsent, CampaignMeasurementStatus } from '../campaign-measurement';
 import type { CatalogApp } from './catalog-app';
 import type { CreateLocalAppInput, CreateLocalAppResult, InstallAppResult, LocalNetworkShareResult, LocalNetworkShareStatus, OpenAppResult, RemoteNetworkShareResult, RemoteNetworkShareStatus, StopAppResult, RuntimeStatus } from './runtime';
 import type { BasicActionResult } from './base';
@@ -237,6 +238,10 @@ export interface ForgerDesktopApi {
   submitAppRating: (input: SubmitAppRatingInput) => Promise<{ success: boolean; rating?: AppRatingSummary; userMessage?: string; technicalCode?: string }>;
   submitProductFeedback: (input: SubmitProductFeedbackInput) => Promise<{ success: boolean; userMessage?: string; technicalCode?: string } & FailureDiagnosticFields>;
   submitUsageEvent: (input: SubmitUsageEventInput) => Promise<SubmitUsageEventResult>;
+  initializeCampaignMeasurement: (existingProfile: boolean) => Promise<CampaignMeasurementStatus>;
+  getCampaignMeasurementStatus: () => Promise<CampaignMeasurementStatus>;
+  setCampaignMeasurementConsent: (input: CampaignMeasurementConsent) => Promise<CampaignMeasurementStatus>;
+  recordCampaignFirstAppCreated: () => Promise<void>;
   openExternalUrl: (url: string) => Promise<{ success: boolean; userMessage?: string } & FailureDiagnosticFields>;
   getAgentProviderUsage: () => Promise<AgentProviderUsageResult>;
   listLlmProviderProfiles: () => Promise<LlmProviderProfilesState>;
@@ -387,6 +392,7 @@ export interface ForgerDesktopApi {
  * new variants as more deep-link kinds are introduced.
  */
 export type ForgerDeepLink =
+  | { kind: 'campaign'; code: CampaignCode }
   | {
       kind: 'chat';
       /** Manifest name of the target app (`pyme-os`). Renderer resolves it against the installed list. `null` means the global free chat. */

@@ -112,6 +112,34 @@ test('rename installed app validates ownership and input before touching the man
   });
 });
 
+test('legacy usage collector is retired even when the backend is available and renderer claims consent', async () => {
+  let calls = 0;
+  const { handlers } = createDeps({ forgerBackendClient: { submitUsageEvent: async () => { calls += 1; } } });
+  const result = await handlers.get(IPC_CHANNELS.submitUsageEvent)(trustedIpcEvent, {
+    eventName: 'forger_installed', installationIdentifier: 'private-legacy-identifier', consent: true,
+  });
+  assert.equal(result.technicalCode, 'legacy_measurement_disabled');
+  assert.equal(calls, 0);
+});
+
+test('actual main IPC composition lazily owns campaign state, reuses it and registers cleanup on first use', async (t) => {
+  const root = await fs.mkdtemp(path.join(tmpdir(), 'forger-campaign-composition-'));
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  const lifecycle = [];
+  let pathReads = 0;
+  const { handlers } = createDeps({ app: { isPackaged: false, getVersion: () => '0.5.18',
+    getPath: () => { pathReads += 1; return root; }, on: (...args) => lifecycle.push(args) } });
+  assert.equal(pathReads, 0); assert.equal(lifecycle.length, 0);
+  const first = await handlers.get(IPC_CHANNELS.initializeCampaignMeasurement)(trustedIpcEvent, false);
+  assert.equal(first.available, false);
+  assert.equal(first.newProfile, true);
+  assert.equal(pathReads, 1);
+  assert.equal(lifecycle.length, 1); assert.equal(lifecycle[0][0], 'before-quit');
+  const second = await handlers.get(IPC_CHANNELS.getCampaignMeasurementStatus)(trustedIpcEvent);
+  assert.deepEqual(second, first); assert.equal(pathReads, 1);
+  lifecycle[0][1]();
+});
+
 test('rename installed app surfaces manifest failures as a local rename error', async () => {
   const root = await fs.mkdtemp(path.join(tmpdir(), 'forger-rename-invalid-'));
   try {

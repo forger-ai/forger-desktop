@@ -972,7 +972,7 @@ test('main IPC delegates common service handlers and returns backend-missing fal
   assert.equal((await handlers.get(IPC_CHANNELS.loginForgerAccount)(trustedIpcEvent, {})).technicalCode, 'backend_client_missing');
   assert.equal((await handlers.get(IPC_CHANNELS.updateForgerAccountProfile)(trustedIpcEvent, { username: 'ada' })).technicalCode, 'backend_client_missing');
   assert.equal((await handlers.get(IPC_CHANNELS.submitProductFeedback)(trustedIpcEvent, {})).technicalCode, 'backend_client_missing');
-  assert.equal((await handlers.get(IPC_CHANNELS.submitUsageEvent)(trustedIpcEvent, { eventName: 'app_opened' })).technicalCode, 'backend_client_missing');
+  assert.equal((await handlers.get(IPC_CHANNELS.submitUsageEvent)(trustedIpcEvent, { eventName: 'app_opened' })).technicalCode, 'legacy_measurement_disabled');
   assert.equal((await handlers.get(IPC_CHANNELS.submitDesktopErrorReport)(trustedIpcEvent, { source: 'main', operation: 'op', message: 'fail' })).technicalCode, 'backend_client_missing');
   assert.equal((await handlers.get(IPC_CHANNELS.submitAppRating)(trustedIpcEvent, { appId: 'finance-os' })).technicalCode, 'backend_client_missing');
 
@@ -1138,7 +1138,7 @@ test('main IPC delegates cloud account, social, telemetry, auth, and browser suc
     success: true,
     feedback: { message: 'idea' },
   });
-  assert.equal((await handlers.get(IPC_CHANNELS.submitUsageEvent)(trustedIpcEvent, { eventName: 'app_opened' })).event.desktopVersion, '0.0.0-test');
+  assert.equal((await handlers.get(IPC_CHANNELS.submitUsageEvent)(trustedIpcEvent, { eventName: 'app_opened' })).technicalCode, 'legacy_measurement_disabled');
   assert.equal((await handlers.get(IPC_CHANNELS.submitDesktopErrorReport)(trustedIpcEvent, { source: 'main' })).report.arch, process.arch);
 
   assert.deepEqual(await handlers.get(IPC_CHANNELS.openExternalUrl)(trustedIpcEvent, 'https://example.com/path'), { success: true });

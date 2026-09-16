@@ -78,6 +78,8 @@ export function TourOverlay({
           left: position.left,
           width: modalWidth,
           maxWidth: 'calc(100vw - 48px)',
+          maxHeight: isWelcome ? 'calc(100vh - 64px)' : undefined,
+          overflowY: isWelcome ? 'auto' : undefined,
           p: isWelcome ? 3 : 2,
           border: '1px solid',
           borderColor: 'divider',
