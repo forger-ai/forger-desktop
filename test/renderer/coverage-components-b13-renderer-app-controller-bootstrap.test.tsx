@@ -265,6 +265,21 @@ beforeEach(() => {
 });
 
 describe('RendererAppController bootstrap, routing, and cleanup', () => {
+  it('continues normal startup when optional measurement initialization cannot read local state', async () => {
+    const app = { id: 'planner', name: 'Planner', category: 'productivity', status: 'installed', privateLocal: true };
+    const bridge = installBridge({
+      initializeCampaignMeasurement: () => Promise.reject(new Error('measurement_state_unavailable')),
+      listInstalledApps: [app],
+    });
+    const { result } = await renderController(bridge);
+    await waitFor(() => expect(bridge.call('initializeCampaignMeasurement')).toHaveBeenCalledOnce());
+    expect(result.current.installedApps).toEqual([app]);
+    expect(result.current.activeLocale).toBe('en');
+    expect(bridge.call('getCampaignMeasurementStatus')).not.toHaveBeenCalled();
+    expect(bridge.call('setCampaignMeasurementConsent')).not.toHaveBeenCalled();
+    expect(bridge.call('recordCampaignFirstAppCreated')).not.toHaveBeenCalled();
+  });
+
   it('hydrates every startup surface, exposes the chosen locale/theme, and records startup analytics', async () => {
     const app = { id: 'planner', name: 'Planner', category: 'productivity', status: 'installed', privateLocal: true };
     const social = { id: 'social', name: 'Social', category: 'productivity', status: 'installed', socialSource: { ownerUsername: 'ana', slug: 'social' } };
