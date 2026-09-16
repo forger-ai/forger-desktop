@@ -1,4 +1,5 @@
-import { Box, Button, Chip, CssBaseline, Dialog, DialogActions, DialogContent, DialogTitle, FormControlLabel, LinearProgress, Link, Stack, Switch, ThemeProvider, Tooltip, Typography } from '@mui/material';
+import { Box, Button, Chip, CssBaseline, Dialog, DialogActions, DialogContent, DialogTitle, LinearProgress, Link, Stack, ThemeProvider, Typography } from '@mui/material';
+import { CampaignMeasurementDialog, CampaignMeasurementPanel } from '@renderer/components/CampaignMeasurementPanel';
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import type { AgentEffort, AntigravityEffort, AudioRuntimeBrokerRequest, BackgroundTask, CatalogApp, ClaudeEffort, CodexReasoningEffort, DesktopUpdateReleaseSummary, WakeWordState } from '@shared/types';
 import { AppShell } from '@renderer/components/AppShell';
@@ -679,22 +680,7 @@ export function RendererAppView({ controller }: RendererAppViewProps) {
         .
       </Typography>
       <Box sx={{ border: '1px solid', borderColor: 'divider', borderRadius: 1, p: 1.5 }}>
-        <Stack spacing={0.75}>
-          <Tooltip title={t.onboarding.steps.welcome.analyticsTooltip} placement="top">
-            <FormControlLabel
-              control={
-                <Switch
-                  checked={tour.welcomeUsageAnalyticsEnabled}
-                  onChange={(event) => tour.setWelcomeUsageAnalyticsEnabled(event.target.checked)}
-                />
-              }
-              label={t.onboarding.steps.welcome.analyticsLabel}
-            />
-          </Tooltip>
-          <Typography variant="caption" color="text.secondary">
-            {t.onboarding.steps.welcome.analyticsSettingsNote}
-          </Typography>
-        </Stack>
+        <CampaignMeasurementPanel locale={activeLocale} />
       </Box>
     </Stack>
   );
@@ -843,6 +829,7 @@ export function RendererAppView({ controller }: RendererAppViewProps) {
 
   return (
     <ThemeProvider theme={theme}>
+      <CampaignMeasurementDialog locale={activeLocale} />
       <CssBaseline />
       <Dialog
         open={desktopUpdateModalOpen}

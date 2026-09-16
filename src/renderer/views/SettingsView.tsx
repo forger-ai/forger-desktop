@@ -1,6 +1,7 @@
 /* eslint-disable max-lines */
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
+import { CampaignMeasurementPanel } from '@renderer/components/CampaignMeasurementPanel';
 import {
   Box,
   Button,
@@ -478,8 +479,6 @@ export function SettingsView({
   cloudIdentity,
   onRevealCloudSecretKey,
   onRegenerateCloudSecretKey,
-  usageAnalyticsEnabled,
-  onUsageAnalyticsChange,
   onNavigate,
   onResetOnboarding,
 }: SettingsViewProps) {
@@ -2296,21 +2295,7 @@ export function SettingsView({
           </Stack>
           <Divider />
           <Stack spacing={1.25}>
-            <Stack spacing={0.5}>
-              <Typography variant="h6">{t.settings.usageAnalyticsTitle}</Typography>
-              <Typography variant="body2" color="text.secondary">{t.settings.usageAnalyticsDescription}</Typography>
-            </Stack>
-            <Tooltip title={t.settings.usageAnalyticsHelp} placement="top" describeChild>
-              <FormControlLabel
-                control={
-                  <Switch
-                    checked={usageAnalyticsEnabled}
-                    onChange={(event) => onUsageAnalyticsChange(event.target.checked)}
-                  />
-                }
-                label={t.settings.usageAnalyticsToggle}
-              />
-            </Tooltip>
+            <CampaignMeasurementPanel locale={t.locale} />
           </Stack>
         </Stack>
       </CardContent>

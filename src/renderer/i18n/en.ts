@@ -1046,7 +1046,7 @@ export const en = { locale: 'en',
     backToSettings: 'Back to Settings',
     settingsRows: {
       llmProvider: 'Connect Codex and Claude, and choose default provider, models, and permissions.',
-      privacySecurity: 'Manage Forger private key and anonymous usage metrics.',
+      privacySecurity: 'Manage your Forger private key and optional measurement.',
       appearance: 'Change language, visual theme, and chat bot picture.',
       storage: 'Review cloud storage usage by backups, uploaded applications, and other storage.',
       speechToText: 'Install and run local audio transcription with faster-whisper.',

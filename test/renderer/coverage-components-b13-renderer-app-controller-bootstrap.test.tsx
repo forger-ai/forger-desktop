@@ -326,6 +326,12 @@ describe('RendererAppController bootstrap, routing, and cleanup', () => {
     });
     const { result } = await renderController(bridge);
     await waitFor(() => expect(bridge.listeners.onDeepLink).toHaveLength(1));
+    const campaignRequested = vi.fn();
+    window.addEventListener('forger-campaign-measurement-link', campaignRequested);
+    act(() => bridge.emit('onDeepLink', { kind: 'campaign', code: 'ig_202609_paid_01' }));
+    expect(campaignRequested).toHaveBeenCalledOnce();
+    expect((campaignRequested.mock.calls[0][0] as CustomEvent).detail).toBe('ig_202609_paid_01');
+    window.removeEventListener('forger-campaign-measurement-link', campaignRequested);
     act(() => bridge.emit('onDeepLink', { kind: 'chat', app: 'planner', prompt: 'Plan today' }));
     expect(result.current.selectedAppId).toBe('planner');
     expect(result.current.chatInput).toBe('Plan today');

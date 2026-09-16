@@ -46,6 +46,9 @@ describe('TourOverlay', () => {
     expect(screen.getByRole('heading', { name: 'Welcome to Forger' })).toBeVisible();
     expect(screen.getByText('A short guided tour.')).toBeVisible();
     expect(screen.getByText('Privacy choice')).toBeVisible();
+    const welcomeStyle = getComputedStyle(screen.getByText('Privacy choice').closest('.MuiPaper-root')!);
+    expect(welcomeStyle.overflowY).toBe('auto');
+    expect(Number.parseFloat(welcomeStyle.maxHeight)).toBe(window.innerHeight - 64);
     await user.click(screen.getByRole('button', { name: t.onboarding.skip }));
     await user.click(screen.getByRole('button', { name: 'Start' }));
     expect(onSkip).toHaveBeenCalledOnce();
