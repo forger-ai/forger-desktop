@@ -56,6 +56,23 @@ const waitFor = async (predicate, { attempts = 500, delayMs = 20 } = {}) => {
   return false;
 };
 
+const hasFinishedAutomationRun = (manager, updates, run, status) => run?.status === status
+  && updates.some((event) => event.run?.id === run.id && event.run.status === status && event.automation.running === false)
+  && (!manager.list().find((automation) => automation.id === run.automationId)?.enabled
+    || manager.timers.has(run.automationId));
+
+const disposeFinishedAutomationFixture = async (manager, updates) => {
+  try {
+    for (const automation of manager.list()) await manager.pause(automation.id);
+    const settled = await waitFor(() => manager.activeRunAutomationIds.size === 0
+      && manager.list().every((automation) => !automation.running && (!automation.lastRun
+        || hasFinishedAutomationRun(manager, updates, automation.lastRun, automation.lastRun.status))));
+    assert.equal(settled, true, 'finish persistence and terminal notifications before deleting fixture storage');
+  } finally {
+    manager.dispose();
+  }
+};
+
 test.after(async () => {
   await __resetChromeExtensionToolForTests();
 });
@@ -3212,12 +3229,13 @@ test('automation manager records failed runs without invoking live credentials o
     let runs = [];
     for (let attempt = 0; attempt < 50; attempt += 1) {
       runs = await manager.listRuns(automation.id);
-      if (runs[0]?.status === 'failed') {
+      if (hasFinishedAutomationRun(manager, updates, runs[0], 'failed')) {
         break;
       }
       await wait(20);
     }
 
+    assert.equal(hasFinishedAutomationRun(manager, updates, runs[0], 'failed'), true);
     assert.equal(runs[0].status, 'failed');
     assert.equal(runs[0].error, 'codex_auth_missing');
     assert.equal(runs[0].userMessage, 'No se pudo ejecutar porque Codex no tiene una sesion activa.');
@@ -3227,7 +3245,7 @@ test('automation manager records failed runs without invoking live credentials o
     assert.equal(released[0], `app:${runs[0].id}`);
     assert.equal(updates.some((event) => event.run?.status === 'failed'), true);
   } finally {
-    manager.dispose();
+    await disposeFinishedAutomationFixture(manager, updates);
     await rm(root, { recursive: true, force: true, maxRetries: 3, retryDelay: 50 });
   }
 });
@@ -3310,12 +3328,12 @@ test('automation manager handles lifecycle validation, corrupted storage, and ov
     let runs = [];
     for (let attempt = 0; attempt < 100; attempt += 1) {
       runs = await manager.listRuns(created.id);
-      if (runs.some((run) => run.status === 'succeeded')) {
+      if (runs.some((run) => run.id === firstRun.id && hasFinishedAutomationRun(manager, updates, run, 'succeeded'))) {
         break;
       }
       await wait(25);
     }
-    assert.equal(runs.some((run) => run.status === 'succeeded'), true);
+    assert.equal(runs.some((run) => run.id === firstRun.id && hasFinishedAutomationRun(manager, updates, run, 'succeeded')), true);
     assert.equal(updates.some((event) => event.run?.status === 'skipped'), true);
 
     await writeFile(join(metadataRoot, 'automation-runs', `${created.id}.index.json`), '{bad json', 'utf8');
@@ -3328,7 +3346,7 @@ test('automation manager handles lifecycle validation, corrupted storage, and ov
     assert.equal((await manager.delete(created.id)).success, true);
     assert.deepEqual(manager.list(), []);
   } finally {
-    manager.dispose();
+    await disposeFinishedAutomationFixture(manager, updates);
     await rm(root, { recursive: true, force: true, maxRetries: 3, retryDelay: 50 });
   }
 });
@@ -3397,7 +3415,7 @@ test('automation manager records successful Codex runs with memory context and r
     let runs = [];
     const completed = await waitFor(async () => {
       runs = await manager.listRuns(automation.id);
-      if (runs[0]?.status !== 'succeeded') {
+      if (!hasFinishedAutomationRun(manager, updates, runs[0], 'succeeded')) {
         return false;
       }
       try {
@@ -3421,7 +3439,7 @@ test('automation manager records successful Codex runs with memory context and r
     assert.deepEqual(released, [`forger:forger-token`, `app:${runs[0].id}`]);
     assert.equal(updates.some((event) => event.run?.status === 'succeeded'), true);
   } finally {
-    manager.dispose();
+    await disposeFinishedAutomationFixture(manager, updates);
     await rm(root, { recursive: true, force: true, maxRetries: 3, retryDelay: 50 });
   }
 });
@@ -3711,6 +3729,7 @@ test('automation prompt describes non-interactive one-time execution and tool gu
 test('automation manager maps missing provider setup to user-facing run failures', async () => {
   const root = await mkdtemp(join(tmpdir(), 'forger-automation-cli-missing-'));
   const metadataRoot = join(root, 'metadata');
+  const updates = [];
   const createManager = (provider, overrides = {}) => new AutomationManager({
     forgerHomeRoot: root,
     metadataRoot,
@@ -3722,7 +3741,7 @@ test('automation manager maps missing provider setup to user-facing run failures
     getCodexPathEntries: async () => [],
     getCodexAuthenticated: async () => overrides.codexAuthenticated ?? true,
     getClaudeAuthenticated: async () => overrides.claudeAuthenticated ?? true,
-    onAutomationUpdated: () => undefined,
+    onAutomationUpdated: (event) => updates.push(event),
   });
 
   const codex = createManager('codex');
@@ -3762,11 +3781,12 @@ test('automation manager maps missing provider setup to user-facing run failures
     let codexRuns = [];
     for (let attempt = 0; attempt < 50; attempt += 1) {
       codexRuns = await codex.listRuns(codexAutomation.id);
-      if (codexRuns[0]?.status === 'failed') {
+      if (hasFinishedAutomationRun(codex, updates, codexRuns[0], 'failed')) {
         break;
       }
       await wait(20);
     }
+    assert.equal(hasFinishedAutomationRun(codex, updates, codexRuns[0], 'failed'), true);
     assert.equal(codexRuns[0].error, 'codex_cli_missing');
     assert.match(codexRuns[0].userMessage, /Codex no esta listo/);
 
@@ -3782,11 +3802,12 @@ test('automation manager maps missing provider setup to user-facing run failures
     let codexAuthRuns = [];
     for (let attempt = 0; attempt < 50; attempt += 1) {
       codexAuthRuns = await codexAuth.listRuns(codexAuthAutomation.id);
-      if (codexAuthRuns[0]?.status === 'failed') {
+      if (hasFinishedAutomationRun(codexAuth, updates, codexAuthRuns[0], 'failed')) {
         break;
       }
       await wait(20);
     }
+    assert.equal(hasFinishedAutomationRun(codexAuth, updates, codexAuthRuns[0], 'failed'), true);
     assert.equal(codexAuthRuns[0].error, 'codex_auth_missing');
 
     await claude.initialize();
@@ -3802,11 +3823,12 @@ test('automation manager maps missing provider setup to user-facing run failures
     let claudeRuns = [];
     for (let attempt = 0; attempt < 50; attempt += 1) {
       claudeRuns = await claude.listRuns(claudeAutomation.id);
-      if (claudeRuns[0]?.status === 'failed') {
+      if (hasFinishedAutomationRun(claude, updates, claudeRuns[0], 'failed')) {
         break;
       }
       await wait(20);
     }
+    assert.equal(hasFinishedAutomationRun(claude, updates, claudeRuns[0], 'failed'), true);
     assert.equal(claudeRuns[0].error, 'claude_cli_missing');
     assert.match(claudeRuns[0].userMessage, /Claude Code no esta listo/);
 
@@ -3823,18 +3845,22 @@ test('automation manager maps missing provider setup to user-facing run failures
     let claudeAuthRuns = [];
     for (let attempt = 0; attempt < 50; attempt += 1) {
       claudeAuthRuns = await claudeAuth.listRuns(claudeAuthAutomation.id);
-      if (claudeAuthRuns[0]?.status === 'failed') {
+      if (hasFinishedAutomationRun(claudeAuth, updates, claudeAuthRuns[0], 'failed')) {
         break;
       }
       await wait(20);
     }
+    assert.equal(hasFinishedAutomationRun(claudeAuth, updates, claudeAuthRuns[0], 'failed'), true);
     assert.equal(claudeAuthRuns[0].error, 'claude_auth_missing');
     assert.match(claudeAuthRuns[0].userMessage, /Claude Code no tiene una sesion activa/);
   } finally {
-    codex.dispose();
-    codexAuth.dispose();
-    claude.dispose();
-    claudeAuth.dispose();
+    try {
+      for (const manager of [codex, codexAuth, claude, claudeAuth]) {
+        await disposeFinishedAutomationFixture(manager, updates);
+      }
+    } finally {
+      for (const manager of [codex, codexAuth, claude, claudeAuth]) manager.dispose();
+    }
     await rm(root, { recursive: true, force: true, maxRetries: 3, retryDelay: 50 });
   }
 });
@@ -3884,6 +3910,7 @@ test('automation manager rejects run ids that escape run storage', async () => {
 test('automation manager maps Codex timeout exits to the timeout user message', async () => {
   const root = await mkdtemp(join(tmpdir(), 'forger-automation-timeout-'));
   const fakeCodex = join(root, 'timeout-codex.js');
+  const updates = [];
   await mkdir(join(root, 'codex-home'), { recursive: true });
   await writeFile(join(root, 'codex-home', 'auth.json'), '{"token":"test"}', 'utf8');
   await writeFile(fakeCodex, [
@@ -3906,7 +3933,7 @@ test('automation manager maps Codex timeout exits to the timeout user message', 
     getCodexAuthenticated: async () => true,
     getClaudeAuthenticated: async () => false,
     releaseAppMcps: () => undefined,
-    onAutomationUpdated: () => undefined,
+    onAutomationUpdated: (event) => updates.push(event),
   });
 
   try {
@@ -3923,16 +3950,18 @@ test('automation manager maps Codex timeout exits to the timeout user message', 
     let runs = [];
     for (let attempt = 0; attempt < 50; attempt += 1) {
       runs = await manager.listRuns(automation.id);
-      if (runs[0]?.status === 'failed') {
+      if (hasFinishedAutomationRun(manager, updates, runs[0], 'failed')) {
         break;
       }
       await wait(20);
     }
 
+    assert.equal(hasFinishedAutomationRun(manager, updates, runs[0], 'failed'), true);
+    assert.match((await manager.getRunTranscript(runs[0].id)).transcript, /Run failed: codex_timeout_after_1000/);
     assert.equal(runs[0].error, 'codex_timeout_after_1000');
     assert.equal(runs[0].userMessage, 'La automatizacion se detuvo porque tardo demasiado en responder.');
   } finally {
-    manager.dispose();
+    await disposeFinishedAutomationFixture(manager, updates);
     await rm(root, { recursive: true, force: true, maxRetries: 3, retryDelay: 50 });
   }
 });
