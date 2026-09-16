@@ -265,6 +265,22 @@ beforeEach(() => {
 });
 
 describe('RendererAppController bootstrap, routing, and cleanup', () => {
+  it('continues normal startup with an older bridge that has no optional measurement initializer', async () => {
+    const app = { id: 'planner', name: 'Planner', category: 'productivity', status: 'installed', privateLocal: true };
+    const bridge = installBridge({ listInstalledApps: [app] });
+    const olderApi = new Proxy(bridge.api, {
+      get: (target, property) => property === 'initializeCampaignMeasurement' ? undefined : Reflect.get(target, property),
+    });
+    Object.defineProperty(window, 'forger', { configurable: true, value: olderApi });
+    const { result } = await renderController(bridge);
+    expect(result.current.installedApps).toEqual([app]);
+    expect(result.current.activeLocale).toBe('en');
+    expect(bridge.calls.initializeCampaignMeasurement).toBeUndefined();
+    expect(bridge.call('getCampaignMeasurementStatus')).not.toHaveBeenCalled();
+    expect(bridge.call('setCampaignMeasurementConsent')).not.toHaveBeenCalled();
+    expect(bridge.call('recordCampaignFirstAppCreated')).not.toHaveBeenCalled();
+  });
+
   it('continues normal startup when optional measurement initialization cannot read local state', async () => {
     const app = { id: 'planner', name: 'Planner', category: 'productivity', status: 'installed', privateLocal: true };
     const bridge = installBridge({

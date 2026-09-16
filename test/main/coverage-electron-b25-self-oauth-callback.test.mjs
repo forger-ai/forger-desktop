@@ -340,7 +340,6 @@ test('shared loopback OAuth handles callback paths, provider errors, missing cod
     toolId: 'demo', clientId: 'client', clientSecret: 'secret', authUrl: 'https://oauth.test/auth',
     tokenUrl: 'https://oauth.test/token', callbackPath: '/oauth/demo/callback', scopes: [], timeoutMs: 5,
   });
-  await new Promise((resolve) => setImmediate(resolve));
   await assert.rejects(timed, /timed out/);
   assert.equal(typeof hiddenFlow.handle, 'function');
   assert.equal(hiddenResponse.headersSent, true);
