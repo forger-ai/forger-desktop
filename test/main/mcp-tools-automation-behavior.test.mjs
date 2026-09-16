@@ -3494,6 +3494,7 @@ test('automation manager uses the saved runtime for scheduled and manual executi
   const metadataRoot = join(root, 'metadata');
   const fakeCodex = join(root, 'fake-codex.js');
   const runtimeRequests = [];
+  const updates = [];
   await mkdir(metadataRoot, { recursive: true });
   await mkdir(join(root, 'codex-home'), { recursive: true });
   await writeFile(join(root, 'codex-home', 'auth.json'), '{"token":"test"}', 'utf8');
@@ -3539,24 +3540,29 @@ test('automation manager uses the saved runtime for scheduled and manual executi
     getCodexPathEntries: async () => [],
     getCodexAuthenticated: async () => true,
     getClaudeAuthenticated: async () => false,
-    onAutomationUpdated: () => undefined,
+    onAutomationUpdated: (event) => updates.push(event),
   });
+
+  const runFinished = (run) => run?.status === 'succeeded'
+    && updates.some((event) => event.run?.id === run.id && event.run.status === 'succeeded' && event.automation.running === false)
+    && manager.timers.has('stored-runtime');
 
   try {
     await manager.initialize();
     let runs = [];
     const scheduledCompleted = await waitFor(async () => {
       runs = await manager.listRuns('stored-runtime');
-      return runs[0]?.status === 'succeeded';
+      return runFinished(runs[0]);
     });
     assert.equal(scheduledCompleted, true);
     assert.equal(runs[0].trigger, 'scheduled');
     assert.equal(runs[0].status, 'succeeded');
 
     const manual = await manager.runNow('stored-runtime');
+    assert.equal(manual.status, 'queued');
     const manualCompleted = await waitFor(async () => {
       runs = await manager.listRuns('stored-runtime');
-      return runs.find((run) => run.id === manual.id)?.status === 'succeeded';
+      return runFinished(runs.find((run) => run.id === manual.id));
     });
 
     assert.equal(manualCompleted, true);
@@ -3565,8 +3571,14 @@ test('automation manager uses the saved runtime for scheduled and manual executi
       { provider: 'codex', model: 'gpt-test', effort: 'high', permissionMode: 'unsafe', strict: true },
     ]);
   } finally {
-    manager.dispose();
-    await rm(root, { recursive: true, force: true, maxRetries: 3, retryDelay: 50 });
+    try {
+      if (manager.list().some((automation) => automation.id === 'stored-runtime')) {
+        await manager.pause('stored-runtime');
+      }
+    } finally {
+      manager.dispose();
+      await rm(root, { recursive: true, force: true, maxRetries: 3, retryDelay: 50 });
+    }
   }
 });
 
@@ -3575,6 +3587,7 @@ test('automation manager applies missed scheduled run policies during initializa
   const metadataRoot = join(root, 'metadata');
   const fakeCodex = join(root, 'fake-codex.js');
   const runtimeRequests = [];
+  const updates = [];
   const now = Date.now();
   await mkdir(metadataRoot, { recursive: true });
   await mkdir(join(root, 'codex-home'), { recursive: true });
@@ -3642,15 +3655,19 @@ test('automation manager applies missed scheduled run policies during initializa
     getCodexPathEntries: async () => [],
     getCodexAuthenticated: async () => true,
     getClaudeAuthenticated: async () => false,
-    onAutomationUpdated: () => undefined,
+    onAutomationUpdated: (event) => updates.push(event),
   });
+
+  const runFinished = (run) => run?.status === 'succeeded'
+    && updates.some((event) => event.run?.id === run.id && event.run.status === 'succeeded' && event.automation.running === false)
+    && manager.timers.has(run.automationId);
 
   try {
     await manager.initialize();
     const completed = await waitFor(async () => {
       const freshRuns = await manager.listRuns('window-fresh');
       const alwaysRuns = await manager.listRuns('always-old');
-      return freshRuns[0]?.status === 'succeeded' && alwaysRuns[0]?.status === 'succeeded';
+      return runFinished(freshRuns[0]) && runFinished(alwaysRuns[0]);
     });
 
     assert.equal(completed, true);
@@ -3665,8 +3682,14 @@ test('automation manager applies missed scheduled run policies during initializa
     assert.equal(alwaysRuns[0].status, 'succeeded');
     assert.equal(runtimeRequests.length, 2);
   } finally {
-    manager.dispose();
-    await rm(root, { recursive: true, force: true, maxRetries: 3, retryDelay: 50 });
+    try {
+      for (const automation of manager.list()) {
+        await manager.pause(automation.id);
+      }
+    } finally {
+      manager.dispose();
+      await rm(root, { recursive: true, force: true, maxRetries: 3, retryDelay: 50 });
+    }
   }
 });
 
