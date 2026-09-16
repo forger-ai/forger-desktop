@@ -3982,7 +3982,11 @@ test('automation manager runs due stored schedules and keeps enabled automations
       } catch {
         captureReady = false;
       }
-      return runs[0]?.status === 'succeeded' && scheduled.running === false && captureReady;
+      // State changes precede the final persistence, notification, and timer rearm.
+      // Wait for the whole scheduled run to settle before asserting or disposing.
+      const completionNotified = updates.some((event) => event.automation.running === false && event.run?.status === 'succeeded');
+      return runs[0]?.status === 'succeeded' && scheduled.running === false && captureReady
+        && completionNotified && manager.timers.has('scheduled');
     });
 
     assert.equal(completed, true);
@@ -3998,8 +4002,15 @@ test('automation manager runs due stored schedules and keeps enabled automations
     assert.equal(updates.some((event) => event.automation.running === true && event.run?.status === 'queued'), true);
     assert.equal(updates.some((event) => event.automation.running === false && event.run?.status === 'succeeded'), true);
   } finally {
-    manager.dispose();
-    await rm(root, { recursive: true, force: true, maxRetries: 3, retryDelay: 50 });
+    try {
+      // Prevent an in-flight completion from rearming after dispose on failure.
+      if (manager.list().some((automation) => automation.id === 'scheduled')) {
+        await manager.pause('scheduled');
+      }
+    } finally {
+      manager.dispose();
+      await rm(root, { recursive: true, force: true, maxRetries: 3, retryDelay: 50 });
+    }
   }
 });
 
