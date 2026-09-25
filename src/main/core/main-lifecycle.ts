@@ -12,11 +12,9 @@ import type {
   AgentToolDefinition, AppSecretDeclaration, AppSummary,
   AntigravityAuthStatus, AudioRuntimeDevices, AutomationFrequency,
   BasicActionResult, CallConnectionActionInput, CallOfficialToolInput,
-  CatalogApp, ChatCreatedAppRequest, ChatQuestion,
-  ChatQuestionRequest, ClaudeAuthStatus, CodexAuthStatus,
+  CatalogApp, ChatCreatedAppRequest, ChatQuestion, ChatQuestionRequest, ClaudeAuthStatus, CodexAuthStatus,
   ConfigureConnectionInput, CreateLocalAppInput, CreateLocalAppResult,
-  PersonalAgent, PersonalAgentPeerThread, RuntimeStatus,
-  SecretMutationResult, WorkflowApplyInput, WorkflowUpsertInput,
+  PersonalAgent, PersonalAgentPeerThread, RuntimeStatus, SecretMutationResult, WorkflowApplyInput, WorkflowUpsertInput,
 } from '../../shared/types';
 import type {
   AsyncFn,
@@ -48,6 +46,8 @@ import { createAppRuntimeDiagnostics } from './app-runtime-diagnostics';
 import { createPublishedAppInfoUpdater } from './main-lifecycle-mcp-handlers';
 import { registerGracefulShutdownHandlers } from './main-lifecycle-shutdown';
 import { isRemoteAgentSessionCloseEvent, isRemoteTunnelCloseEvent } from './remote-session-events';
+import type { WhatsAppAgentChannelService } from '../personal-agents/whatsapp-channel-service';
+import { createWhatsAppChannelHistoryReader, initializeWhatsAppAgentChannel } from './whatsapp-agent-channel-startup';
 import type { SidekickService } from '../sidekick-service';
 import type { SidekickVoiceOutcomeInput } from '../sidekick-voice-runtime';
 import { createSidekickRuntimeBridgeBindings } from '../sidekick-runtime-bridge';
@@ -165,6 +165,7 @@ export interface MainLifecycleDeps {
   };
 		  getOfficialToolsService: () => NonNullable<MainLifecycleState['officialToolsService']>;
   getConnectionsService: () => NonNullable<MainLifecycleState['connectionsService']>;
+  getWhatsAppAgentChannelService?: () => WhatsAppAgentChannelService;
   getSelfOAuthCallbackService: () => NonNullable<MainLifecycleState['selfOAuthCallbackService']>;
   getSpeechToTextService: () => NonNullable<MainLifecycleState['speechToTextService']>;
   getTextToSpeechService: () => NonNullable<MainLifecycleState['textToSpeechService']>;
@@ -333,6 +334,7 @@ export const registerMainLifecycle = (deps: MainLifecycleDeps) => {
     getPersonalAgentRoutineManager,
     getOfficialToolsService,
     getConnectionsService,
+    getWhatsAppAgentChannelService,
     getSelfOAuthCallbackService,
     getSidekickService,
     getSpeechToTextService,
@@ -484,6 +486,8 @@ export const registerMainLifecycle = (deps: MainLifecycleDeps) => {
   await startupLogger.step('startup:connections:load', async () => {
     await state.connectionsService?.load();
   });
+  await initializeWhatsAppAgentChannel(state, getWhatsAppAgentChannelService, startupLogger,
+    (error) => void appendInstallLog('whatsapp_agent_channel:initialize_failed', serializeErrorForInstallLog(error)));
   await startupLogger.step('startup:sidekick:start_if_paired', async () => {
     await startSidekickIfPaired?.();
   }).catch((error: unknown) => {
@@ -891,6 +895,7 @@ export const registerMainLifecycle = (deps: MainLifecycleDeps) => {
     listConnectionGrantsForApp: async (appId: string) => await getConnectionsService().listSessionGrantsForApp(appId),
     listConnectionsForSession: async (grants: unknown) => await getConnectionsService().listConnectionsForSession(grants as never),
     callConnectionFromSession: async (input: unknown, grants: unknown) => await getConnectionsService().callFromSession(input as never, grants as never),
+    readWhatsAppChannelHistory: createWhatsAppChannelHistoryReader(getWhatsAppAgentChannelService),
     memoryList: async (input: unknown, access: unknown) => await getMemoryStore().list(input, access),
     memoryCreate: async (input: unknown, access: unknown) => await getMemoryStore().create(input, access),
     memoryUpdate: async (input: unknown, access: unknown) => await getMemoryStore().update(input, access),

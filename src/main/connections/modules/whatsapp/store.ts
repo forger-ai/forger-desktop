@@ -131,14 +131,19 @@ export class WhatsAppLocalStore {
     const limit = clampLimit(input.limit, 25, 500);
     const before = decodeStableMessageRef(input.beforeMessageRef);
     const beforeRow = before
-      ? this.requireDb().prepare('SELECT timestamp FROM messages WHERE stable_ref = ?').get(encodeStableMessageRef(before)) as { timestamp: number | null } | undefined
+      ? this.requireDb().prepare('SELECT timestamp, stable_ref FROM messages WHERE stable_ref = ? AND chat_id = ?')
+        .get(encodeStableMessageRef(before), input.chatId) as { timestamp: number | null; stable_ref: string } | undefined
       : undefined;
+    if (before && !beforeRow) return [];
     const params: Record<string, string | number | null> = {
       chatId: input.chatId,
       limit,
       beforeTimestamp: beforeRow?.timestamp ?? null,
+      beforeRef: beforeRow?.stable_ref ?? null,
     };
-    const beforeClause = beforeRow ? 'AND coalesce(timestamp, 0) < coalesce(@beforeTimestamp, 0)' : '';
+    const beforeClause = beforeRow
+      ? 'AND (coalesce(timestamp, 0) < coalesce(@beforeTimestamp, 0) OR (coalesce(timestamp, 0) = coalesce(@beforeTimestamp, 0) AND stable_ref < @beforeRef))'
+      : '';
     const rows = this.requireDb().prepare(`
       SELECT *
       FROM messages
@@ -182,11 +187,14 @@ export class WhatsAppLocalStore {
     this.upsertAliases(chat.chatId, [chat.title, chat.phoneNumber, ...(chat.aliases ?? [])]);
   }
 
-  async upsertMessages(messages: WhatsAppIndexedMessage[]): Promise<void> {
+  async upsertMessages(messages: WhatsAppIndexedMessage[]): Promise<string[]> {
     await this.load();
     const insert = this.requireDb().transaction((items: WhatsAppIndexedMessage[]) => {
+      const insertedRefs: string[] = [];
+      const existingMessage = this.requireDb().prepare('SELECT 1 FROM messages WHERE stable_ref = ?');
       for (const message of items) {
         const stableRef = encodeStableMessageRef(message.stableMessageRef);
+        if (!existingMessage.get(stableRef)) insertedRefs.push(stableRef);
         this.requireDb().prepare(`
           INSERT INTO chats (chat_id, chat_type, title, phone_number, last_message_ref, unread_count, is_muted, updated_at)
           VALUES (@chatId, @chatType, NULL, NULL, @lastMessageRef, NULL, NULL, @updatedAt)
@@ -239,16 +247,27 @@ export class WhatsAppLocalStore {
           this.upsertAttachment(attachment);
         }
       }
+      return insertedRefs;
     });
-    insert(messages);
+    return insert(messages);
   }
 
-  async rememberSend(): Promise<void> {
+  async rememberSend(stableMessageRef?: string): Promise<void> {
     await this.load();
-    this.requireDb().prepare(`
-      INSERT INTO kv (key, value) VALUES ('last_send_at', ?)
-      ON CONFLICT(key) DO UPDATE SET value = excluded.value
-    `).run(new Date().toISOString());
+    const now = new Date().toISOString();
+    this.requireDb().transaction(() => {
+      const write = this.requireDb().prepare(`
+        INSERT INTO kv (key, value) VALUES (?, ?)
+        ON CONFLICT(key) DO UPDATE SET value = excluded.value
+      `);
+      write.run('last_send_at', now);
+      if (stableMessageRef) write.run(`outbound_message:${stableMessageRef}`, now);
+    })();
+  }
+
+  async isKnownOutboundMessageRef(stableMessageRef: string): Promise<boolean> {
+    await this.load();
+    return Boolean(this.requireDb().prepare('SELECT 1 FROM kv WHERE key = ?').get(`outbound_message:${stableMessageRef}`));
   }
 
   async canSendNow(): Promise<boolean> {

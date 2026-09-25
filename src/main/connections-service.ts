@@ -166,6 +166,16 @@ export class ConnectionsService {
     this.loaded = true;
   }
 
+  async startType(type: string): Promise<void> {
+    await this.load();
+    await this.modulesByType.get(type)?.start?.(this.getContext());
+  }
+
+  async stopType(type: string): Promise<void> {
+    if (!this.loaded) return;
+    await this.modulesByType.get(type)?.stop?.(this.getContext());
+  }
+
   async listTypes(locale?: string): Promise<ConnectionTypeDefinition[]> {
     await this.load();
     const effectiveLocale = locale ?? this.options.locale;

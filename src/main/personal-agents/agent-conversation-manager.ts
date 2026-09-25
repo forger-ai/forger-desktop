@@ -2,7 +2,7 @@ import path from 'node:path';
 
 import type { ChildProcessWithoutNullStreams } from 'node:child_process';
 import type { AgentRunActivity, AgentRunActivityStatus, AgentRuntime, AgentRuntimeRequest, PersonalAgent, PersonalAgentConversation, PersonalAgentConversationEvent, PersonalAgentConversationGetInput, PersonalAgentConversationStartInput, PersonalAgentMessage, PersonalAgentMessageSendInput, PersonalAgentMessageSource, PersonalAgentPeerThread, PersonalAgentRun } from '../../shared/types';
-import { existsDirectory, runCommandCapture } from '../app-agent/process';
+import { existsDirectory, killProcessTree, runCommandCapture } from '../app-agent/process';
 import type { LlmAppMcpServerConfig } from '../app-agent/types';
 import {
   addStatusActivityItem,
@@ -69,6 +69,7 @@ export interface PersonalAgentMcpRunContext {
   conversationId: string;
   peerThreadId?: string;
   callStackAgentIds: string[];
+  channel?: PersonalAgentWhatsAppChannel;
   sidekick?: {
     sidekickId: string;
     locale: string;
@@ -76,6 +77,29 @@ export interface PersonalAgentMcpRunContext {
     voice?: string;
   };
 }
+
+export interface PersonalAgentWhatsAppChannel {
+  kind: 'whatsapp';
+  connectionId: string;
+  chatId: string;
+  bindingId: string;
+  revision: number;
+  allowAgentCapabilities: boolean;
+}
+
+const effectiveAgentForChannel = (
+  agent: PersonalAgent,
+  channel: PersonalAgentWhatsAppChannel | undefined,
+): PersonalAgent => !channel || channel.allowAgentCapabilities ? agent : {
+  ...agent,
+  permissionMode: 'safe',
+  networkAccess: false,
+  canSpawnAgents: false,
+  appIds: [],
+  toolIds: [],
+  connectionGrants: [],
+  peerAgentGrants: [],
+};
 
 export interface PersonalAgentSidekickMessageInput {
   conversationId: string;
@@ -108,16 +132,39 @@ export interface PersonalAgentAskPeerResult {
 export interface PersonalAgentScheduledMessageInput {
   conversationId: string;
   content: string;
-  source: Exclude<PersonalAgentMessageSource, 'human'>;
+  source: Exclude<PersonalAgentMessageSource, 'human' | 'whatsapp'>;
   routineId?: string | null;
   wakeupId?: string | null;
   onRunSettled?: (result: { success: true } | { success: false; error: unknown }) => void | Promise<void>;
+}
+
+type PersonalAgentSendOptions = {
+  source: PersonalAgentMessageSource;
+  channel?: PersonalAgentWhatsAppChannel;
+  routineId?: string | null;
+  wakeupId?: string | null;
+  bypassWakeupBlock?: boolean;
+  bypassReadOnly?: boolean;
+  locale?: string;
+  sidekick?: PersonalAgentMcpRunContext['sidekick'];
+  onRunSettled?: (result: { success: true } | { success: false; error: unknown }) => void | Promise<void>;
+};
+
+export interface PersonalAgentSteerInput {
+  conversationId: string;
+  expectedRunId: string;
+  content: string;
+  source?: 'human' | 'whatsapp';
+  channel?: PersonalAgentWhatsAppChannel;
 }
 
 export class AgentConversationManager {
   private readonly activeChildren = new Map<string, ChildProcessWithoutNullStreams>();
   private readonly activities = new Map<string, AgentRunActivity>();
   private readonly listeners = new Set<(event: PersonalAgentConversationEvent) => void>();
+  private readonly conversationMutations = new Map<string, Promise<void>>();
+  private readonly canceledRunIds = new Set<string>();
+  private readonly runPreparations = new Map<string, { promise: Promise<void>; resolve: () => void }>();
 
   public constructor(private readonly options: AgentConversationManagerOptions) {}
 
@@ -134,6 +181,19 @@ export class AgentConversationManager {
     const conversation = await this.options.store.createConversation({
       agentId: agent.id,
       title: input.title,
+    });
+    this.emit({ type: 'conversation.created', conversation });
+    return conversation;
+  }
+
+  public async createWhatsAppConversation(input: { agentId: string; title?: string }): Promise<PersonalAgentConversation> {
+    const agent = await this.options.store.requireAgent(input.agentId);
+    await this.options.store.workspaceRootForAgent(agent.id);
+    const conversation = await this.options.store.createConversation({
+      agentId: agent.id,
+      title: input.title,
+      origin: 'whatsapp',
+      readOnly: true,
     });
     this.emit({ type: 'conversation.created', conversation });
     return conversation;
@@ -188,22 +248,81 @@ export class AgentConversationManager {
 
   public async cancelRun(runId: string): Promise<boolean> {
     const run = await this.options.store.getRun(runId);
+    if (!run) return false;
+    return await this.withConversationMutation(run.conversationId, async () => await this.cancelRunUnlocked(runId));
+  }
+
+  public async sendMessage(input: PersonalAgentMessageSendInput): Promise<PersonalAgentConversation> {
+    return await this.sendMessageInternal(input, { source: 'human' });
+  }
+
+  public async sendWhatsAppMessage(input: {
+    conversationId: string;
+    content: string;
+    channel: PersonalAgentWhatsAppChannel;
+  }): Promise<PersonalAgentConversation> {
+    this.assertWhatsAppChannel(input.channel);
+    const conversation = await this.options.store.requireConversation(input.conversationId);
+    if (conversation.origin !== 'whatsapp') throw new Error('personal_agent_whatsapp_conversation_required');
+    return await this.sendMessageInternal(
+      { conversationId: input.conversationId, content: input.content },
+      { source: 'whatsapp', channel: input.channel, bypassReadOnly: true },
+    );
+  }
+
+  public async steerMessage(input: PersonalAgentSteerInput): Promise<PersonalAgentConversation> {
+    const source = input.channel ? 'whatsapp' : input.source ?? 'human';
+    if (source === 'whatsapp') this.assertWhatsAppChannel(input.channel);
+    if (input.source === 'human' && input.channel) throw new Error('personal_agent_channel_source_mismatch');
+    return await this.withConversationMutation(input.conversationId, async () => {
+      const content = input.content.trim();
+      if (!content) throw new Error('personal_agent_message_required');
+      const conversation = await this.options.store.requireConversation(input.conversationId);
+      if (source === 'whatsapp' && conversation.origin !== 'whatsapp') {
+        throw new Error('personal_agent_whatsapp_conversation_required');
+      }
+      if (source !== 'whatsapp' && (conversation.readOnly || conversation.origin === 'agent')) {
+        throw new Error('personal_agent_conversation_read_only');
+      }
+      if (conversation.scheduledWakeup?.status === 'scheduled') {
+        throw new Error('personal_agent_wakeup_active');
+      }
+      if (!input.expectedRunId?.trim()) {
+        throw new Error('personal_agent_run_id_required');
+      }
+      const activeRun = conversation.activeRun;
+      if (!activeRun || isTerminalRunStatus(activeRun.status)) {
+        throw new Error('personal_agent_run_not_active');
+      }
+      if (activeRun.id !== input.expectedRunId) {
+        throw new Error('personal_agent_run_mismatch');
+      }
+      await this.cancelRunUnlocked(activeRun.id);
+      return await this.sendMessageInternalUnlocked(
+        { conversationId: input.conversationId, content },
+        { source, ...(input.channel ? { channel: input.channel, bypassReadOnly: true } : {}) },
+      );
+    });
+  }
+
+  private async cancelRunUnlocked(runId: string): Promise<boolean> {
+    const run = await this.options.store.getRun(runId);
     if (!run || isTerminalRunStatus(run.status)) return false;
-    const child = this.activeChildren.get(runId);
-    if (child && !child.killed) child.kill('SIGTERM');
+    this.canceledRunIds.add(runId);
     const canceled = await this.options.store.updateRunStatus({ runId, status: 'canceled' });
-    this.activeChildren.delete(runId);
     this.updateActivityForRun(canceled, 'canceled');
     this.emit({
       type: 'run.canceled',
       conversation: await this.requireUpdatedConversation(run.conversationId),
       run: canceled,
     });
+    await this.runPreparations.get(runId)?.promise;
+    const child = this.activeChildren.get(runId);
+    if (child) {
+      killProcessTree(child);
+      await this.waitForChildExit(child);
+    }
     return true;
-  }
-
-  public async sendMessage(input: PersonalAgentMessageSendInput): Promise<PersonalAgentConversation> {
-    return await this.sendMessageInternal(input, { source: 'human' });
   }
 
   public async sendSidekickMessage(input: PersonalAgentSidekickMessageInput): Promise<PersonalAgentConversation> {
@@ -242,16 +361,15 @@ export class AgentConversationManager {
 
   private async sendMessageInternal(
     input: PersonalAgentMessageSendInput,
-    options: {
-      source: PersonalAgentMessageSource;
-      routineId?: string | null;
-      wakeupId?: string | null;
-      bypassWakeupBlock?: boolean;
-      bypassReadOnly?: boolean;
-      locale?: string;
-      sidekick?: PersonalAgentMcpRunContext['sidekick'];
-      onRunSettled?: (result: { success: true } | { success: false; error: unknown }) => void | Promise<void>;
-    },
+    options: PersonalAgentSendOptions,
+  ): Promise<PersonalAgentConversation> {
+    return await this.withConversationMutation(input.conversationId, async () =>
+      await this.sendMessageInternalUnlocked(input, options));
+  }
+
+  private async sendMessageInternalUnlocked(
+    input: PersonalAgentMessageSendInput,
+    options: PersonalAgentSendOptions,
   ): Promise<PersonalAgentConversation> {
     const conversation = await this.options.store.requireConversation(input.conversationId);
     if ((conversation.readOnly || conversation.origin === 'agent') && !options.bypassReadOnly) {
@@ -286,7 +404,7 @@ export class AgentConversationManager {
       conversationId: conversation.id,
       runId: run.id,
       role: 'user',
-      authorType: options.source === 'human' || options.source === 'sidekick' ? 'human' : 'system',
+      authorType: options.source === 'human' || options.source === 'whatsapp' || options.source === 'sidekick' ? 'human' : 'system',
       source: options.source,
       locale: options.locale,
       routineId: options.routineId,
@@ -303,6 +421,7 @@ export class AgentConversationManager {
       conversationId: updated.id,
       callStackAgentIds: [agent.id],
       ...(options.sidekick ? { sidekick: options.sidekick } : {}),
+      ...(options.channel ? { channel: options.channel } : {}),
     });
     if (options.onRunSettled) {
       void execution.then((result) => options.onRunSettled?.(result));
@@ -445,40 +564,77 @@ export class AgentConversationManager {
     runId: string,
     context: PersonalAgentMcpRunContext,
   ): Promise<{ success: true } | { success: false; error: unknown }> {
-    try {
-      await this.executeRun(conversationId, runId, context);
-      return { success: true };
-    } catch (error) {
-      await this.failRun(runId, error);
-      return { success: false, error };
-    }
+    const execution = this.executeRun(conversationId, runId, context).then(
+      (): { success: true } => ({ success: true }),
+      async (error): Promise<{ success: false; error: unknown }> => {
+        await this.failRun(runId, error);
+        return { success: false, error };
+      },
+    );
+    return await execution.finally(() => {
+      this.canceledRunIds.delete(runId);
+    });
   }
 
   private async executeRun(conversationId: string, runId: string, context: PersonalAgentMcpRunContext): Promise<void> {
-    const conversation = await this.options.store.requireConversation(conversationId);
-    const run = await this.options.store.updateRunStatus({ runId, status: 'running' });
-
-    const agent = await this.options.store.requireAgent(conversation.agentId);
-    this.updateActivityForRun(run, 'running', { agent, conversation });
-    this.emit({ type: 'run.started', conversation: await this.requireUpdatedConversation(conversationId), run });
-    const runtime = await this.resolveRuntimeForAgent(agent);
-    if (runtime && conversation.provider && conversation.provider !== runtime.provider) {
-      throw new Error('personal_agent_provider_changed_new_conversation_required');
+    const started = await this.withConversationMutation(conversationId, async () => {
+      const currentRun = await this.options.store.getRun(runId);
+      if (!currentRun || currentRun.status !== 'queued' || this.canceledRunIds.has(runId)) return null;
+      const conversation = await this.options.store.requireConversation(conversationId);
+      const run = await this.options.store.updateRunStatus({ runId, status: 'running' });
+      const agent = await this.options.store.requireAgent(conversation.agentId);
+      let resolvePreparation!: () => void;
+      const preparation = new Promise<void>((resolve) => { resolvePreparation = resolve; });
+      this.runPreparations.set(runId, { promise: preparation, resolve: resolvePreparation });
+      try {
+        this.updateActivityForRun(run, 'running', { agent, conversation });
+        this.emit({ type: 'run.started', conversation: await this.requireUpdatedConversation(conversationId), run });
+        return { conversation, run, agent };
+      } catch (error) {
+        this.releaseRunPreparation(runId);
+        throw error;
+      }
+    });
+    if (!started) return;
+    const { conversation, run } = started;
+    const agent = effectiveAgentForChannel(started.agent, context.channel);
+    let runtime: AgentRuntime | undefined;
+    let conversationForRun: PersonalAgentConversation;
+    let workspaceRoot: string;
+    let prompt: string;
+    let sharedRoots: string[];
+    let trustedRoots: string[];
+    let prepared = false;
+    try {
+      runtime = await this.resolveRuntimeForAgent(agent);
+      if (context.channel && !context.channel.allowAgentCapabilities && runtime && runtime.provider !== 'codex') {
+        throw new Error('personal_agent_whatsapp_restricted_mode_requires_codex');
+      }
+      if (runtime && conversation.provider && conversation.provider !== runtime.provider) {
+        throw new Error('personal_agent_provider_changed_new_conversation_required');
+      }
+      conversationForRun = runtime
+        ? await this.options.store.updateConversationProvider({
+          conversationId: conversation.id,
+          provider: runtime.provider,
+          providerThreadId: conversation.providerThreadId ?? null,
+        })
+        : conversation;
+      workspaceRoot = await this.options.store.workspaceRootForAgent(agent.id);
+      prompt = await this.buildPrompt(agent, conversationForRun, run, context);
+      sharedRoots = await this.resolveAppTrustedRoots(agent.appIds);
+      trustedRoots = [
+        ...trustedRootsForConversationFiles(workspaceRoot, conversationForRun.messages),
+        ...sharedRoots,
+      ];
+      prepared = true;
+    } finally {
+      if (!prepared || this.options.runner) this.releaseRunPreparation(runId);
     }
-    const conversationForRun = runtime
-      ? await this.options.store.updateConversationProvider({
-        conversationId: conversation.id,
-        provider: runtime.provider,
-        providerThreadId: conversation.providerThreadId ?? null,
-      })
-      : conversation;
-    const workspaceRoot = await this.options.store.workspaceRootForAgent(agent.id);
-    const prompt = await this.buildPrompt(agent, conversationForRun, run, context);
-    const sharedRoots = await this.resolveAppTrustedRoots(agent.appIds);
-    const trustedRoots = [
-      ...trustedRootsForConversationFiles(workspaceRoot, conversationForRun.messages),
-      ...sharedRoots,
-    ];
+    if (this.canceledRunIds.has(runId)) {
+      this.releaseRunPreparation(runId);
+      return;
+    }
     const progressWrites: Array<Promise<void>> = [];
     const visibleActivityParts: string[] = [];
     const result = await this.runPersonalAgent({
@@ -503,45 +659,56 @@ export class AgentConversationManager {
       },
     });
     await Promise.all(progressWrites);
-    const latestRun = await this.options.store.getRun(run.id);
-    if (latestRun?.status === 'canceled') return;
-    const assistantText = result.assistantText || 'Done.';
-    await this.options.store.deleteDuplicateRunProgress({ runId: run.id, finalContent: assistantText });
-    const normalizedFinal = normalizeMessageText(assistantText);
-    // The persisted `reasoning` field is a user-visible activity summary. It
-    // contains sanitized progress receipts, never hidden chain-of-thought.
-    const reasoning = visibleActivityParts
-      .filter((part) => !isDuplicateFinalProgress(normalizedFinal, part))
-      .join('\n\n');
-    const assistantMessage = await this.options.store.addMessage({
-      agentId: conversation.agentId,
-      conversationId: conversation.id,
-      runId: run.id,
-      role: 'assistant',
-      source: conversation.origin === 'sidekick' ? 'sidekick' : undefined,
-      content: assistantText,
-      ...(reasoning ? { reasoning } : {}),
+    await this.withConversationMutation(conversationId, async () => {
+      const latestRun = await this.options.store.getRun(run.id);
+      if (latestRun?.status !== 'running' || this.canceledRunIds.has(runId)) return;
+      const assistantText = result.assistantText || 'Done.';
+      await this.options.store.deleteDuplicateRunProgress({ runId: run.id, finalContent: assistantText });
+      const normalizedFinal = normalizeMessageText(assistantText);
+      // The persisted `reasoning` field is a user-visible activity summary.
+      // It contains sanitized progress receipts, never hidden chain-of-thought.
+      const reasoning = visibleActivityParts
+        .filter((part) => !isDuplicateFinalProgress(normalizedFinal, part))
+        .join('\n\n');
+      if (result.providerThreadId && runtime) {
+        await this.options.store.updateConversationProvider({
+          conversationId: conversation.id,
+          provider: runtime.provider,
+          providerThreadId: result.providerThreadId,
+        });
+      }
+      const assistantMessage = await this.options.store.addMessage({
+        agentId: conversation.agentId,
+        conversationId: conversation.id,
+        runId: run.id,
+        role: 'assistant',
+        source: conversation.origin === 'sidekick' ? 'sidekick' : conversation.origin === 'whatsapp' ? 'whatsapp' : undefined,
+        content: assistantText,
+        ...(reasoning ? { reasoning } : {}),
+      });
+      const completed = await this.options.store.updateRunStatus({ runId, status: 'completed' });
+      const updated = await this.requireUpdatedConversation(conversationId);
+      this.updateActivityForRun(completed, 'completed', { agent, conversation: updated });
+      this.emit({ type: 'message.created', conversation: updated, message: assistantMessage, run: completed });
+      this.emit({ type: 'run.completed', conversation: updated, run: completed });
     });
-    const completed = await this.options.store.updateRunStatus({ runId, status: 'completed' });
-    const updated = await this.requireUpdatedConversation(conversationId);
-    this.updateActivityForRun(completed, 'completed', { agent, conversation: updated });
-    this.emit({ type: 'message.created', conversation: updated, message: assistantMessage, run: completed });
-    this.emit({ type: 'run.completed', conversation: updated, run: completed });
   }
 
   private async failRun(runId: string, error: unknown): Promise<void> {
     const run = await this.options.store.getRun(runId);
-    if (!run || isTerminalRunStatus(run.status)) {
-      return;
-    }
-    const failed = await this.options.store.updateRunStatus({
-      runId,
-      status: 'failed',
-      error: error instanceof Error ? error.message : String(error ?? 'personal_agent_run_failed'),
+    if (!run) return;
+    await this.withConversationMutation(run.conversationId, async () => {
+      const latest = await this.options.store.getRun(runId);
+      if (!latest || isTerminalRunStatus(latest.status)) return;
+      const failed = await this.options.store.updateRunStatus({
+        runId,
+        status: 'failed',
+        error: error instanceof Error ? error.message : String(error ?? 'personal_agent_run_failed'),
+      });
+      this.activeChildren.delete(runId);
+      this.updateActivityForRun(failed, 'failed', { error: failed.error });
+      this.emit({ type: 'run.failed', conversation: await this.requireUpdatedConversation(run.conversationId), run: failed });
     });
-    this.activeChildren.delete(runId);
-    this.updateActivityForRun(failed, 'failed', { error: failed.error });
-    this.emit({ type: 'run.failed', conversation: await this.requireUpdatedConversation(run.conversationId), run: failed });
   }
 
   private async recordProgress(
@@ -549,31 +716,33 @@ export class AgentConversationManager {
     message: string,
     options: { includeActivity?: boolean } = {},
   ): Promise<void> {
-    const progress = await this.options.store.addRunProgress({ runId, message });
     const run = await this.options.store.getRun(runId);
-    if (!run) {
-      return;
-    }
-    if (options.includeActivity !== false) {
-      this.activities.set(
-        runId,
-        addStatusActivityItem(this.activities.get(runId) ?? this.createActivityForRun(run), message),
-      );
-      this.persistActivity(runId);
-    }
-    const sourceConversation = await this.options.store.requireConversation(run.conversationId);
-    const intermediateMessage = await this.options.store.addMessage({
-      agentId: run.agentId,
-      conversationId: run.conversationId,
-      runId: run.id,
-      role: 'assistant',
-      kind: 'intermediate',
-      source: sourceConversation.origin === 'sidekick' ? 'sidekick' : undefined,
-      content: message,
+    if (!run) return;
+    await this.withConversationMutation(run.conversationId, async () => {
+      const current = await this.options.store.getRun(runId);
+      if (!current || current.status !== 'running' || this.canceledRunIds.has(runId)) return;
+      const progress = await this.options.store.addRunProgress({ runId, message });
+      if (options.includeActivity !== false) {
+        this.activities.set(
+          runId,
+          addStatusActivityItem(this.activities.get(runId) ?? this.createActivityForRun(current), message),
+        );
+        this.persistActivity(runId);
+      }
+      const sourceConversation = await this.options.store.requireConversation(current.conversationId);
+      const intermediateMessage = await this.options.store.addMessage({
+        agentId: current.agentId,
+        conversationId: current.conversationId,
+        runId: current.id,
+        role: 'assistant',
+        kind: 'intermediate',
+        source: sourceConversation.origin === 'sidekick' ? 'sidekick' : sourceConversation.origin === 'whatsapp' ? 'whatsapp' : undefined,
+        content: message,
+      });
+      const conversation = await this.requireUpdatedConversation(current.conversationId);
+      this.emit({ type: 'message.created', conversation, message: intermediateMessage, run: current });
+      this.emit({ type: 'run.progress', conversation, run: current, progress });
     });
-    const conversation = await this.requireUpdatedConversation(run.conversationId);
-    this.emit({ type: 'message.created', conversation, message: intermediateMessage, run });
-    this.emit({ type: 'run.progress', conversation, run, progress });
   }
 
   private async buildPrompt(
@@ -630,14 +799,18 @@ export class AgentConversationManager {
     return buildPersonalAgentInitialWakePrompt({ agent, memoryRegister });
   }
 
-  private async runPersonalAgent(input: PersonalAgentRunnerInput): Promise<{ assistantText: string }> {
+  private async runPersonalAgent(input: PersonalAgentRunnerInput): Promise<{ assistantText: string; providerThreadId?: string }> {
     if (this.options.runner) {
       return await this.options.runner(input);
     }
-    return await this.runWithConfiguredProvider(input);
+    try {
+      return await this.runWithConfiguredProvider(input);
+    } finally {
+      this.releaseRunPreparation(input.run.id);
+    }
   }
 
-  private async runWithConfiguredProvider(input: PersonalAgentRunnerInput): Promise<{ assistantText: string }> {
+  private async runWithConfiguredProvider(input: PersonalAgentRunnerInput): Promise<{ assistantText: string; providerThreadId?: string }> {
     if (!this.options.getAgentRuntime || !this.options.metadataRoot || !this.options.codexHome) {
       throw new Error('personal_agent_runtime_unavailable');
     }
@@ -720,6 +893,8 @@ export class AgentConversationManager {
           : { type: 'none' },
         onChild: (child) => {
           this.activeChildren.set(input.run.id, child);
+          if (this.canceledRunIds.has(input.run.id)) killProcessTree(child);
+          this.releaseRunPreparation(input.run.id);
         },
         onOutput,
         runCommandCapture,
@@ -728,16 +903,8 @@ export class AgentConversationManager {
       if (result.code !== 0) {
         throw new Error((result.stderr || result.stdout || `${runtime.provider}_personal_agent_exec_failed`).trim());
       }
-      if (result.threadId) {
-        input.conversation.providerThreadId = result.threadId;
-        await this.options.store.updateConversationProvider({
-          conversationId: input.conversation.id,
-          provider: runtime.provider,
-          providerThreadId: result.threadId,
-        });
-      }
       await Promise.all(logWrites);
-      return { assistantText: result.assistantText };
+      return { assistantText: result.assistantText, ...(result.threadId ? { providerThreadId: result.threadId } : {}) };
     } finally {
       this.activeChildren.delete(input.run.id);
       if (forgerMcpSession) {
@@ -785,6 +952,7 @@ export class AgentConversationManager {
     stream: 'stdout' | 'stderr' | 'meta',
     text: string,
   ): void {
+    if (this.canceledRunIds.has(input.run.id)) return;
     const priorCount = this.activities.get(input.run.id)?.counts.total ?? 0;
     const activity = appendProviderActivity({
       activity: this.activities.get(input.run.id) ?? this.createActivityForRun(input.run, input.agent, input.conversation),
@@ -891,7 +1059,7 @@ export class AgentConversationManager {
 
   private async emitActivityProgress(runId: string): Promise<void> {
     const run = await this.options.store.getRun(runId);
-    if (!run) {
+    if (!run || run.status !== 'running' || this.canceledRunIds.has(runId)) {
       return;
     }
     const conversation = await this.requireUpdatedConversation(run.conversationId);
@@ -908,6 +1076,59 @@ export class AgentConversationManager {
         createdAt: new Date().toISOString(),
       },
     });
+  }
+
+  private async withConversationMutation<T>(conversationId: string, action: () => Promise<T>): Promise<T> {
+    const previous = this.conversationMutations.get(conversationId) ?? Promise.resolve();
+    let release!: () => void;
+    const pending = new Promise<void>((resolve) => { release = resolve; });
+    const current = previous.then(() => pending);
+    this.conversationMutations.set(conversationId, current);
+    await previous;
+    try {
+      return await action();
+    } finally {
+      release();
+      if (this.conversationMutations.get(conversationId) === current) {
+        this.conversationMutations.delete(conversationId);
+      }
+    }
+  }
+
+  private async waitForChildExit(child: ChildProcessWithoutNullStreams): Promise<void> {
+    if (child.exitCode !== null || child.signalCode !== null) return;
+    await new Promise<void>((resolve, reject) => {
+      const timeout = setTimeout(() => {
+        child.off('exit', onExit);
+        reject(new Error('personal_agent_cancellation_unconfirmed'));
+      }, 4_000);
+      const onExit = (): void => {
+        clearTimeout(timeout);
+        child.off('exit', onExit);
+        resolve();
+      };
+      child.once('exit', onExit);
+      if (child.exitCode !== null || child.signalCode !== null) onExit();
+    });
+  }
+
+  private releaseRunPreparation(runId: string): void {
+    this.runPreparations.get(runId)?.resolve();
+    this.runPreparations.delete(runId);
+  }
+
+  private assertWhatsAppChannel(channel: PersonalAgentWhatsAppChannel | undefined): asserts channel is PersonalAgentWhatsAppChannel {
+    if (
+      channel?.kind !== 'whatsapp' ||
+      !channel.connectionId?.trim() ||
+      !channel.chatId?.trim() ||
+      !channel.bindingId?.trim() ||
+      !Number.isSafeInteger(channel.revision) ||
+      channel.revision < 0 ||
+      typeof channel.allowAgentCapabilities !== 'boolean'
+    ) {
+      throw new Error('personal_agent_whatsapp_channel_invalid');
+    }
   }
 }
 

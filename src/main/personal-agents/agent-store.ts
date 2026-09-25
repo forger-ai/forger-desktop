@@ -581,7 +581,7 @@ export class AgentStore {
       sanitizeText(input.title, 160) || agent.name,
       'active',
       origin,
-      input.readOnly === true || origin === 'agent' || origin === 'sidekick' ? 1 : 0,
+      input.readOnly === true || origin === 'agent' || origin === 'sidekick' || origin === 'whatsapp' ? 1 : 0,
       initiatorAgentId,
       peerThreadId,
       routineId,
@@ -1304,7 +1304,7 @@ export class AgentStore {
       title: row.title,
       status: normalizeConversationStatus(row.status),
       origin,
-      readOnly: row.read_only !== 0 || origin === 'agent' || origin === 'sidekick',
+      readOnly: row.read_only !== 0 || origin === 'agent' || origin === 'sidekick' || origin === 'whatsapp',
       ...(sanitizeGrantTarget(row.sidekick_id) ? { sidekickId: sanitizeGrantTarget(row.sidekick_id) as string } : {}),
       ...(initiatorAgentId ? { initiatorAgentId } : {}),
       ...(initiatorAgentName ? { initiatorAgentName } : {}),
@@ -1471,7 +1471,7 @@ export class AgentStore {
     const row = this.requireDb().prepare(`
       SELECT * FROM personal_agent_runs
       WHERE conversation_id = ?
-      ORDER BY created_at DESC
+      ORDER BY created_at DESC, rowid DESC
       LIMIT 1
     `).get(conversationId) as RunRow | undefined;
     return row ? this.runFromRow(row) : null;

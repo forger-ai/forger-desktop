@@ -173,6 +173,8 @@ test('Given complete and absent lifecycle services, when quit begins twice, then
     stopActiveTools: async () => calls.push(`${name}:stopActiveTools`),
   });
   const state = {
+    connectionsService: { stopType: async (type) => calls.push(`connection:stop:${type}`) },
+    whatsappAgentChannelService: { close: () => calls.push('whatsapp-channel:close') },
     memoryMaintenanceManager: service('memory'),
     personalAgentRoutineManager: service('routine'),
     automationManager: service('automation'),
@@ -207,6 +209,7 @@ test('Given complete and absent lifecycle services, when quit begins twice, then
   listeners.get('before-quit')({ preventDefault: () => { prevented += 1; } });
   await waitFor(() => calls.includes('quit'), 'graceful-quit');
   assert.equal(prevented, 1);
+  assert.ok(calls.indexOf('connection:stop:whatsapp') < calls.indexOf('whatsapp-channel:close'));
   assert.equal(calls.filter((entry) => entry === 'routine:dispose').length, 1);
   assert.ok(calls.includes('terminate:backend'));
   assert.equal(state.workflowFeatureController, null);

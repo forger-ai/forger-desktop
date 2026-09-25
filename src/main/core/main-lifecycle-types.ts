@@ -21,6 +21,7 @@ import type { AppMcpManager } from '../app-mcp-manager';
 import type { WorkflowFeatureController } from '../workflow-feature-controller';
 import type { WorkflowManager } from '../workflow-manager';
 import type { AppRegistry } from './main-process-types';
+import type { WhatsAppAgentChannelService } from '../personal-agents/whatsapp-channel-service';
 
 export type ServiceConstructor<T = unknown> = new (...args: any[]) => T;
 export type AsyncFn<T = unknown> = (...args: any[]) => Promise<T>;
@@ -95,6 +96,7 @@ export interface MainLifecycleState {
   remoteNetworkShareManager: { stopAll?: () => Promise<void> } | null;
   remoteAgentSessionService: { stopAll?: () => Promise<void> } | null;
   personalAgentRoutineManager: { initialize: () => Promise<void>; dispose?: () => void } | null;
+  whatsappAgentChannelService?: WhatsAppAgentChannelService | null;
   mainWindow: BrowserWindow | null;
   memoryMaintenanceManager: MemoryMaintenanceService | null;
   memoryStore: LifecycleService | null;

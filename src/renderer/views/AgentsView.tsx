@@ -70,6 +70,7 @@ import {
 } from './AgentsView.helpers';
 import { AgentAccessControls } from './AgentAccessControls';
 import { AgentCreateDialog, AgentGroupSelect, AgentGroupsDialog, AgentIdentityChips, AgentsOverview } from './AgentGroupsUi';
+import { AgentWhatsAppPanel } from './AgentWhatsAppPanel';
 interface AgentsViewProps {
   t: AppDictionary;
   intelligenceProviderConfigured: boolean;
@@ -1337,6 +1338,7 @@ export function AgentsView({ t, intelligenceProviderConfigured, providerOptions 
                     {t.agents.saveAccess}
                   </Button>
                 </Box>
+                <AgentWhatsAppPanel key={activeAgent.id} agentId={activeAgent.id} agentName={activeAgent.name} t={t} />
               </Stack>
             </Paper>
           ) : (
@@ -1548,7 +1550,6 @@ export function AgentsView({ t, intelligenceProviderConfigured, providerOptions 
         onEnabledChange={setRoutineEnabled}
         onAuthorizationTextChange={setRoutineAuthorizationText}
       />
-
       <Dialog open={Boolean(openPeerThread)} onClose={() => setOpenPeerThread(null)} fullWidth maxWidth="md">
         <DialogTitle>
           {openPeerThread

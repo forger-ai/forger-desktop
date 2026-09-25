@@ -176,6 +176,7 @@ const createConnectionToolContext = (
   connectionId: string,
 ): InternalToolContext => ({
   metadataRoot: path.join(context.metadataRoot, 'connections', toolId, connectionId),
+  connectionId,
   locale: context.locale,
   secretsStore: {
     setToolSecret: async (_toolId: string, secretName: string, value: string) =>

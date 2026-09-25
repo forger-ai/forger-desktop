@@ -54,11 +54,9 @@ import type {
 import type { PersonalAgentAskPeerInput, PersonalAgentAskPeerResult } from './personal-agents/agent-conversation-manager';
 import { buildFailureDiagnostic } from '../shared/error-diagnostics';
 import { getSharedCopy } from '../shared/i18n';
-import { getMcpToolAnnotations, getMcpToolInputSchema, type McpToolAnnotations } from './forger-mcp/tool-metadata';
 import {
   getChromeAppRuntimeUrlBlock,
   INTERNAL_MCP_TOOL_DEFINITIONS,
-  PERSONAL_AGENT_PEER_TOOL_IDS,
   PERSONAL_AGENT_ROUTINE_TOOL_IDS,
   WORKFLOW_MANAGEMENT_TOOL_IDS,
   SIDEKICK_VOICE_TOOL_IDS,
@@ -69,8 +67,17 @@ import {
   getEffectiveConnectionGrants,
 } from './forger-mcp/connection-tools';
 import { executePersonalAgentRoutineTool } from './forger-mcp/personal-agent-routine-tools';
-import { canUsePersonalAgentSpawnTool, executePersonalAgentSpawnTool, type PersonalAgentSpawnToolOptions } from './forger-mcp/personal-agent-spawn-tool';
 import { executeWorkflowManagementTool } from './forger-mcp/workflow-management-tools';
+import {
+  WHATSAPP_CHANNEL_HISTORY_TOOL,
+  readWhatsAppChannelHistory,
+  whatsappChannelToolResponse,
+  type WhatsAppChannelHistoryInput,
+  type WhatsAppChannelHistoryResult,
+} from './forger-mcp/whatsapp-channel-history';
+import type { PersonalAgentWhatsAppChannel } from './personal-agents/agent-conversation-manager';
+import { executePersonalAgentSpawnTool, type PersonalAgentSpawnToolOptions } from './forger-mcp/personal-agent-spawn-tool';
+import { buildVisibleMcpTools, type ForgerMcpTool } from './forger-mcp/tool-visibility';
 import {
   cleanString,
   connectionActionGranted,
@@ -112,6 +119,8 @@ export interface AgentMcpSession {
   personalAgentPeerThreadId?: string;
   personalAgentCallStackIds?: string[];
   personalAgentCanSpawnAgents?: boolean;
+  whatsappChannel?: PersonalAgentWhatsAppChannel;
+  whatsappChannelAllowedConnectionActionIds?: string[];
   /** Present only for runs originated by a Sidekick voice turn. */
   sidekick?: { sidekickId: string };
   appIds: string[];
@@ -129,6 +138,8 @@ export interface ForgerMcpSessionAccess {
   personalAgentPeerThreadId?: string;
   personalAgentCallStackIds?: string[];
   personalAgentCanSpawnAgents?: boolean;
+  whatsappChannel?: PersonalAgentWhatsAppChannel;
+  whatsappChannelAllowedConnectionActionIds?: string[];
   sidekick?: { sidekickId: string };
   appIds?: string[];
   officialToolActionIds?: string[];
@@ -140,6 +151,7 @@ interface ForgerMcpServerOptions extends PersonalAgentSpawnToolOptions {
   getAppVersion: () => string;
   getToolDefinitions: () => AgentToolDefinition[];
   getConnectionToolDefinitions?: () => Promise<AgentToolDefinition[]>;
+  readWhatsAppChannelHistory?: (input: WhatsAppChannelHistoryInput) => Promise<WhatsAppChannelHistoryResult>;
   getToolSettings: () => AgentToolSettings;
   appendInstallLog: (event: string, payload?: Record<string, unknown>) => Promise<void>;
   requestPermission: (
@@ -282,12 +294,6 @@ export interface ToolApprovalResult {
   status: 'not_required' | 'approved' | 'denied' | 'unavailable';
   userMessage: string;
 }
-interface ForgerMcpTool {
-  name: string;
-  description: string;
-  inputSchema: Record<string, unknown>;
-  annotations: McpToolAnnotations;
-}
 export interface MemoryAccessInput {
   caller: AgentMcpSession['caller'];
   appId?: string;
@@ -360,6 +366,10 @@ export class ForgerMcpServer {
       personalAgentPeerThreadId: access?.personalAgentPeerThreadId,
       personalAgentCallStackIds: access?.personalAgentCallStackIds,
       personalAgentCanSpawnAgents: access?.personalAgentCanSpawnAgents,
+      whatsappChannel: access?.caller === 'personal-agent' ? access.whatsappChannel : undefined,
+      whatsappChannelAllowedConnectionActionIds: access?.caller === 'personal-agent'
+        ? access.whatsappChannelAllowedConnectionActionIds ?? []
+        : [],
       sidekick: access?.sidekick,
       appIds: access?.appIds ?? (appId === 'forger' ? [] : [appId]),
       officialToolActionIds: access?.officialToolActionIds ?? [],
@@ -495,6 +505,28 @@ export class ForgerMcpServer {
       toolName,
       argumentCount,
     });
+    if (toolName === WHATSAPP_CHANNEL_HISTORY_TOOL) {
+      return whatsappChannelToolResponse(id, await readWhatsAppChannelHistory(session, params?.arguments, this.options.readWhatsAppChannelHistory));
+    }
+    if (
+      session.whatsappChannel &&
+      typeof toolName === 'string' &&
+      toolName.startsWith('whatsapp.') &&
+      !session.whatsappChannelAllowedConnectionActionIds?.includes(toolName)
+    ) {
+      return whatsappChannelToolResponse(id, {
+        success: false,
+        userMessage: 'Esta acción de WhatsApp no está autorizada para el chat del agente.',
+        technicalCode: 'whatsapp_channel_action_not_granted',
+      });
+    }
+    if (session.whatsappChannel && !session.whatsappChannel.allowAgentCapabilities) {
+      return whatsappChannelToolResponse(id, {
+        success: false,
+        userMessage: 'Esta acción no está habilitada para este chat de WhatsApp.',
+        technicalCode: 'whatsapp_channel_capability_not_granted',
+      });
+    }
     const allToolDefinitions = await this.getAllToolDefinitions();
     if (typeof toolName !== 'string' || !allToolDefinitions.some((tool) => tool.id === toolName)) {
       await this.options.appendInstallLog('agent_tool:mcp_tools_call_rejected', {
@@ -546,44 +578,15 @@ export class ForgerMcpServer {
     const connectionGrants = await getEffectiveConnectionGrants(session, this.options);
     const allowedConnectionActions = new Set(connectionGrants.flatMap((grant) => grant.actions));
     const allToolDefinitions = await this.getAllToolDefinitions();
-    const tools = allToolDefinitions.filter((tool) => {
-      if (WORKFLOW_MANAGEMENT_TOOL_IDS.has(tool.id) && !this.isWorkflowsEnabled()) {
-        return false;
-      }
-      if (tool.id === 'forger_add_app_to_personal_agent' && session.caller !== 'personal-agent') {
-        return false;
-      }
-      if (tool.id === 'forger_create_personal_agent' && !canUsePersonalAgentSpawnTool(session)) {
-        return false;
-      }
-      if (PERSONAL_AGENT_PEER_TOOL_IDS.has(tool.id) && (session.caller !== 'personal-agent' || !session.personalAgentId || !session.personalAgentConversationId)) {
-        return false;
-      }
-      if (PERSONAL_AGENT_ROUTINE_TOOL_IDS.has(tool.id) && (session.caller !== 'personal-agent' || !session.personalAgentId || !session.personalAgentConversationId)) {
-        return false;
-      }
-      if (WORKFLOW_NODE_TOOL_IDS.has(tool.id) && session.caller !== 'workflow') {
-        return false;
-      }
-      if (SIDEKICK_VOICE_TOOL_IDS.has(tool.id) && (session.caller !== 'personal-agent' || !session.sidekick || !session.personalAgentConversationId)) {
-        return false;
-      }
-      if (WORKFLOW_MANAGEMENT_TOOL_IDS.has(tool.id) && (session.caller === 'workflow' || session.caller === 'app-agent')) {
-        return false;
-      }
-      if (isConnectionAction(tool.id)) {
-        return allowedConnectionActions.has(tool.id);
-      }
-      if (!isOfficialTool(tool.id)) {
-        return true;
-      }
-      return allowedOfficialActions ? allowedOfficialActions.has(tool.id) : true;
-    }).map((tool) => ({
-      name: tool.id,
-      description: tool.description,
-      inputSchema: getMcpToolInputSchema(tool.id),
-      annotations: getMcpToolAnnotations(tool),
-    }));
+    const tools = buildVisibleMcpTools({
+      session,
+      definitions: this.isWorkflowsEnabled()
+        ? allToolDefinitions
+        : allToolDefinitions.filter((tool) => !WORKFLOW_MANAGEMENT_TOOL_IDS.has(tool.id)),
+      allowedOfficialActions,
+      allowedConnectionActions,
+      hasWhatsAppHistory: Boolean(this.options.readWhatsAppChannelHistory),
+    });
     await this.options.appendInstallLog('agent_tool:mcp_tools_list_built', {
       appId: session.appId,
       runId: session.runId,

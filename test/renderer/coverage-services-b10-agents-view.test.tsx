@@ -241,6 +241,9 @@ const createBridge = () => {
     personalAgentGrantOptionsList: vi.fn(async () => ({ apps: [], tools: [], connections: [], peerAgents: [] })),
     sidekicksGetState: vi.fn(async () => sidekickState()),
     personalAgentConversationsList: vi.fn(async () => [] as PersonalAgentConversation[]),
+    connectionsList: vi.fn(async () => ({ instances: [] })),
+    personalAgentWhatsAppBindingsList: vi.fn(async () => []),
+    personalAgentWhatsAppUnsettledList: vi.fn(async () => []),
     personalAgentWorkspaceList: vi.fn(async () => [] as PersonalAgentWorkspaceEntry[]),
     personalAgentRoutinesList: vi.fn(async () => [] as PersonalAgentRoutine[]),
     onPersonalAgentConversationEvent: vi.fn((listener: (event: PersonalAgentConversationEvent) => void) => {
@@ -464,7 +467,7 @@ describe('AgentsView orchestration', () => {
 
     bridge.personalAgentUpdatePermissions.mockRejectedValueOnce(new Error('access rejected'));
     await userEvent.click(save);
-    expect(await screen.findByRole('alert')).toHaveTextContent('access rejected');
+    expect(await screen.findByText('access rejected')).toBeVisible();
     await userEvent.click(screen.getByRole('button', { name: t.actions.back }));
 
     vi.mocked(window.confirm).mockReturnValueOnce(false).mockReturnValueOnce(true).mockReturnValueOnce(true);
@@ -474,10 +477,10 @@ describe('AgentsView orchestration', () => {
     expect(bridge.personalAgentsDelete).toHaveBeenCalledWith({ agentId: 'agent-2' });
     bridge.personalAgentsDelete.mockRejectedValueOnce('delete rejected');
     await userEvent.click(screen.getByRole('button', { name: 'Mock delete Agent agent-2' }));
-    expect(await screen.findByRole('alert')).toHaveTextContent(t.agents.deleteError);
+    expect(await screen.findByText(t.agents.deleteError)).toBeVisible();
     bridge.personalAgentsDelete.mockRejectedValueOnce(new Error('delete exploded'));
     await userEvent.click(screen.getByRole('button', { name: 'Mock delete Agent agent-2' }));
-    expect(await screen.findByRole('alert')).toHaveTextContent('delete exploded');
+    expect(await screen.findByText('delete exploded')).toBeVisible();
   });
 
   it('groups conversation history, reacts to live events, and reports generic run failures once', async () => {

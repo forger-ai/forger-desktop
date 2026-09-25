@@ -18,6 +18,10 @@ export interface WhatsAppIndexedMessage {
   senderId?: string;
   senderDisplayName?: string;
   fromMe: boolean;
+  /** Whether the current message quotes another message. Quoted content is not an instruction. */
+  quoted?: boolean;
+  /** Whether WhatsApp marks this message as forwarded. */
+  forwarded?: boolean;
   timestamp?: number;
   text?: string;
   messageType: string;

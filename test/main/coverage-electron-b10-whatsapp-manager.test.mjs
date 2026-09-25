@@ -11,7 +11,7 @@ const {
   WhatsAppConnectionManager,
   createWhatsAppConnectionManager,
 } = require('../../dist-electron/main/connections/modules/whatsapp/manager.js');
-const { encodeStableMessageRef } = require('../../dist-electron/main/connections/modules/whatsapp/normalizer.js');
+const { decodeStableMessageRef, encodeStableMessageRef } = require('../../dist-electron/main/connections/modules/whatsapp/normalizer.js');
 
 class FakeStore {
   constructor(root) {
@@ -100,7 +100,7 @@ test('Given observed chats, manager commands validate, send, read, describe, pai
   manager.ensureStarted = async () => undefined;
   manager.socket = { sendMessage: async () => undefined };
   const sentWithoutPayload = await manager.sendMessage(context, { chatId, text: ' hello ' });
-  assert.equal(sentWithoutPayload.sent, true);
+  assert.equal(sentWithoutPayload.sent, false);
   assert.ok(Number.isInteger(sentWithoutPayload.timestamp));
   assert.ok(Math.abs(sentWithoutPayload.timestamp - Math.floor(Date.now() / 1000)) <= 1);
   let quotedOptions;
@@ -111,13 +111,13 @@ test('Given observed chats, manager commands validate, send, read, describe, pai
     replyToMessageRef: encodeStableMessageRef({ remoteJid: chatId, id: 'quoted', fromMe: false }),
   });
   assert.deepEqual(quotedOptions, { quoted: { key: { remoteJid: chatId, id: 'quoted', fromMe: false } } });
-  assert.equal(sent.stableMessageRef, 'encoded:M2');
+  assert.equal(decodeStableMessageRef(sent.stableMessageRef).id, 'M2');
   assert.equal(store.upsertedMessages.at(-1).stableMessageRef.id, 'M2');
   assert.equal(store.rememberSendCount, 2);
   manager.socket = {};
-  assert.equal((await manager.sendMessage(context, { chatId, text: 'without method' })).sent, true);
+  assert.equal((await manager.sendMessage(context, { chatId, text: 'without method' })).technicalCode, 'whatsapp_send_unavailable');
   manager.socket = null;
-  assert.equal((await manager.sendMessage(context, { chatId, text: 'without socket' })).sent, true);
+  assert.equal((await manager.sendMessage(context, { chatId, text: 'without socket' })).technicalCode, 'whatsapp_send_unavailable');
 
   assert.equal((await manager.getChatDetails(context, { chatId: '' })).technicalCode, 'whatsapp_chat_not_observed');
   assert.equal((await manager.getChatDetails(context, { chatId: '56999999999' })).technicalCode, 'whatsapp_chat_not_observed');

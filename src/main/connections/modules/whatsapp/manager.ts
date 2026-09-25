@@ -7,6 +7,7 @@ import type { OfficialToolRuntimeEvent, OfficialToolRuntimePhase } from '../../.
 import {
   chatFromMessage,
   decodeStableMessageRef,
+  encodeStableMessageRef,
   normalizeBaileysChat,
   normalizeBaileysContact,
   normalizeBaileysMessage,
@@ -49,6 +50,16 @@ type BaileysSocket = {
   end?: (error?: Error) => void;
 };
 
+export interface WhatsAppConnectionManagerOptions {
+  /** Called after storing a live notification not sent through this manager; replays retry admission. */
+  onLiveMessage?: (message: WhatsAppIndexedMessage, metadata: { newlyStored: boolean }) => void | Promise<void>;
+}
+
+export interface WhatsAppIngestionOptions {
+  source: 'live-notify' | 'append' | 'history';
+  sessionGeneration?: number;
+}
+
 export class WhatsAppConnectionManager {
   private socket: BaileysSocket | null = null;
   private latestQr: string | null = null;
@@ -59,11 +70,18 @@ export class WhatsAppConnectionManager {
   private starting: Promise<void> | null = null;
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private sessionGeneration = 0;
+  private readonly pendingSends = new Map<string, Set<Promise<void>>>();
+  private readonly options: WhatsAppConnectionManagerOptions;
+  private readonly loadBaileys: BaileysModuleLoader;
 
   constructor(
     private readonly store: WhatsAppLocalStore,
-    private readonly loadBaileys: BaileysModuleLoader = importBaileys,
-  ) {}
+    optionsOrLoadBaileys: WhatsAppConnectionManagerOptions | BaileysModuleLoader = {},
+    loadBaileys: BaileysModuleLoader = importBaileys,
+  ) {
+    this.options = typeof optionsOrLoadBaileys === 'function' ? {} : optionsOrLoadBaileys;
+    this.loadBaileys = typeof optionsOrLoadBaileys === 'function' ? optionsOrLoadBaileys : loadBaileys;
+  }
 
   async status(context?: InternalToolContext): Promise<WhatsAppConnectionStatus> {
     await this.store.load();
@@ -156,22 +174,32 @@ export class WhatsAppConnectionManager {
       return { success: false, userMessage: 'Espera un momento antes de enviar otro mensaje de WhatsApp.', technicalCode: 'whatsapp_send_rate_limited' };
     }
     await this.ensureStarted(context);
-    const quoted = decodeStableMessageRef(input.replyToMessageRef);
-    const sent = await this.socket?.sendMessage?.(
-      chatId,
-      { text },
-      quoted ? { quoted: { key: quoted } } : undefined,
-    );
-    const normalized = normalizeBaileysMessage(sent);
-    if (normalized) {
-      await this.store.upsertMessages([normalized]);
+    const socket = this.socket;
+    if (!socket?.sendMessage) {
+      return { success: false, userMessage: 'La conexión de WhatsApp no está lista para enviar.', technicalCode: 'whatsapp_send_unavailable' };
     }
-    await this.store.rememberSend();
-    return {
-      sent: true,
-      ...(normalized ? { stableMessageRef: this.store.encodeRef(normalized.stableMessageRef) } : {}),
-      timestamp: Math.floor(Date.now() / 1000),
-    };
+    const quoted = decodeStableMessageRef(input.replyToMessageRef);
+    const finishSend = this.trackPendingSend(chatId);
+    try {
+      const sent = await socket.sendMessage(
+        chatId,
+        { text },
+        quoted ? { quoted: { key: quoted } } : undefined,
+      );
+      const normalized = normalizeBaileysMessage(sent);
+      const ref = normalized ? encodeStableMessageRef(normalized.stableMessageRef) : undefined;
+      await this.store.rememberSend(ref);
+      if (normalized) {
+        await this.store.upsertMessages([normalized]);
+      }
+      return {
+        sent: Boolean(ref),
+        ...(ref ? { stableMessageRef: ref } : {}),
+        timestamp: Math.floor(Date.now() / 1000),
+      };
+    } finally {
+      finishSend();
+    }
   }
 
   async getChatDetails(context: InternalToolContext, input: WhatsAppChatDetailsInput): Promise<Record<string, unknown>> {
@@ -294,14 +322,19 @@ export class WhatsAppConnectionManager {
     }
   }
 
-  async ingestMessages(messages: unknown[], context?: InternalToolContext): Promise<void> {
+  async ingestMessages(
+    messages: unknown[],
+    context?: InternalToolContext,
+    options: WhatsAppIngestionOptions = { source: 'history' },
+  ): Promise<void> {
+    if (options.sessionGeneration !== undefined && options.sessionGeneration !== this.sessionGeneration) return;
     const normalized = messages
       .map((message) => normalizeBaileysMessage(message))
       .filter((message): message is WhatsAppIndexedMessage => Boolean(message));
     if (normalized.length === 0) {
       return;
     }
-    await this.store.upsertMessages(normalized);
+    const insertedRefs = new Set(await this.store.upsertMessages(normalized));
     for (const message of normalized) {
       await this.store.upsertChat(chatFromMessage(message));
     }
@@ -313,6 +346,63 @@ export class WhatsAppConnectionManager {
         },
       });
     }
+    if (options.source === 'live-notify' && this.options.onLiveMessage) {
+      const deliveredRefs = new Set<string>();
+      for (const message of normalized) {
+        if (options.sessionGeneration !== undefined && options.sessionGeneration !== this.sessionGeneration) return;
+        const ref = encodeStableMessageRef(message.stableMessageRef);
+        if (deliveredRefs.has(ref)) continue;
+        deliveredRefs.add(ref);
+        if (message.fromMe) await this.waitForPendingSends(message.chatId);
+        if (options.sessionGeneration !== undefined && options.sessionGeneration !== this.sessionGeneration) return;
+        if (await this.store.isKnownOutboundMessageRef(ref)) continue;
+        if (options.sessionGeneration !== undefined && options.sessionGeneration !== this.sessionGeneration) return;
+        await this.options.onLiveMessage(this.toLiveMessage(message), { newlyStored: insertedRefs.has(ref) });
+      }
+    }
+  }
+
+  async ingestUpsert(payload: unknown, context?: InternalToolContext, sessionGeneration?: number): Promise<void> {
+    const messages = isRecord(payload) && Array.isArray(payload.messages) ? payload.messages : [];
+    const source = isRecord(payload) && payload.type === 'notify' ? 'live-notify' : 'append';
+    await this.ingestMessages(messages, context, { source, sessionGeneration });
+  }
+
+  private trackPendingSend(chatId: string): () => void {
+    let resolvePending!: () => void;
+    const pending = new Promise<void>((resolve) => { resolvePending = resolve; });
+    const current = this.pendingSends.get(chatId) ?? new Set<Promise<void>>();
+    current.add(pending);
+    this.pendingSends.set(chatId, current);
+    return () => {
+      current.delete(pending);
+      if (current.size === 0) this.pendingSends.delete(chatId);
+      resolvePending();
+    };
+  }
+
+  private async waitForPendingSends(chatId: string): Promise<void> {
+    const pending = this.pendingSends.get(chatId);
+    if (pending?.size) await Promise.all([...pending]);
+  }
+
+  private toLiveMessage(message: WhatsAppIndexedMessage): WhatsAppIndexedMessage {
+    return {
+      ...message,
+      attachments: message.attachments.map((attachment) => ({
+        attachmentId: attachment.attachmentId,
+        stableMessageRef: attachment.stableMessageRef,
+        chatId: attachment.chatId,
+        kind: attachment.kind,
+        messageType: attachment.messageType,
+        ...(attachment.mimeType ? { mimeType: attachment.mimeType } : {}),
+        ...(attachment.caption ? { caption: attachment.caption } : {}),
+        ...(attachment.sizeBytes ? { sizeBytes: attachment.sizeBytes } : {}),
+        ...(attachment.sha256 ? { sha256: attachment.sha256 } : {}),
+        downloaded: attachment.downloaded,
+        downloadStatus: attachment.downloadStatus,
+      })),
+    };
   }
 
   async ingestChats(chats: unknown[], context?: InternalToolContext): Promise<void> {
@@ -388,8 +478,7 @@ export class WhatsAppConnectionManager {
       this.handleConnectionUpdate(payload, context, generation);
     });
     socket.ev?.on('messages.upsert', (payload) => {
-      const messages = isRecord(payload) && Array.isArray(payload.messages) ? payload.messages : [];
-      void this.ingestMessages(messages, context).catch((error) => {
+      void this.ingestUpsert(payload, context, generation).catch((error) => {
         void context.appendLog?.('official_tool:whatsapp_message_ingest_failed', sanitizeErrorPayload(error));
       });
     });
@@ -466,7 +555,7 @@ export class WhatsAppConnectionManager {
     const contacts = isRecord(payload) && Array.isArray(payload.contacts) ? payload.contacts : [];
     const counts = { messages: messages.length, chats: chats.length, contacts: contacts.length };
     this.emitRuntimeEvent(context, 'history_sync', { counts });
-    await this.ingestMessages(messages, context);
+    await this.ingestMessages(messages, context, { source: 'history' });
     await this.ingestChats(chats, context);
     await this.ingestContacts(contacts, context);
     this.emitRuntimeEvent(context, 'sync_ready', { counts });
@@ -811,5 +900,8 @@ const normalizeGroupMetadata = (metadata: unknown): Record<string, unknown> | nu
   };
 };
 
-export const createWhatsAppConnectionManager = (context: InternalToolContext): WhatsAppConnectionManager =>
-  new WhatsAppConnectionManager(new WhatsAppLocalStore(context.metadataRoot));
+export const createWhatsAppConnectionManager = (
+  context: InternalToolContext,
+  options: WhatsAppConnectionManagerOptions = {},
+): WhatsAppConnectionManager =>
+  new WhatsAppConnectionManager(new WhatsAppLocalStore(context.metadataRoot), options);

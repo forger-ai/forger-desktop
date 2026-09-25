@@ -77,6 +77,10 @@ const extractMessageText = (message: Record<string, unknown> | undefined): strin
   if (typeof video?.caption === 'string') {
     return video.caption;
   }
+  const document = message.documentMessage as { caption?: unknown } | undefined;
+  if (typeof document?.caption === 'string') {
+    return document.caption;
+  }
   return undefined;
 };
 
@@ -187,6 +191,16 @@ const toTimestamp = (value: unknown): number | undefined => {
   return undefined;
 };
 
+const messageContextInfo = (message: Record<string, unknown> | undefined): Record<string, unknown> | null => {
+  if (!message) return null;
+  const payload = message[getMessageType(message)];
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) return null;
+  const contextInfo = (payload as Record<string, unknown>).contextInfo;
+  return contextInfo && typeof contextInfo === 'object' && !Array.isArray(contextInfo)
+    ? contextInfo as Record<string, unknown>
+    : null;
+};
+
 export const normalizeBaileysMessage = (raw: unknown): WhatsAppIndexedMessage | null => {
   if (!raw || typeof raw !== 'object') {
     return null;
@@ -211,14 +225,21 @@ export const normalizeBaileysMessage = (raw: unknown): WhatsAppIndexedMessage | 
     fromMe,
     ...(participant ? { participant } : {}),
   };
+  const contextInfo = messageContextInfo(candidate.message);
+  const quoted = Boolean(contextInfo?.quotedMessage)
+    || typeof contextInfo?.stanzaId === 'string' && Boolean(contextInfo.stanzaId.trim());
+  const forwarded = contextInfo?.isForwarded === true
+    || (toNumber(contextInfo?.forwardingScore) ?? 0) > 0;
   const attachments = extractAttachments(candidate.message, stableMessageRef, remoteJid, raw);
   return {
     stableMessageRef,
     chatId: remoteJid,
     chatType,
-    ...(participant ? { senderId: participant } : {}),
+    ...(participant || (!fromMe && chatType === 'direct') ? { senderId: participant || remoteJid } : {}),
     ...(typeof candidate.pushName === 'string' && candidate.pushName.trim() ? { senderDisplayName: candidate.pushName.trim() } : {}),
     fromMe,
+    ...(quoted ? { quoted: true } : {}),
+    ...(forwarded ? { forwarded: true } : {}),
     ...(toTimestamp(candidate.messageTimestamp) ? { timestamp: toTimestamp(candidate.messageTimestamp) } : {}),
     ...(extractMessageText(candidate.message) ? { text: extractMessageText(candidate.message) } : {}),
     messageType: getMessageType(candidate.message),

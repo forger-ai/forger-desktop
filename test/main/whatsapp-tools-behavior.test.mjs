@@ -15,7 +15,67 @@ const {
 } = require('../../dist-electron/main/connections/modules/whatsapp/normalizer.js');
 const { WhatsAppLocalStore } = require('../../dist-electron/main/connections/modules/whatsapp/store.js');
 const { WhatsAppConnectionManager } = require('../../dist-electron/main/connections/modules/whatsapp/manager.js');
-const { whatsappToolModule, __resetWhatsAppToolForTests } = require('../../dist-electron/main/connections/modules/whatsapp/index.js');
+const { whatsappToolModule, setLiveWhatsAppMessageHandler, __resetWhatsAppToolForTests } = require('../../dist-electron/main/connections/modules/whatsapp/index.js');
+const whatsappManagerModule = require('../../dist-electron/main/connections/modules/whatsapp/manager.js');
+
+test('live notifications route only when one configured connection identifies the account', async (t) => {
+  const root = await mkdtemp(join(tmpdir(), 'forger-whatsapp-routing-'));
+  const originalFactory = whatsappManagerModule.createWhatsAppConnectionManager;
+  let onLiveMessage;
+  const deliveries = [];
+  whatsappManagerModule.createWhatsAppConnectionManager = (_context, options) => {
+    onLiveMessage = options.onLiveMessage;
+    return { status: async () => ({ configured: false }) };
+  };
+  t.after(async () => {
+    setLiveWhatsAppMessageHandler(null);
+    __resetWhatsAppToolForTests();
+    whatsappManagerModule.createWhatsAppConnectionManager = originalFactory;
+    await rm(root, { recursive: true, force: true });
+  });
+  const message = { stableMessageRef: { id: 'inbound' } };
+  const first = { ...createContext(root), connectionId: 'connection-one' };
+  await whatsappToolModule.start(first);
+
+  await onLiveMessage(message, { newlyStored: true });
+  setLiveWhatsAppMessageHandler(async (delivery) => deliveries.push(delivery));
+  await onLiveMessage(message, { newlyStored: true });
+  assert.deepEqual(deliveries, [{ connectionId: 'connection-one', message, newlyStored: true }]);
+
+  await whatsappToolModule.start({ ...first, connectionId: 'connection-two' });
+  await onLiveMessage(message, { newlyStored: false });
+  assert.equal(deliveries.length, 1);
+
+  await whatsappToolModule.start(createContext(join(root, 'unbound-account')));
+  await onLiveMessage(message, { newlyStored: true });
+  assert.equal(deliveries.length, 1);
+});
+
+test('document captions and message provenance are read from the original message only', () => {
+  const key = { remoteJid: '56912345678@s.whatsapp.net', id: 'DOC', fromMe: false };
+  const document = normalizeBaileysMessage({
+    key,
+    message: { documentMessage: { caption: 'Current caption', contextInfo: {
+      stanzaId: 'quoted-id', isForwarded: false, forwardingScore: 1,
+    } } },
+  });
+  assert.equal(document.text, 'Current caption');
+  assert.equal(document.quoted, true);
+  assert.equal(document.forwarded, true);
+
+  const unquoted = normalizeBaileysMessage({
+    key: { ...key, id: 'NO_QUOTE' },
+    message: { documentMessage: { contextInfo: { stanzaId: ' ', forwardingScore: 'not-a-number' } } },
+  });
+  assert.equal(unquoted.quoted, undefined);
+  assert.equal(unquoted.forwarded, undefined);
+  const noContext = normalizeBaileysMessage({
+    key: { ...key, id: 'NO_CONTEXT' },
+    message: { documentMessage: { caption: 'No quote' } },
+  });
+  assert.equal(noContext.quoted, undefined);
+  assert.equal(noContext.forwarded, undefined);
+});
 
 const createContext = (metadataRoot, events = []) => ({
   metadataRoot,
