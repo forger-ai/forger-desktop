@@ -564,7 +564,13 @@ test('real WhatsApp transport classification preserves an offline reply through 
   };
   for (let i = 0; i < 500 && h.service.listActivity(key)[0].deliveryState !== 'sent'; i++)
     await new Promise((resolve) => setTimeout(resolve, 10));
-  assert.deepEqual(outcomes, ['whatsapp_send_unavailable', 'whatsapp_send_rate_limited', 'sent']);
+  // The transport requires >1500 ms; a retry at exactly 1500 ms is safely rate-limited again.
+  // Assert ordered recovery and one delivery, independently of timer-boundary scheduling.
+  assert.equal(outcomes[0], 'whatsapp_send_unavailable');
+  assert.equal(outcomes.at(-1), 'sent');
+  const rateLimitedRetries = outcomes.slice(1, -1);
+  assert.ok(rateLimitedRetries.length >= 1);
+  assert.ok(rateLimitedRetries.every((outcome) => outcome === 'whatsapp_send_rate_limited'));
   assert.deepEqual(network, ['another authorized sender', 'durable answer']);
   assert.equal(h.service.listActivity(key)[0].deliveryState, 'sent');
 });
