@@ -2,6 +2,7 @@ export { WhatsAppAgentChannelStore } from './store';
 export { WhatsAppAgentChannelCoordinator } from './coordinator';
 export { parseAgentWakeMessage, normalizeAgentAliasKey } from './parser';
 export type {
+  WhatsAppAgentActivity,
   WhatsAppAgentBinding,
   WhatsAppAgentBindingInput,
   WhatsAppAgentBindingKey,
@@ -9,6 +10,7 @@ export type {
   WhatsAppAgentInboundResult,
   WhatsAppAgentContextMessage,
   WhatsAppAgentRunInput,
+  WhatsAppAgentRunAdmission,
   WhatsAppAgentSteerInput,
   WhatsAppAgentCancelInput,
   WhatsAppAgentReplyInput,

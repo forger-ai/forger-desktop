@@ -610,13 +610,15 @@ const getPersonalAgentConversationManager = (): AgentConversationManager => {
         getForgerMcpServer: () => forgerMcpServer,
         getAppMcpManager: () => appMcpManager,
         getRegistry: () => registry,
+        getFileLibrary,
+        getWhatsAppChannelAgent: input => getWhatsAppAgentChannelService().getCurrentPolicyAgent(input),
       }),
       onConversationEvent: emitPersonalAgentConversationEvent,
     });
   }
   return personalAgentConversationManager;
 };
-const getWhatsAppAgentChannelService = (): WhatsAppAgentChannelService => {
+const getWhatsAppAgentChannelService = (): WhatsAppAgentChannelService =>
   whatsappAgentChannelService ??= new WhatsAppAgentChannelService({
     metadataRoot: getForgerMetadataRoot(),
     getConnectionsService,
@@ -624,8 +626,6 @@ const getWhatsAppAgentChannelService = (): WhatsAppAgentChannelService => {
     getConversationManager: getPersonalAgentConversationManager,
     appendLog: appendInstallLog,
   });
-  return whatsappAgentChannelService;
-};
 const getSidekickVoiceRuntime = (): SidekickVoiceRuntime => {
   sidekickVoiceRuntime ??= new SidekickVoiceRuntime({
     getSidekickService,

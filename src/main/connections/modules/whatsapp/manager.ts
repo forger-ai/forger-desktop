@@ -164,19 +164,23 @@ export class WhatsAppConnectionManager {
     const chatId = normalizeWhatsAppJid(input.chatId);
     const text = typeof input.text === 'string' ? input.text.trim() : '';
     if (!chatId || !text || text.length > 4000) {
-      return { success: false, userMessage: 'Completa un chat observado y un mensaje de WhatsApp valido.', technicalCode: 'whatsapp_send_input_invalid' };
+      return { success: false, userMessage: 'Completa un chat observado y un mensaje de WhatsApp valido.', technicalCode: 'whatsapp_send_input_invalid', data: { deliveryState: 'not_sent', retryable: false } };
     }
     const knownChat = await this.store.getChat(chatId);
     if (!knownChat) {
-      return { success: false, userMessage: 'Primero lee o lista ese chat antes de enviar mensajes.', technicalCode: 'whatsapp_chat_not_observed' };
+      return { success: false, userMessage: 'Primero lee o lista ese chat antes de enviar mensajes.', technicalCode: 'whatsapp_chat_not_observed', data: { deliveryState: 'not_sent', retryable: false } };
     }
     if (!await this.store.canSendNow()) {
-      return { success: false, userMessage: 'Espera un momento antes de enviar otro mensaje de WhatsApp.', technicalCode: 'whatsapp_send_rate_limited' };
+      return { success: false, userMessage: 'Espera un momento antes de enviar otro mensaje de WhatsApp.', technicalCode: 'whatsapp_send_rate_limited', data: { deliveryState: 'not_sent', retryable: true } };
     }
-    await this.ensureStarted(context);
+    try {
+      await this.ensureStarted(context);
+    } catch {
+      return { success: false, userMessage: 'La conexión de WhatsApp no está lista para enviar.', technicalCode: 'whatsapp_send_unavailable', data: { deliveryState: 'not_sent', retryable: true } };
+    }
     const socket = this.socket;
     if (!socket?.sendMessage) {
-      return { success: false, userMessage: 'La conexión de WhatsApp no está lista para enviar.', technicalCode: 'whatsapp_send_unavailable' };
+      return { success: false, userMessage: 'La conexión de WhatsApp no está lista para enviar.', technicalCode: 'whatsapp_send_unavailable', data: { deliveryState: 'not_sent', retryable: true } };
     }
     const quoted = decodeStableMessageRef(input.replyToMessageRef);
     const finishSend = this.trackPendingSend(chatId);
@@ -214,7 +218,7 @@ export class WhatsAppConnectionManager {
       return {
         chat,
         type: 'group',
-        metadata: normalizeGroupMetadata(metadata),
+        metadata: await normalizeGroupMetadata(metadata, async (id) => (await this.store.getChat(id))?.title),
       };
     }
     if (chat.chatType === 'channel') {
@@ -876,7 +880,10 @@ const chmodAuthFiles = async (directory: string): Promise<void> => {
   }));
 };
 
-const normalizeGroupMetadata = (metadata: unknown): Record<string, unknown> | null => {
+const normalizeGroupMetadata = async (
+  metadata: unknown,
+  contactName: (id: string) => Promise<string | undefined>,
+): Promise<Record<string, unknown> | null> => {
   if (!isRecord(metadata)) {
     return null;
   }
@@ -892,10 +899,19 @@ const normalizeGroupMetadata = (metadata: unknown): Record<string, unknown> | nu
     ephemeralDuration: metadata.ephemeralDuration,
     size: metadata.size,
     participants: Array.isArray(metadata.participants)
-      ? metadata.participants.map((participant) => isRecord(participant) ? ({
-        id: participant.id,
-        admin: participant.admin,
-      }) : participant)
+      ? await Promise.all(metadata.participants.map(async (participant) => {
+        if (!isRecord(participant)) return participant;
+        const providedName = [participant.name, participant.notify]
+          .find((value) => typeof value === 'string' && value.trim());
+        const name = typeof providedName === 'string'
+          ? providedName.trim()
+          : typeof participant.id === 'string' ? await contactName(participant.id) : undefined;
+        return {
+          id: participant.id,
+          admin: participant.admin,
+          ...(name ? { name } : {}),
+        };
+      }))
       : [],
   };
 };

@@ -620,3 +620,27 @@ test('WhatsApp QR pairing clears stale auth before starting a fresh QR session',
   assert.equal(typeof result.qrDataUrl, 'string');
   assert.equal((await manager.status()).configured, false);
 });
+
+test('transport distinguishes proven pre-send failures from an uncertain socket attempt', async (t) => {
+  const root = await mkdtemp(join(tmpdir(), 'forger-whatsapp-delivery-'));
+  t.after(async () => rm(root, { recursive: true, force: true }));
+  const store = new WhatsAppLocalStore(root);
+  const manager = new WhatsAppConnectionManager(store);
+  const context = createContext(root);
+  const chatId = '56912345678@s.whatsapp.net';
+  let sends = 0;
+  await manager.ingestMessages([{ key: { remoteJid: chatId, id: 'observed', fromMe: false }, messageTimestamp: 1, message: { conversation: 'hello' } }]);
+  manager.ensureStarted = async () => { throw new Error('offline'); };
+  assert.deepEqual((await manager.sendMessage(context, { chatId, text: 'reply' })).data, { deliveryState: 'not_sent', retryable: true });
+  manager.ensureStarted = async () => undefined;
+  manager.socket = {};
+  assert.deepEqual((await manager.sendMessage(context, { chatId, text: 'reply' })).data, { deliveryState: 'not_sent', retryable: true });
+  assert.deepEqual((await manager.sendMessage(context, { chatId, text: '' })).data, { deliveryState: 'not_sent', retryable: false });
+  assert.deepEqual((await manager.sendMessage(context, { chatId: '56999999999@s.whatsapp.net', text: 'reply' })).data, { deliveryState: 'not_sent', retryable: false });
+  manager.socket = { sendMessage: async () => { sends++; throw new Error('response lost after possible send'); } };
+  await assert.rejects(manager.sendMessage(context, { chatId, text: 'reply' }), /response lost/);
+  assert.equal(sends, 1);
+  await store.rememberSend();
+  assert.deepEqual((await manager.sendMessage(context, { chatId, text: 'reply' })).data, { deliveryState: 'not_sent', retryable: true });
+  await store.close?.();
+});

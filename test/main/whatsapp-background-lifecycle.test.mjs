@@ -11,6 +11,7 @@ const {
   startWhatsAppAgentChannel,
   initializeWhatsAppAgentChannel,
   createWhatsAppChannelHistoryReader,
+  createWhatsAppChannelAgentReader,
 } = require('../../dist-electron/main/core/whatsapp-agent-channel-startup.js');
 
 test('a configured WhatsApp connection can start listening after the agent runtime is ready and stop before shutdown', async () => {
@@ -64,6 +65,9 @@ test('WhatsApp channel startup keeps listening tied to successful initialization
   const reader = createWhatsAppChannelHistoryReader(() => ({ readChannelHistory: async (input) => input }));
   assert.deepEqual(await reader({ limit: 3 }), { limit: 3 });
   assert.equal(createWhatsAppChannelHistoryReader(undefined), undefined);
+  const policyReader = createWhatsAppChannelAgentReader(() => ({ getCurrentPolicyAgent: async input => ({ agentId: input.agentId }) }));
+  assert.deepEqual(await policyReader({ agentId: 'bound-agent' }), { agentId: 'bound-agent' });
+  assert.equal(createWhatsAppChannelAgentReader(undefined), undefined);
 });
 
 test('WhatsApp startup forwards a live message to the channel service', async () => {

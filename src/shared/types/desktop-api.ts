@@ -47,7 +47,7 @@ import type { BackgroundTask, BackgroundTaskEvent, BackgroundTaskUpsertInput } f
 import type { LlmRunsSnapshot } from './llm-runs';
 import type { PersonalAgent, PersonalAgentConversation, PersonalAgentConversationDraftUpdateInput, PersonalAgentConversationEvent, PersonalAgentConversationGetInput, PersonalAgentConversationsListInput, PersonalAgentConversationStartInput, PersonalAgentCreateInput, PersonalAgentDeleteInput, PersonalAgentGrantOptions, PersonalAgentMessageSendInput, PersonalAgentPeerThread, PersonalAgentPeerThreadGetInput, PersonalAgentPeerThreadsListInput, PersonalAgentRoutine, PersonalAgentRoutineDeleteInput, PersonalAgentRoutineListInput, PersonalAgentRoutineRun, PersonalAgentRoutineRunNowInput, PersonalAgentRoutineSetEnabledInput, PersonalAgentRoutineUpsertInput, PersonalAgentScheduledWakeup, PersonalAgentUpdatePermissionsInput, PersonalAgentWakeupCancelInput, PersonalAgentWorkspaceEntry, PersonalAgentWorkspaceFile, PersonalAgentWorkspaceFileReadInput, PersonalAgentWorkspaceFileWriteInput, PersonalAgentWorkspaceListInput } from './personal-agents';
 import type { PersonalAgentGroup, PersonalAgentGroupCreateInput, PersonalAgentGroupDeleteInput, PersonalAgentGroupUpdateInput, PersonalAgentUpdateGroupInput } from './personal-agents';
-import type { WhatsAppAgentBinding, WhatsAppAgentBindingKey, WhatsAppAgentBindingPutInput, WhatsAppAgentDeliveryStatus, WhatsAppAgentUnsettledMessage } from './whatsapp-agent-channel';
+import type { WhatsAppAgentActivityItem, WhatsAppAgentBindingSetEnabledInput, WhatsAppAgentRequestActionInput, WhatsAppAgentAliasUpdateInput, WhatsAppAgentPolicyOptions, WhatsAppAgentBinding, WhatsAppAgentBindingKey, WhatsAppAgentBindingPutInput, WhatsAppAgentDeliveryStatus, WhatsAppAgentUnsettledMessage } from './whatsapp-agent-channel';
 import type { RemoteActivitySnapshot } from './remote-activity';
 
 export type MicrophonePermissionStatus = 'not-determined' | 'granted' | 'denied' | 'restricted' | 'unknown' | 'unsupported';
@@ -304,6 +304,13 @@ export interface ForgerDesktopApi {
   personalAgentWhatsAppBindingDelete: (input: WhatsAppAgentBindingKey) => Promise<boolean>;
   personalAgentWhatsAppUnsettledList: (input: { agentId: string; connectionId?: string }) => Promise<WhatsAppAgentUnsettledMessage[]>;
   personalAgentWhatsAppLatestDeliveryGet: (input: WhatsAppAgentBindingKey) => Promise<WhatsAppAgentDeliveryStatus | null>;
+  personalAgentWhatsAppActivityList: (input: WhatsAppAgentBindingKey) => Promise<WhatsAppAgentActivityItem[]>;
+  personalAgentWhatsAppBindingSetEnabled: (input: WhatsAppAgentBindingSetEnabledInput) => Promise<WhatsAppAgentBinding>;
+  personalAgentWhatsAppRequestCancel: (input: WhatsAppAgentRequestActionInput) => Promise<void>;
+  personalAgentWhatsAppDeliveryRetry: (input: WhatsAppAgentRequestActionInput) => Promise<void>;
+  personalAgentWhatsAppRequestDismiss: (input: WhatsAppAgentRequestActionInput) => Promise<void>;
+  personalAgentWhatsAppAliasUpdate: (input: WhatsAppAgentAliasUpdateInput) => Promise<WhatsAppAgentBinding[]>;
+  personalAgentWhatsAppPolicyOptionsGet: (input: { agentId: string }) => Promise<WhatsAppAgentPolicyOptions>;
   personalAgentsCreate: (input: PersonalAgentCreateInput) => Promise<PersonalAgent>;
   personalAgentGroupsList: () => Promise<PersonalAgentGroup[]>;
   personalAgentGroupsCreate: (input: PersonalAgentGroupCreateInput) => Promise<PersonalAgentGroup>;

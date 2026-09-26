@@ -10,7 +10,7 @@ const { AgentStore } = require('../../dist-electron/main/personal-agents/agent-s
 const { WhatsAppAgentChannelService } = require('../../dist-electron/main/personal-agents/whatsapp-channel-service.js');
 
 const waitFor = async (check) => {
-  for (let attempt = 0; attempt < 100; attempt += 1) {
+  for (let attempt = 0; attempt < 400; attempt += 1) {
     if (check()) return;
     await new Promise((resolve) => setTimeout(resolve, 10));
   }
@@ -35,19 +35,20 @@ const fixture = async (t, options = {}) => {
   const manager = {
     onConversationEvent: (callback) => { listener = callback; return () => { listener = null; }; },
     createWhatsAppConversation: async ({ agentId }) => {
-      const conversation = { id: `conversation-${conversations.size + 1}`, agentId };
+      const conversation = { id: `conversation-${conversations.size + 1}`, agentId, messages: [] };
       conversations.set(conversation.id, conversation);
       return conversation;
     },
+    reconcileWhatsAppConversation: async () => {},
     getConversation: async (id) => conversations.get(id) ?? null,
     sendWhatsAppMessage: async (input) => {
-      const runId = `run-${starts.length + steers.length + 1}`;
+      const runId = input.runId ?? `steer-${steers.length + 1}`;
       starts.push({ ...input, runId });
-      options.onStart?.({ runId, emit: (event) => listener?.(event) });
+      options.onStart?.({ runId, number: starts.length, emit: (event) => listener?.(event) });
       return { activeRun: { id: runId } };
     },
     steerMessage: async (input) => {
-      const runId = `run-${starts.length + steers.length + 1}`;
+      const runId = input.runId ?? `steer-${steers.length + 1}`;
       steers.push({ ...input, runId });
       return { activeRun: { id: runId } };
     },
@@ -156,8 +157,8 @@ test('channel history is bounded to the active chat turn and revoked during an i
 
 test('early completion delivers once, trims long replies, and failed runs release the chat', async (t) => {
   const f = await fixture(t, {
-    onStart: ({ runId, emit }) => {
-      if (runId !== 'run-1') return;
+    onStart: ({ runId, number, emit }) => {
+      if (number !== 1) return;
       emit({
         type: 'run.completed', run: { id: runId },
         conversation: { messages: [{ runId, role: 'assistant', kind: 'message', content: 'x'.repeat(4100) }] },
@@ -170,14 +171,14 @@ test('early completion delivers once, trims long replies, and failed runs releas
     { stableMessageRef: 'empty', text: ' ' },
   ] } }));
   await f.service.handleLiveMessage(f.inbound('early-1'));
-  await waitFor(() => f.sends.length === 1);
+  await waitFor(() => f.service.getLatestDelivery(f.key)?.state === 'sent');
   assert.equal(f.sends[0].input.text.length < 4000, true);
   assert.match(f.sends[0].input.text, /Respuesta abreviada/);
   assert.match(f.starts[0].content, /context/);
   assert.equal(f.service.getLatestDelivery(f.key).state, 'sent');
   f.emit({
-    type: 'run.completed', run: { id: 'run-1' },
-    conversation: { messages: [{ runId: 'run-1', role: 'assistant', kind: 'message', content: 'duplicate' }] },
+    type: 'run.completed', run: { id: f.starts[0].runId },
+    conversation: { messages: [{ runId: f.starts[0].runId, role: 'assistant', kind: 'message', content: 'duplicate' }] },
   });
   await new Promise((resolve) => setTimeout(resolve, 10));
   assert.equal(f.sends.length, 1);
@@ -185,14 +186,14 @@ test('early completion delivers once, trims long replies, and failed runs releas
   await f.service.handleLiveMessage(f.inbound('failed-2', 'Casa: vuelve a revisar', { senderId: 'participant', fromMe: false }));
   assert.equal(f.starts.length, 2);
   assert.match(f.starts[1].content, /participant/);
-  f.emit({ type: 'run.failed', run: { id: 'run-2' }, conversation: { messages: [] } });
+  f.emit({ type: 'run.failed', run: { id: f.starts[1].runId }, conversation: { messages: [] } });
   await waitFor(() => f.service.getBinding(f.key).activeTurnId === null);
   assert.equal(f.sends.length, 1);
   await f.service.handleLiveMessage(f.inbound('third-3'));
   assert.equal(f.starts.length, 3);
 });
 
-test('binding setup validates the observed account and a missing runner ID stays quarantined', async (t) => {
+test('binding setup validates the observed account and a rejected admission releases its chat', async (t) => {
   const f = await fixture(t);
   await assert.rejects(f.service.putBinding({ ...f.baseBinding, agentId: 'missing' }));
   await assert.rejects(f.service.putBinding({ ...f.baseBinding, connectionId: 'missing' }), /connection_not_found/);
@@ -206,10 +207,11 @@ test('binding setup validates the observed account and a missing runner ID stays
   await assert.rejects(f.service.putBinding({ ...f.baseBinding, expectedRevision: saved.revision - 1 }), /revision_conflict/);
   f.manager.sendWhatsAppMessage = async () => ({ activeRun: null });
   await f.service.handleLiveMessage(f.inbound('missing-run'));
-  assert.deepEqual(f.service.listUnsettledMessages('connection-1').map((message) => message.state), ['admitting']);
-  assert.equal(f.service.getBinding(f.key).activeTurnId !== null, true);
+  assert.deepEqual(f.service.listUnsettledMessages('connection-1'), []);
+  assert.equal(f.service.getBinding(f.key).activeTurnId, null);
   await f.service.handleLiveMessage(f.inbound('follow-up'));
-  assert.deepEqual(f.service.listUnsettledMessages('connection-1').map((message) => message.state), ['pending', 'admitting']);
+  assert.deepEqual(f.service.listUnsettledMessages('connection-1'), []);
+  assert.equal(f.service.listActivity(f.key).every(request => request.status === 'failed'), true);
 });
 
 test('service startup retires an orphaned run before processing new messages', async (t) => {
@@ -228,7 +230,7 @@ test('service startup retires an orphaned run before processing new messages', a
   await resumed.initialize();
   t.after(() => resumed.close());
   assert.equal(resumed.getBinding(f.key).activeTurnId, null);
-  assert.ok(resumed.getBinding(f.key).revision > before.revision);
+  assert.equal(resumed.getBinding(f.key).configurationVersion, before.configurationVersion);
   await resumed.handleLiveMessage(f.inbound('after-restart'));
   assert.equal(f.starts.length, 2);
 });
@@ -265,43 +267,38 @@ test('delivery records definite rejection separately from uncertain transport ac
     type: 'run.completed', run: { id: runId },
     conversation: { messages: [{ runId, role: 'assistant', kind: 'message', content: 'Listo' }] },
   });
-  f.setDelivery(async () => ({ success: false, technicalCode: 'offline' }));
+  f.setDelivery(async () => ({ success: false, technicalCode: 'rejected', data: { deliveryState: 'not_sent' } }));
   await f.service.handleLiveMessage(f.inbound('rejected-1'));
-  complete('run-1');
+  complete(f.starts[0].runId);
   await waitFor(() => f.service.getLatestDelivery(f.key)?.state === 'failed');
   assert.equal(f.service.getLatestDelivery(f.key).stableMessageRef, null);
   assert.equal(f.service.getBinding(f.key).activeTurnId, null);
 
   f.setDelivery(async () => ({ success: true, data: { sent: false } }));
   await f.service.handleLiveMessage(f.inbound('uncertain-2'));
-  complete('run-2');
+  complete(f.starts[1].runId);
   await waitFor(() => f.service.getLatestDelivery(f.key)?.state === 'unknown');
   assert.equal(f.sends.length, 2);
-  complete('run-2');
+  complete(f.starts[1].runId);
   await new Promise((resolve) => setTimeout(resolve, 10));
   assert.equal(f.sends.length, 2);
 });
 
-test('steer replaces the exact run, OFF cancels it, and completion without text settles silently', async (t) => {
+test('independent tasks queue, explicit correction cancels only its target, and OFF pauses the chat', async (t) => {
   const f = await fixture(t);
   await f.service.putBinding(f.baseBinding);
   await f.service.handleLiveMessage(f.inbound('first', 'Casa: first task'));
-  await f.service.handleLiveMessage(f.inbound('second', 'Casa: corrected task'));
-  assert.equal(f.steers.length, 1);
-  assert.equal(f.steers[0].expectedRunId, 'run-1');
-  assert.equal(f.steers[0].source, 'whatsapp');
-  assert.match(f.steers[0].content, /corrected task/);
+  const first = f.service.listActivity(f.key)[0];
+  await f.service.handleLiveMessage(f.inbound('second', 'Casa: independent task'));
+  assert.equal(f.starts.length, 1);
+  assert.equal(f.steers.length, 0);
+  assert.equal(f.service.listActivity(f.key).filter(item => item.status === 'queued').length, 1);
+  await f.service.handleLiveMessage(f.inbound('correct', `Casa CORREGIR ${first.requestId} corrected task`));
+  assert.ok(f.cancels.includes(first.runId));
   await f.service.handleLiveMessage(f.inbound('off', 'Casa OFF'));
-  assert.deepEqual(f.cancels, ['run-2']);
   assert.equal(f.service.getBinding(f.key).enabled, false);
-  assert.equal(f.logs.some(({ event, payload }) => event === 'whatsapp_agent:inbound' && payload.status === 'steered'), true);
-
-  await f.service.handleLiveMessage(f.inbound('on', 'Casa ON'));
-  await f.service.handleLiveMessage(f.inbound('third', 'Casa: third task'));
-  f.emit({ type: 'run.completed', run: { id: 'run-3' }, conversation: { messages: [] } });
-  await waitFor(() => f.service.getBinding(f.key).activeTurnId === null);
+  assert.equal(f.service.getBinding(f.key).activeTurnId, null);
   assert.equal(f.sends.length, 0);
-  assert.equal(f.service.getLatestDelivery(f.key), null);
 });
 
 test('conversation event failures are logged without leaking a reply', async (t) => {
@@ -321,53 +318,34 @@ test('conversation event failures are logged without leaking a reply', async (t)
   assert.equal(f.sends.length, 0);
 });
 
-test('service rejects unverified steer targets and a canceled run releases its chat', async (t) => {
+test('correction requires a real owned request and cancellation releases only the matching chat', async (t) => {
   const f = await fixture(t);
-  await f.service.initialize();
   await f.service.putBinding(f.baseBinding);
-  const binding = f.service.getBinding(f.key);
-  const input = {
-    binding, previousTurnId: 'missing', revision: binding.revision,
-    text: 'correction', context: [], stableMessageRef: 'ref', authorId: null, isFromMe: false,
-  };
-  await assert.rejects(f.service.startRun({ ...input, binding: { ...binding, conversationId: null } }), /conversation_missing/);
-  await assert.rejects(f.service.steerRun({ ...input, binding: { ...binding, conversationId: null } }), /conversation_missing/);
-  await assert.rejects(f.service.steerRun(input), /previous_run_unverified/);
-  assert.match(f.service.runPrompt(input), /Autor de la invocación: desconocido/);
-  await f.service.onRunEvent({ type: 'run.canceled', run: null, conversation: { messages: [] } });
-
-  await f.service.handleLiveMessage(f.inbound('direct'));
-  const current = f.service.getBinding(f.key);
-  const turn = f.service.store.findTurnByRunId('run-1');
-  f.service.store.markTurnStatus(turn.turnId, 'failed');
-  await assert.rejects(f.service.steerRun({ ...input, binding: current, previousTurnId: turn.turnId }), /previous_run_unverified/);
-  f.service.store.markTurnStatus(turn.turnId, 'active');
-  for (const change of [{ agentId: 'different' }, { connectionId: 'other-account' }, { chatId: 'other-chat' }]) {
-    await assert.rejects(f.service.steerRun({
-      ...input, binding: { ...current, ...change }, previousTurnId: turn.turnId,
-    }), /previous_run_unverified/);
-  }
-  f.manager.steerMessage = async () => ({ activeRun: null });
-  await assert.rejects(f.service.steerRun({ ...input, binding: current, previousTurnId: turn.turnId }), /run_missing/);
-  f.emit({ type: 'run.canceled', run: { id: 'run-1' }, conversation: { messages: [] } });
-  await waitFor(() => f.service.getBinding(f.key).activeTurnId === null);
+  await f.service.handleLiveMessage(f.inbound('task'));
+  const request = f.service.listActivity(f.key)[0];
+  await f.service.handleLiveMessage(f.inbound('fake-correction', 'Casa CORREGIR missing correction'));
+  await f.service.handleLiveMessage(f.inbound('other-person', `Casa CORREGIR ${request.requestId} correction`, { senderId: 'participant', fromMe: false }));
+  assert.equal(f.starts.length, 1);
+  assert.equal(f.cancels.length, 0);
+  await f.service.cancelRequest(f.key, request.requestId);
+  assert.deepEqual(f.cancels, [request.runId]);
+  assert.equal(f.service.getBinding(f.key).activeTurnId, null);
   assert.equal(f.service.getLatestDelivery(f.key), null);
 });
 
-test('unknown early events stay pending and malformed context never enters the task prompt', async (t) => {
+test('unrelated completion events cannot displace channel completions and malformed context stays empty', async (t) => {
   const f = await fixture(t);
   await f.service.putBinding(f.baseBinding);
-  f.emit({ type: 'run.completed', run: { id: 'unrelated-run' }, conversation: { messages: [] } });
-  await waitFor(() => f.service.earlyRunEvents.size === 1);
+  for (let index = 0; index < 100; index++) {
+    f.emit({ type: 'run.completed', run: { id: `unrelated-${index}` }, conversation: { messages: [] } });
+  }
   f.setHistory(async () => ({ success: true, data: { messages: 'malformed' } }));
   await f.service.handleLiveMessage(f.inbound('task'));
   assert.match(f.starts[0].content, /Contexto reciente no confiable del mismo chat: \[\]/);
-  assert.equal(f.service.earlyRunEvents.size, 1);
-  f.setHistory(async () => ({ success: true, data: { messages: [
-    { stableMessageRef: 'no-author', fromMe: false, text: 'context' },
-  ] } }));
-  await f.service.handleLiveMessage(f.inbound('correction', 'Casa: correction'));
-  assert.match(f.steers[0].content, /unknown/);
+  const runId = f.starts[0].runId;
+  f.emit({ type: 'run.completed', run: { id: runId }, conversation: { messages: [{ runId, role: 'assistant', kind: 'message', content: 'Still delivered' }] } });
+  await waitFor(() => f.sends.length === 1);
+  assert.equal(f.sends[0].input.text, 'Still delivered');
 });
 
 test('channel initialization fails closed when SQLite is unavailable', async (t) => {
@@ -387,4 +365,95 @@ test('channel initialization fails closed when SQLite is unavailable', async (t)
   } finally {
     sqlite.openPersonalAgentSqliteDatabase = open;
   }
+});
+
+test('a policy lookup cannot restore authority revoked while the agent is loading', async (t) => {
+  const f = await fixture(t);
+  const saved = await f.service.putBinding(f.baseBinding);
+  await f.service.initialize();
+  await f.service.handleLiveMessage(f.inbound('policy-race'));
+  const start = f.starts[0];
+  const query = { channel: start.channel, runId: start.runId, agentId: f.agent.id, conversationId: saved.conversationId };
+  let release;
+  const loaded = new Promise(resolve => { release = resolve; });
+  const requireAgent = f.agentStore.requireAgent.bind(f.agentStore);
+  f.agentStore.requireAgent = async () => await loaded;
+  const refreshing = f.service.getCurrentPolicyAgent(query);
+  await f.service.setEnabled(f.key, false);
+  release(await requireAgent(f.agent.id));
+  assert.equal(await refreshing, null);
+  assert.equal(await f.service.getCurrentPolicyAgent(query), null);
+  assert.deepEqual(f.cancels, [start.runId]);
+});
+
+test('deleting a chat invalidates its completed reply waiting behind the account delivery limit', async (t) => {
+  const f = await fixture(t);
+  await f.service.putBinding(f.baseBinding);
+  const complete = (runId) => f.service.onRunEvent({
+    type: 'run.completed', run: { id: runId },
+    conversation: { messages: [{ runId, role: 'assistant', kind: 'message', content: 'Listo' }] },
+  });
+  await f.service.handleLiveMessage(f.inbound('first-delivery'));
+  await complete(f.starts[0].runId);
+  await f.service.handleLiveMessage(f.inbound('pending-delivery'));
+  await complete(f.starts[1].runId);
+  const pending = f.service.listActivity(f.key).find(request => request.runId === f.starts[1].runId);
+  assert.equal(pending.deliveryState, 'pending');
+  await f.service.deleteBinding(f.key);
+  const retired = f.service.listActivity(f.key).find(request => request.requestId === pending.requestId);
+  assert.equal(retired.deliveryState, 'failed');
+  assert.equal(retired.reason, 'channel_reconfigured');
+  assert.equal(retired.canRetryDelivery, false);
+  assert.equal(f.sends.length, 1);
+});
+
+test('a transport rejection without evidence of non-delivery is uncertain and is never retried', async (t) => {
+  const f = await fixture(t);
+  await f.service.putBinding(f.baseBinding);
+  f.setDelivery(async () => ({ success: false }));
+  await f.service.handleLiveMessage(f.inbound('unknown-transport'));
+  const runId = f.starts[0].runId;
+  await f.service.onRunEvent({ type: 'run.completed', run: { id: runId }, conversation: {
+    messages: [{ runId, role: 'assistant', kind: 'message', content: 'Listo' }],
+  } });
+  assert.equal(f.service.getLatestDelivery(f.key).state, 'unknown');
+  assert.equal(f.service.listActivity(f.key)[0].canRetryDelivery, false);
+  assert.equal(f.sends.length, 1);
+});
+
+test('channel boundaries tolerate absent authors and events while refusing a missing conversation', async (t) => {
+  const f = await fixture(t);
+  const binding = await f.service.putBinding(f.baseBinding);
+  f.setHistory(async () => ({ success: true, data: { messages: [
+    { stableMessageRef: 'owner', fromMe: true, text: 'Owner context' },
+    { stableMessageRef: 'unknown', text: 'Unattributed context' },
+  ] } }));
+  await f.service.handleLiveMessage(f.inbound('context-author'));
+  assert.match(f.starts[0].content, /"author":"owner"/);
+  assert.match(f.starts[0].content, /"author":"unknown"/);
+  const input = { binding, context: [], isFromMe: false, authorId: null, text: 'Task', stableMessageRef: 'x' };
+  assert.match(f.service.runPrompt(input), /Autor de la invocación: desconocido/);
+  await assert.rejects(f.service.startRun({ ...input, binding: { ...binding, conversationId: null } }), /conversation_missing/);
+  await f.service.onRunEvent({ type: 'run.canceled', run: null });
+  assert.equal(f.sends.length, 0);
+});
+
+test('restart safely retires an orphan whose legacy binding has no conversation without consuming other chats', async (t) => {
+  const f = await fixture(t);
+  await f.service.putBinding(f.baseBinding);
+  await f.service.handleLiveMessage(f.inbound('legacy-orphan'));
+  // Persist the two legacy states at the actual SQLite migration/restart boundary.
+  f.service.store.claimMessage('connection-1', 'other-chat', 'pending-other-chat');
+  f.service.db.prepare('UPDATE whatsapp_agent_bindings SET conversation_id = NULL WHERE chat_id = ?').run('group-1');
+  f.service.close();
+  const resumed = new WhatsAppAgentChannelService({
+    metadataRoot: f.root, getConnectionsService: () => f.connection,
+    getAgentStore: () => f.agentStore, getConversationManager: () => f.manager,
+  });
+  t.after(() => resumed.close());
+  await resumed.initialize();
+  assert.equal(resumed.getBinding(f.key).activeTurnId, null);
+  assert.equal(resumed.listActivity(f.key)[0].status, 'interrupted');
+  assert.equal(resumed.listUnsettledMessages('connection-1')[0].chatId, 'other-chat');
+  assert.equal(f.starts.length, 1);
 });

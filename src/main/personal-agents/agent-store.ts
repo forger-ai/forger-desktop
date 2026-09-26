@@ -627,7 +627,7 @@ export class AgentStore {
     const now = new Date().toISOString();
     this.requireDb().prepare('UPDATE personal_agent_conversations SET provider = ?, provider_thread_id = ?, updated_at = ? WHERE id = ?').run(
       input.provider,
-      input.providerThreadId ?? conversation.providerThreadId ?? null,
+      input.providerThreadId === undefined ? conversation.providerThreadId ?? null : input.providerThreadId,
       now,
       input.conversationId,
     );
@@ -806,7 +806,7 @@ export class AgentStore {
     return deleted;
   }
 
-  public async createRun(input: { agentId: string; conversationId: string }): Promise<PersonalAgentRun> {
+  public async createRun(input: { agentId: string; conversationId: string; runId?: string }): Promise<PersonalAgentRun> {
     await this.load();
     const conversation = await this.requireConversation(input.conversationId);
     if (conversation.agentId !== input.agentId) {
@@ -818,7 +818,7 @@ export class AgentStore {
     }
     const now = new Date().toISOString();
     const run: PersonalAgentRun = {
-      id: randomUUID(),
+      id: input.runId ?? randomUUID(),
       agentId: input.agentId,
       conversationId: input.conversationId,
       status: 'queued',

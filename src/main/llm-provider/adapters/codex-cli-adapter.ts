@@ -1,4 +1,5 @@
 import path from 'node:path';
+import { codexChannelToolArgs } from '../channel-tool-policy';
 import type { ChildProcessWithoutNullStreams } from 'node:child_process';
 import type { AgentPermissionMode, ChatErrorCode, CodexReasoningEffort } from '../../../shared/types';
 import {
@@ -44,6 +45,7 @@ export type { LlmTokenUsage };
 type CodexCommandResult = LlmCommandResult & { code: number };
 
 interface CodexBaseRunInput {
+  localToolPolicy?: 'mcp-only';
   cliPath: string;
   pathEntries: string[];
   environment: Record<string, string>;
@@ -207,9 +209,9 @@ export class CodexCliAdapter {
       input.model,
       '--config',
       codexReasoningConfigArg(input.reasoningEffort),
-      ...codexWorkspaceNetworkConfigArgs(input.networkAccess === true),
-      ...codexUnsafeArgs(input.permissionMode),
-      ...codexWorkspaceArgs(input.permissionMode),
+      ...(input.localToolPolicy ? [] : codexWorkspaceNetworkConfigArgs(input.networkAccess === true)),
+      ...(input.localToolPolicy ? codexChannelToolArgs(input.workingDir) : codexUnsafeArgs(input.permissionMode)),
+      ...(input.localToolPolicy ? [] : codexWorkspaceArgs(input.permissionMode)),
       '--skip-git-repo-check',
       ...buildCodexMcpArgs(mcpServers),
       ...(input.addDirs ?? []).flatMap((dir) => ['--add-dir', dir]),
@@ -233,9 +235,9 @@ export class CodexCliAdapter {
       input.model,
       '--config',
       codexReasoningConfigArg(input.reasoningEffort),
-      ...codexWorkspaceNetworkConfigArgs(input.networkAccess === true),
-      ...codexUnsafeArgs(input.permissionMode),
-      ...(input.threadId ? [] : codexWorkspaceArgs(input.permissionMode)),
+      ...(input.localToolPolicy ? [] : codexWorkspaceNetworkConfigArgs(input.networkAccess === true)),
+      ...(input.localToolPolicy ? codexChannelToolArgs(input.workingDir) : codexUnsafeArgs(input.permissionMode)),
+      ...(input.threadId || input.localToolPolicy ? [] : codexWorkspaceArgs(input.permissionMode)),
       '--skip-git-repo-check',
       ...buildCodexMcpArgs(mcpServers),
     ];
@@ -275,9 +277,9 @@ export class CodexCliAdapter {
       input.model || CODEX_CHATGPT_COMPATIBLE_FALLBACK_MODEL,
       '--config',
       codexReasoningConfigArg(input.reasoningEffort || 'low'),
-      ...codexWorkspaceNetworkConfigArgs(input.networkAccess === true),
-      ...codexUnsafeArgs(input.permissionMode),
-      ...codexWorkspaceArgs(input.permissionMode),
+      ...(input.localToolPolicy ? [] : codexWorkspaceNetworkConfigArgs(input.networkAccess === true)),
+      ...(input.localToolPolicy ? codexChannelToolArgs(input.workingDir) : codexUnsafeArgs(input.permissionMode)),
+      ...(input.localToolPolicy ? [] : codexWorkspaceArgs(input.permissionMode)),
       '--skip-git-repo-check',
       ...buildCodexMcpArgs(mcpServers),
       '-C',
@@ -465,6 +467,9 @@ const buildChatAttempts = (input: CodexChatRunInput, mcpServers: LlmMcpServerCon
   const networkArgs = codexWorkspaceNetworkConfigArgs(input.networkAccess === true);
   const mcpArgs = buildCodexMcpArgs(mcpServers);
   const commonArgs = ['--skip-git-repo-check', '-C', input.workingDir];
+  if (input.localToolPolicy) {
+    return [['exec', '--json', ...modelArgs, ...reasoningArgs, ...mcpArgs, ...codexChannelToolArgs(input.workingDir), ...commonArgs, '--', '-']];
+  }
   return input.threadId
     ? [
         ['exec', 'resume', '--json', ...modelArgs, ...reasoningArgs, ...networkArgs, ...mcpArgs, '--skip-git-repo-check', '--', input.threadId, '-'],

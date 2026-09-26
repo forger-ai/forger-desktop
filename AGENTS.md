@@ -102,6 +102,16 @@ The agent internally classifies each user request before acting. If a message co
 - `OTHERS.md` contains the Forger-managed current configuration for creating and contacting agents plus concise human-specific collaboration criteria. It does not duplicate the common Agent Tools procedure.
 - The full personal-agent bootstrap and memory register are included only on the first run of a conversation. Later turns contain the visible conversation and current message without repeating the bootstrap; Sidekick turns continue to include their required voice contract.
 
+## WhatsApp Agent Channels
+
+- WhatsApp tasks use a separate conversation and isolated runtime workspace. Private agent memories, files and prior provider sessions are excluded unless the owner explicitly shares the supported data with that chat.
+- The channel's selected permissions intersect the agent's current permissions and are checked during tool execution. Sharing an app, connection action or peer shares access through that capability; all members of the chat can see the resulting replies.
+- Independent requests are queued. Corrections are explicit and author-bound. The owner controls ON/OFF, and local pause remains available without connectivity.
+- Execution and delivery have separate durable states. An uncertain send never triggers an automatic resend, and a restart never automatically repeats an interrupted execution.
+- Activity and WhatsApp history expose full replies and local recovery controls. Configuration drafts retain conflicts, and account-wide alias edits show all affected chats.
+- Codex and Claude channel runtimes enforce MCP-only access. Antigravity is unsupported for this channel. Supported files are explicitly imported; text file reads are scoped and paginated.
+- [WhatsApp channel contract](docs/whatsapp-agent-channels.md) defines the current flow, recovery rules, boundaries and verification limits.
+
 ## Installed App Update Playbook
 
 This playbook applies when Forger detects a new published version of an already installed app.

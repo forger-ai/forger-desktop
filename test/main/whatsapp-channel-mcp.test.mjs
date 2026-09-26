@@ -178,7 +178,7 @@ test('restricted chat cannot discover or call another configured connection', as
 });
 
 test('channel grants expose only the specifically allowed WhatsApp action', async () => {
-  const harness = await createHarness();
+  const harness = await createHarness({ getWhatsAppChannelAgent: async () => ({ appIds: [], toolIds: [], peerAgentGrants: [], connectionGrants: [{ type: 'whatsapp', connectionId: 'connection-one', actions: ['whatsapp.read_messages'] }] }) });
   try {
     const session = harness.server.createSession('active-run', 'forger', {
       caller: 'personal-agent', personalAgentId: 'agent-one', personalAgentConversationId: 'conversation-one',
@@ -199,4 +199,76 @@ test('history argument parser rejects non-object values and uses the default pag
   assert.equal(parseWhatsAppChannelHistoryArgs([]), null);
   assert.equal(parseWhatsAppChannelHistoryArgs('other-chat'), null);
   assert.deepEqual(parseWhatsAppChannelHistoryArgs(undefined), { limit: 20 });
+});
+
+test('explicit live grants work without the legacy broad switch and are rechecked after approval', async () => {
+  let authorized = true;
+  let calls = 0;
+  let requireApproval = false;
+  const current = { appIds: [], toolIds: [], peerAgentGrants: [], connectionGrants: [{ type: 'slack', connectionIds: ['slack-one'], multiple: false, actions: ['slack.list_channels'] }] };
+  const harness = await createHarness({
+    getWhatsAppChannelAgent: async () => authorized ? current : null,
+    getToolSettings: () => ({ approvals: { 'slack.list_channels': requireApproval } }),
+    requestPermission: async () => { authorized = false; return true; },
+    callConnectionFromSession: async () => { calls++; return { success: true }; },
+  });
+  try {
+    const session = harness.server.createSession('active-run', 'forger', { caller: 'personal-agent', personalAgentId: 'agent', personalAgentConversationId: 'conv', whatsappChannel: channel });
+    assert.equal(toolResult(await request(session, 'tools/call', { name: 'slack.list_channels', arguments: {} })).success, true);
+    requireApproval = true;
+    const revoked = toolResult(await request(session, 'tools/call', { name: 'slack.list_channels', arguments: {} }));
+    assert.equal(revoked.technicalCode, 'whatsapp_channel_capability_not_granted');
+    assert.equal(calls, 1);
+    assert.equal(names(await request(session, 'tools/list')).includes('slack.list_channels'), false);
+  } finally { harness.stop(); }
+});
+
+test('channel peer tools expose only selected peers and threads originating in this chat', async () => {
+  const own = { id: 'own', sourceConversationId: 'conv', targetAgentId: 'allowed' };
+  const privateThread = { id: 'private', sourceConversationId: 'private-conv', targetAgentId: 'allowed' };
+  const other = { id: 'other', sourceConversationId: 'conv', targetAgentId: 'unselected' };
+  const asked = [];
+  let includeRecent = true;
+  const harness = await createHarness({
+    getWhatsAppChannelAgent: async () => ({ appIds: [], toolIds: [], connectionGrants: [], peerAgentGrants: [{ agentId: 'allowed' }] }),
+    listAgentPeers: async () => ({ success: true, peers: [{ agentId: 'allowed' }, { agentId: 'unselected' }], ...(includeRecent ? { recentThreads: [own, privateThread, other] } : {}) }),
+    readAgentThread: async ({ threadId }) => ({ success: true, thread: [own, privateThread, other].find(thread => thread.id === threadId) }),
+    askAgent: async input => { asked.push(input); return { success: true }; },
+  });
+  try {
+    const session = harness.server.createSession('active-run', 'forger', { caller: 'personal-agent', personalAgentId: 'agent', personalAgentConversationId: 'conv', whatsappChannel: { ...channel, allowAgentCapabilities: true } });
+    const call = async (name, args) => toolResult(await request(session, 'tools/call', { name, arguments: args }));
+    const peers = await call('forger_list_agent_peers', {});
+    assert.deepEqual(peers.peers, [{ agentId: 'allowed' }]);
+    assert.deepEqual(peers.recentThreads, [own]);
+    includeRecent = false;
+    assert.equal((await call('forger_list_agent_peers', {})).recentThreads, undefined);
+    for (const id of ['private', 'other', 'missing']) {
+      assert.equal((await call('forger_read_agent_thread', { threadId: id })).technicalCode, 'whatsapp_channel_thread_not_granted');
+      assert.equal((await call('forger_ask_agent', { targetAgentId: 'allowed', threadId: id, message: 'hello' })).technicalCode, 'whatsapp_channel_thread_not_granted');
+      assert.equal((await call('forger_ask_agent', { threadId: id, message: 'hello' })).technicalCode, 'whatsapp_channel_thread_not_granted');
+    }
+    assert.deepEqual((await call('forger_read_agent_thread', { threadId: 'own' })).thread, own);
+    assert.equal((await call('forger_ask_agent', { targetAgentId: 'allowed', threadId: 'own', message: 'hello' })).success, true);
+    assert.equal(asked.length, 1);
+    assert.equal((await call('forger_ask_agent', { threadId: 'own', message: 'continue our task' })).success, true);
+    assert.equal(asked.length, 2);
+    assert.equal((await call('forger_ask_agent', { targetAgentId: 'unselected', message: 'hello' })).success, false);
+  } finally { harness.stop(); }
+});
+
+test('host channel workspace file tools appear in MCP and reject stale access', async () => {
+  const fs = await import('node:fs/promises');
+  const os = await import('node:os');
+  const path = await import('node:path');
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'mcp-files-'));
+  let granted = true;
+  const harness = await createHarness({ getWhatsAppChannelAgent: async () => granted ? { appIds: [], toolIds: [], connectionGrants: [], peerAgentGrants: [] } : null });
+  try {
+    const session = harness.server.createSession('active-run', 'forger', { caller: 'personal-agent', personalAgentId: 'agent', personalAgentConversationId: 'conv', whatsappChannel: channel, whatsappChannelWorkspaceRoot: root });
+    assert.ok(names(await request(session, 'tools/list')).includes('whatsapp_channel_files_list'));
+    assert.deepEqual(toolResult(await request(session, 'tools/call', { name: 'whatsapp_channel_files_list' })), { success: true, files: [] });
+    granted = false;
+    assert.equal(toolResult(await request(session, 'tools/call', { name: 'whatsapp_channel_files_list', arguments: {} })).success, false);
+  } finally { harness.stop(); await fs.rm(root, { recursive: true, force: true }); }
 });

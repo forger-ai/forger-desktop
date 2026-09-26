@@ -1,3 +1,7 @@
+import { effectiveAgentForWhatsAppChannel } from './whatsapp-channel-policy';
+import { prepareWhatsAppChannelWorkspace, buildWhatsAppChannelPrompt, stageWhatsAppChannelFiles, type WhatsAppChannelSharedFile } from './whatsapp-channel-context';
+import type { SharedFileRef } from '../../shared/types';
+import type { PersonalAgentWhatsAppChannelPolicy } from '../../shared/types/whatsapp-agent-channel';
 import path from 'node:path';
 
 import type { ChildProcessWithoutNullStreams } from 'node:child_process';
@@ -54,8 +58,9 @@ interface AgentConversationManagerOptions {
   getAntigravityAuthenticated?: () => Promise<boolean>;
   createForgerMcpSession?: (runId: string, agent: PersonalAgent, context: PersonalAgentMcpRunContext) => { url: string; token: string } | null;
   releaseForgerMcpSession?: (token: string) => void;
-  listenAppMcps?: (appIds: string[], runId: string) => Promise<LlmAppMcpServerConfig[]>;
+  listenAppMcps?: (appIds: string[], runId: string, context?: PersonalAgentMcpRunContext, agentId?: string) => Promise<LlmAppMcpServerConfig[]>;
   releaseAppMcps?: (runId: string) => void;
+  resolveWhatsAppSharedFiles?: (refs: SharedFileRef[]) => Promise<WhatsAppChannelSharedFile[]>;
   resolveAppTrustedRoots?: (appIds: string[]) => Promise<string[]>;
   runner?: PersonalAgentRunner;
   onConversationEvent?: (event: PersonalAgentConversationEvent) => void;
@@ -66,6 +71,7 @@ const FIRST_MESSAGE_TITLE_WORDS = 8;
 const MAX_PEER_AGENT_DEPTH = 5;
 
 export interface PersonalAgentMcpRunContext {
+  channelWorkspaceRoot?: string;
   conversationId: string;
   peerThreadId?: string;
   callStackAgentIds: string[];
@@ -85,21 +91,8 @@ export interface PersonalAgentWhatsAppChannel {
   bindingId: string;
   revision: number;
   allowAgentCapabilities: boolean;
+  policy?: PersonalAgentWhatsAppChannelPolicy;
 }
-
-const effectiveAgentForChannel = (
-  agent: PersonalAgent,
-  channel: PersonalAgentWhatsAppChannel | undefined,
-): PersonalAgent => !channel || channel.allowAgentCapabilities ? agent : {
-  ...agent,
-  permissionMode: 'safe',
-  networkAccess: false,
-  canSpawnAgents: false,
-  appIds: [],
-  toolIds: [],
-  connectionGrants: [],
-  peerAgentGrants: [],
-};
 
 export interface PersonalAgentSidekickMessageInput {
   conversationId: string;
@@ -139,6 +132,7 @@ export interface PersonalAgentScheduledMessageInput {
 }
 
 type PersonalAgentSendOptions = {
+  runId?: string;
   source: PersonalAgentMessageSource;
   channel?: PersonalAgentWhatsAppChannel;
   routineId?: string | null;
@@ -257,6 +251,7 @@ export class AgentConversationManager {
   }
 
   public async sendWhatsAppMessage(input: {
+    runId?: string;
     conversationId: string;
     content: string;
     channel: PersonalAgentWhatsAppChannel;
@@ -266,8 +261,19 @@ export class AgentConversationManager {
     if (conversation.origin !== 'whatsapp') throw new Error('personal_agent_whatsapp_conversation_required');
     return await this.sendMessageInternal(
       { conversationId: input.conversationId, content: input.content },
-      { source: 'whatsapp', channel: input.channel, bypassReadOnly: true },
+      { source: 'whatsapp', channel: input.channel, bypassReadOnly: true, runId: input.runId },
     );
+  }
+
+  public async reconcileWhatsAppConversation(conversationId: string): Promise<void> {
+    await this.withConversationMutation(conversationId, async () => {
+      const conversation = await this.options.store.requireConversation(conversationId);
+      if (conversation.origin !== 'whatsapp') throw new Error('personal_agent_whatsapp_conversation_required');
+      const run = conversation.activeRun;
+      if (run && !isTerminalRunStatus(run.status) && !this.activeChildren.has(run.id) && !this.runPreparations.has(run.id)) {
+        await this.options.store.updateRunStatus({ runId: run.id, status: 'failed', error: 'whatsapp_agent_run_interrupted' });
+      }
+    });
   }
 
   public async steerMessage(input: PersonalAgentSteerInput): Promise<PersonalAgentConversation> {
@@ -378,12 +384,14 @@ export class AgentConversationManager {
     if (!options.bypassWakeupBlock && conversation.scheduledWakeup?.status === 'scheduled') {
       throw new Error('personal_agent_wakeup_active');
     }
+    if (options.runId && await this.options.store.getRun(options.runId)) return conversation;
     if (conversation.activeRun && !isTerminalRunStatus(conversation.activeRun.status)) {
       throw new Error('personal_agent_run_active');
     }
+
     const agent = await this.options.store.requireAgent(conversation.agentId);
     const runtime = await this.resolveRuntimeForAgent(agent);
-    if (runtime && conversation.provider && conversation.provider !== runtime.provider) {
+    if (!options.channel && runtime && conversation.provider && conversation.provider !== runtime.provider) {
       throw new Error('personal_agent_provider_changed_new_conversation_required');
     }
     const content = input.content.trim();
@@ -397,7 +405,7 @@ export class AgentConversationManager {
         title: deriveConversationTitle(content),
       });
     }
-    const run = await this.options.store.createRun({ agentId: conversation.agentId, conversationId: conversation.id });
+    const run = await this.options.store.createRun({ agentId: conversation.agentId, conversationId: conversation.id, runId: options.runId });
     this.activities.set(run.id, this.createActivityForRun(run, agent, conversation));
     const message = await this.options.store.addMessage({
       agentId: conversation.agentId,
@@ -597,7 +605,7 @@ export class AgentConversationManager {
     });
     if (!started) return;
     const { conversation, run } = started;
-    const agent = effectiveAgentForChannel(started.agent, context.channel);
+    const agent = context.channel ? effectiveAgentForWhatsAppChannel(started.agent, context.channel.policy) : started.agent;
     let runtime: AgentRuntime | undefined;
     let conversationForRun: PersonalAgentConversation;
     let workspaceRoot: string;
@@ -607,23 +615,32 @@ export class AgentConversationManager {
     let prepared = false;
     try {
       runtime = await this.resolveRuntimeForAgent(agent);
-      if (context.channel && !context.channel.allowAgentCapabilities && runtime && runtime.provider !== 'codex') {
-        throw new Error('personal_agent_whatsapp_restricted_mode_requires_codex');
+      if (context.channel && runtime?.provider === 'antigravity') {
+        throw new Error('personal_agent_whatsapp_runtime_unsupported');
       }
-      if (runtime && conversation.provider && conversation.provider !== runtime.provider) {
+      if (!context.channel && runtime && conversation.provider && conversation.provider !== runtime.provider) {
         throw new Error('personal_agent_provider_changed_new_conversation_required');
       }
       conversationForRun = runtime
         ? await this.options.store.updateConversationProvider({
           conversationId: conversation.id,
           provider: runtime.provider,
-          providerThreadId: conversation.providerThreadId ?? null,
+          providerThreadId: context.channel ? null : conversation.providerThreadId ?? null,
         })
         : conversation;
-      workspaceRoot = await this.options.store.workspaceRootForAgent(agent.id);
-      prompt = await this.buildPrompt(agent, conversationForRun, run, context);
-      sharedRoots = await this.resolveAppTrustedRoots(agent.appIds);
-      trustedRoots = [
+      workspaceRoot = context.channel
+        ? await prepareWhatsAppChannelWorkspace(this.options.metadataRoot, context.channel.bindingId, context.channel.revision)
+        : await this.options.store.workspaceRootForAgent(agent.id);
+      if (context.channel?.policy?.sharedFiles?.length) {
+        if (!this.options.resolveWhatsAppSharedFiles) throw new Error('whatsapp_agent_shared_files_unavailable');
+        const shared = await this.options.resolveWhatsAppSharedFiles(context.channel.policy.sharedFiles);
+        await stageWhatsAppChannelFiles(workspaceRoot, shared);
+      }
+      prompt = context.channel
+        ? buildWhatsAppChannelPrompt(agent, conversationForRun, run, await this.options.store.listMemories(agent.id), context.channel.policy)
+        : await this.buildPrompt(agent, conversationForRun, run, context);
+      sharedRoots = context.channel ? [] : await this.resolveAppTrustedRoots(agent.appIds);
+      trustedRoots = context.channel ? [workspaceRoot] : [
         ...trustedRootsForConversationFiles(workspaceRoot, conversationForRun.messages),
         ...sharedRoots,
       ];
@@ -646,7 +663,7 @@ export class AgentConversationManager {
       workspaceRoot,
       sharedRoots,
       trustedRoots,
-      mcpContext: context,
+      mcpContext: context.channel ? { ...context, channelWorkspaceRoot: workspaceRoot } : context,
       onProgress: (message, progressOptions) => {
         const visibleActivity = typeof message === 'string'
           ? sanitizeAgentRunActivityText(message)
@@ -829,7 +846,7 @@ export class AgentConversationManager {
     let mcpServers: LlmAppMcpServerConfig[] = [];
     const logWrites: Array<Promise<void>> = [];
     try {
-      const appMcpServers = await (this.options.listenAppMcps?.(input.agent.appIds, input.run.id) ?? Promise.resolve([]));
+      const appMcpServers = await (this.options.listenAppMcps?.(input.agent.appIds, input.run.id, input.mcpContext, input.agent.id) ?? Promise.resolve([]));
       forgerMcpSession = this.options.createForgerMcpSession?.(input.run.id, input.agent, input.mcpContext) ?? null;
       mcpServers = [
         ...(forgerMcpSession
@@ -861,6 +878,7 @@ export class AgentConversationManager {
       });
       const result = await providerRunService.run({
         surface: 'personal_agent',
+        localToolPolicy: input.mcpContext.channel ? 'mcp-only' : undefined,
         mode: 'conversation',
         runtime,
         runId: input.run.id,

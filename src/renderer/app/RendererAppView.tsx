@@ -990,6 +990,7 @@ export function RendererAppView({ controller }: RendererAppViewProps) {
             providerOptions={visibleProviderOptions}
             installedApps={installedApps}
             onNotifyForger={(input) => void prepareConversationDiagnosticReport(input)}
+            onOpenConnections={backToConnectionsList}
           />
         ) : null}
 

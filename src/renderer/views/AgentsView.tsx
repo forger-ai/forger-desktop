@@ -76,13 +76,14 @@ interface AgentsViewProps {
   intelligenceProviderConfigured: boolean;
   providerOptions?: Array<{ label: string; value: AgentProvider | 'auto' }>;
   installedApps?: AppSummary[];
+  onOpenConnections?: () => void;
   onNotifyForger?: (input: { agent: PersonalAgent; conversation: PersonalAgentConversation; run?: PersonalAgentRun; auto?: boolean }) => void;
 }
 
 type AgentDetailTab = 'chat' | 'workspace' | 'routines' | 'settings';
 type RoutineFrequencyType = AutomationFrequency['type'];
 
-export function AgentsView({ t, intelligenceProviderConfigured, providerOptions = AGENT_PROVIDER_OPTIONS, installedApps = [], onNotifyForger }: AgentsViewProps) {
+export function AgentsView({ t, intelligenceProviderConfigured, providerOptions = AGENT_PROVIDER_OPTIONS, installedApps = [], onNotifyForger, onOpenConnections }: AgentsViewProps) {
   const theme = useTheme();
   const [agents, setAgents] = useState<PersonalAgent[]>([]);
   const [agentGroups, setAgentGroups] = useState<PersonalAgentGroup[]>([]);
@@ -185,7 +186,7 @@ export function AgentsView({ t, intelligenceProviderConfigured, providerOptions 
   const activeRunProgressCount = activeRun?.progress.length ?? 0;
   const activeRunActivityCount = activeRun?.activity?.items.length ?? 0;
   const busy = busyAction !== null;
-  const conversationReadOnly = Boolean(conversation && (conversation.readOnly || conversation.origin === 'agent' || conversation.origin === 'sidekick'));
+  const conversationReadOnly = Boolean(conversation && (conversation.readOnly || conversation.origin === 'agent' || conversation.origin === 'sidekick' || conversation.origin === 'whatsapp'));
   const shouldReserveMacTrafficLightSpace = isMacOsPlatform() && !windowState?.isFullScreen;
   const installedAppsGrantOptionsKey = useMemo(
     () => installedApps
@@ -195,6 +196,7 @@ export function AgentsView({ t, intelligenceProviderConfigured, providerOptions 
     [installedApps],
   );
   const historyGroups = useMemo<AgentConversationHistoryGroup[]>(() => {
+    const whatsappStarted = sortItemsByRecentActivity(conversations.filter((item) => item.origin === 'whatsapp'));
     const routineStarted = sortItemsByRecentActivity(conversations.filter((item) => item.origin === 'routine'));
     const userStarted = sortItemsByRecentActivity(conversations.filter((item) => item.origin === 'user'));
     const agentStarted = sortItemsByRecentActivity(conversations.filter((item) => item.origin === 'agent'));
@@ -206,6 +208,7 @@ export function AgentsView({ t, intelligenceProviderConfigured, providerOptions 
     }));
     const groups: Array<AgentConversationHistoryGroup | null> = [
       ...sidekickGroups,
+      whatsappStarted.length > 0 ? { id: 'whatsapp-started', label: 'WhatsApp', items: whatsappStarted } : null,
       routineStarted.length > 0
         ? { id: 'routine-started', label: t.agents.conversationGroups.routine, items: routineStarted }
         : null,
@@ -1338,7 +1341,11 @@ export function AgentsView({ t, intelligenceProviderConfigured, providerOptions 
                     {t.agents.saveAccess}
                   </Button>
                 </Box>
-                <AgentWhatsAppPanel key={activeAgent.id} agentId={activeAgent.id} agentName={activeAgent.name} t={t} />
+                <AgentWhatsAppPanel key={activeAgent.id} agentId={activeAgent.id} agentName={activeAgent.name} t={t} onOpenConnections={onOpenConnections} onOpenConversation={(id) => {
+                  void window.forger.personalAgentGetConversation({ conversationId: id }).then((loaded) => {
+                    if (loaded) { setConversation(loaded); setConversations((items) => upsertConversation(items, loaded)); setDetailTab('chat'); }
+                  }).catch(() => setError(t.agents.routines.openThreadError));
+                }} />
               </Stack>
             </Paper>
           ) : (

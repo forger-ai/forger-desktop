@@ -1,0 +1,41 @@
+# Personal agents in WhatsApp
+
+Desktop binds one personal agent to an observed chat on a configured WhatsApp account. The owner selects who may submit tasks and which data and actions the chat can use. Replies are visible to everyone in the chat, including members who cannot submit tasks. Desktop and the account connection must remain available for processing and delivery.
+
+## Requests and recovery
+
+A task starts with the configured activation word. Independent tasks enter a durable FIFO queue for that binding; another participant's task does not cancel the current task. ON and OFF are owner commands. Desktop can pause the binding without a network connection. Canceling a request or pausing a chat does not undo completed external actions.
+
+A correction explicitly identifies its request and requires its author or the account owner. `Ana CORREGIR MI ULTIMA <text>` corrects only that sender's latest active or queued task; it never targets another participant's task. `ÚLTIMA` is also accepted. The owner can identify another request explicitly with `Ana CORREGIR <requestId> <text>`. Activity shows the request identifier, full request and response, creation/update times, execution state, delivery state and recovery actions. WhatsApp conversations also appear in the agent's history. The alias belongs to the account/agent pair; editing it shows all affected chats and preserves active work.
+
+Configuration versions are independent of execution generations. Editing configuration invalidates old authority and cancels work with the obsolete scope. A queued request rechecks its author's permission before admission. Drafts remain available after configuration conflicts.
+
+The channel records request/run correlation before the runner starts. Admission has accepted, rejected and unknown outcomes. Startup reconciles AgentStore runs before resuming unstarted requests. Runs that lost their process become interrupted; they are not re-executed automatically. A persisted completed response can be recovered without re-running the agent. Legacy ambiguous admissions become interrupted activity records, retaining deduplication without replaying effects.
+
+Execution and delivery are separate. The account outbox persists full response text and spaces sends by at least 1,500 milliseconds. A confirmed rejection before sending can be retried; temporary offline/rate-limit rejections stay queued. An unconfirmed send is never automatically retried. The local recovery action retries only a known failed delivery, not the agent execution. Activity can dismiss an uncertain delivery after the owner reviews the chat.
+
+## Data and action boundaries
+
+A channel starts with no shared apps, connections, peer agents, memories or files. Its policy intersects the personal agent's current permissions. Removing an agent grant therefore removes channel access too. The old broad capabilities switch does not grant access on its own.
+
+Each request starts a new provider session in a separate channel workspace. The prompt includes the agent's identity/instructions, selected memories and the current request, not personal conversation history or the private workspace bootstrap. Selected files resolve through host-owned imported file IDs; renderer-supplied filesystem paths have no authority. File tools list and read only the channel's shared/output directories, reject traversal and symlinks, and recheck authority after reading. Text reads are paginated; binary files require an explicitly shared app capable of interpreting them.
+
+Codex uses a filesystem allowlist and disables native shell, image, JavaScript, subagent, plugin and memory tools. Claude disables native tools, ambient project documents and automatic memory and uses a strict MCP configuration. Antigravity channel execution is rejected because this integration does not enforce the required isolation for that runtime. Channel sessions never inherit a provider thread, private image attachments or extra filesystem roots.
+
+Forger tools check the current binding and run before each action and again after a permission prompt. Chat history is fixed to the originating account/chat. Peer thread reads are fixed to the originating conversation and selected peers. Private platform memory, unscoped file/audio tools and configuration-changing platform tools are unavailable. App-scoped tools require a selected app. Apps' MCP servers use a per-run proxy credential; shared upstream credentials stay in Desktop. The proxy checks current access before requests and before emitting responses, including streamed chunks.
+
+Sharing an app, a connection action or another agent authorizes the data available through that capability. In particular, explicitly shared WhatsApp connection actions may access other chats of the selected account. The review screen explains this scope. External access depends on those selected capabilities; there is no separate native internet access switch in the channel panel.
+
+## Implementation boundaries
+
+- `personal-agents/whatsapp-channel/`: parser, coordinator, relational request/policy stores and account outbox.
+- `personal-agents/whatsapp-channel-service.ts`: WhatsApp transport and conversation adapters, startup reconciliation and local control surface.
+- `personal-agents/whatsapp-channel-policy.ts` and `whatsapp-channel-context.ts`: permission intersection, prompt and file boundaries.
+- `forger-mcp/whatsapp-channel-*` and `channel-app-proxy.ts`: live authorization and scoped tools.
+- `views/whatsapp-agent-channel/`: MUI policy review, drafts, connection state and activity/recovery controls.
+
+## Verification and limits
+
+Integration tests use real SQLite stores, AgentStore, ConversationManager and channel service with external runner/transport doubles. They cover restart gaps, concurrent completion/correction, queue authorization, deduplication, rate limiting, unconfirmed delivery, policy changes, local pause and migration. HTTP tests exercise live MCP revocation and streaming proxies. A native Codex sandbox test reads a shared fixture and rejects reads/writes to a private sibling without contacting a model. Renderer tests cover configuration, conflicts, activity, reconnect navigation and history.
+
+These checks do not contact a real WhatsApp recipient or publish a release. A controlled real-account test of authorization, reconnect and delivery remains a release prerequisite. The trigger consumes supported message text/captions; this feature does not automatically interpret voice notes or unshared attachments.

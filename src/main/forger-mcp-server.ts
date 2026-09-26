@@ -1,3 +1,6 @@
+import { whatsAppChannelVisibleApps, refreshWhatsAppChannelAccess, whatsAppChannelToolAllowed, whatsAppChannelThreadAllowed, type WhatsAppChannelAgentReader } from './forger-mcp/whatsapp-channel-access';
+import { isWhatsAppChannelToolSupported } from '../shared/whatsapp-channel-tool-support';
+import { callWhatsAppChannelFileTool, WHATSAPP_CHANNEL_FILE_TOOLS } from './forger-mcp/whatsapp-channel-files';
 import { randomBytes } from 'node:crypto';
 import * as http from 'node:http';
 import type { IncomingMessage, ServerResponse } from 'node:http';
@@ -121,6 +124,8 @@ export interface AgentMcpSession {
   personalAgentCanSpawnAgents?: boolean;
   whatsappChannel?: PersonalAgentWhatsAppChannel;
   whatsappChannelAllowedConnectionActionIds?: string[];
+  whatsappChannelPeerAgentIds?: string[];
+  whatsappChannelWorkspaceRoot?: string;
   /** Present only for runs originated by a Sidekick voice turn. */
   sidekick?: { sidekickId: string };
   appIds: string[];
@@ -139,6 +144,7 @@ export interface ForgerMcpSessionAccess {
   personalAgentCallStackIds?: string[];
   personalAgentCanSpawnAgents?: boolean;
   whatsappChannel?: PersonalAgentWhatsAppChannel;
+  whatsappChannelWorkspaceRoot?: string;
   whatsappChannelAllowedConnectionActionIds?: string[];
   sidekick?: { sidekickId: string };
   appIds?: string[];
@@ -152,6 +158,7 @@ interface ForgerMcpServerOptions extends PersonalAgentSpawnToolOptions {
   getToolDefinitions: () => AgentToolDefinition[];
   getConnectionToolDefinitions?: () => Promise<AgentToolDefinition[]>;
   readWhatsAppChannelHistory?: (input: WhatsAppChannelHistoryInput) => Promise<WhatsAppChannelHistoryResult>;
+  getWhatsAppChannelAgent?: WhatsAppChannelAgentReader;
   getToolSettings: () => AgentToolSettings;
   appendInstallLog: (event: string, payload?: Record<string, unknown>) => Promise<void>;
   requestPermission: (
@@ -367,6 +374,7 @@ export class ForgerMcpServer {
       personalAgentCallStackIds: access?.personalAgentCallStackIds,
       personalAgentCanSpawnAgents: access?.personalAgentCanSpawnAgents,
       whatsappChannel: access?.caller === 'personal-agent' ? access.whatsappChannel : undefined,
+      whatsappChannelWorkspaceRoot: access?.caller === 'personal-agent' ? access.whatsappChannelWorkspaceRoot : undefined,
       whatsappChannelAllowedConnectionActionIds: access?.caller === 'personal-agent'
         ? access.whatsappChannelAllowedConnectionActionIds ?? []
         : [],
@@ -508,6 +516,10 @@ export class ForgerMcpServer {
     if (toolName === WHATSAPP_CHANNEL_HISTORY_TOOL) {
       return whatsappChannelToolResponse(id, await readWhatsAppChannelHistory(session, params?.arguments, this.options.readWhatsAppChannelHistory));
     }
+    if (WHATSAPP_CHANNEL_FILE_TOOLS.some(tool => tool.name === toolName)) {
+      return whatsappChannelToolResponse(id, await callWhatsAppChannelFileTool(session, toolName as string, params?.arguments, this.options.getWhatsAppChannelAgent));
+    }
+    if (session.whatsappChannel) await refreshWhatsAppChannelAccess(session, this.options.getWhatsAppChannelAgent);
     if (
       session.whatsappChannel &&
       typeof toolName === 'string' &&
@@ -518,13 +530,6 @@ export class ForgerMcpServer {
         success: false,
         userMessage: 'Esta acción de WhatsApp no está autorizada para el chat del agente.',
         technicalCode: 'whatsapp_channel_action_not_granted',
-      });
-    }
-    if (session.whatsappChannel && !session.whatsappChannel.allowAgentCapabilities) {
-      return whatsappChannelToolResponse(id, {
-        success: false,
-        userMessage: 'Esta acción no está habilitada para este chat de WhatsApp.',
-        technicalCode: 'whatsapp_channel_capability_not_granted',
       });
     }
     const allToolDefinitions = await this.getAllToolDefinitions();
@@ -570,6 +575,9 @@ export class ForgerMcpServer {
   }
 
   private async getMcpTools(session: AgentMcpSession): Promise<ForgerMcpTool[]> {
+    if (!await refreshWhatsAppChannelAccess(session, this.options.getWhatsAppChannelAgent)) {
+      return buildVisibleMcpTools({ session, definitions: [], allowedOfficialActions: new Set(), allowedConnectionActions: new Set(), hasWhatsAppHistory: Boolean(this.options.readWhatsAppChannelHistory) });
+    }
     const allowedOfficialActions = session.caller === 'app-agent'
       ? await this.options.listOfficialToolActionIdsForApp(session.appId)
       : session.caller === 'personal-agent' || session.caller === 'workflow'
@@ -587,6 +595,7 @@ export class ForgerMcpServer {
       allowedConnectionActions,
       hasWhatsAppHistory: Boolean(this.options.readWhatsAppChannelHistory),
     });
+    if (session.whatsappChannel && session.whatsappChannelWorkspaceRoot) tools.push(...WHATSAPP_CHANNEL_FILE_TOOLS);
     await this.options.appendInstallLog('agent_tool:mcp_tools_list_built', {
       appId: session.appId,
       runId: session.runId,
@@ -821,6 +830,15 @@ export class ForgerMcpServer {
     args: Record<string, unknown>,
     allToolDefinitions?: AgentToolDefinition[],
   ): Promise<unknown> {
+    if (!await refreshWhatsAppChannelAccess(session, this.options.getWhatsAppChannelAgent)) {
+      return { success: false, technicalCode: 'whatsapp_channel_capability_not_granted', userMessage: 'El chat ya no tiene permiso para realizar esta acción.' };
+    }
+    if (session.whatsappChannel && !isWhatsAppChannelToolSupported(toolId)) {
+      return { success: false, technicalCode: 'whatsapp_channel_tool_unavailable', userMessage: 'Esta acción requiere Forger y no está disponible desde WhatsApp.' };
+    }
+    if (!whatsAppChannelToolAllowed(session, toolId, args)) {
+      return { success: false, technicalCode: 'whatsapp_channel_capability_not_granted', userMessage: 'El chat no tiene permiso para esta acción o aplicación.' };
+    }
     const copy = getSharedCopy(session.locale).agentTools;
     const tool = (allToolDefinitions ?? await this.getAllToolDefinitions()).find((candidate) => candidate.id === toolId);
     if (!tool) {
@@ -929,6 +947,10 @@ export class ForgerMcpServer {
       );
     }
 
+    if (!await refreshWhatsAppChannelAccess(session, this.options.getWhatsAppChannelAgent) || !whatsAppChannelToolAllowed(session, toolId, args)) {
+      return { success: false, technicalCode: 'whatsapp_channel_capability_not_granted', userMessage: 'Los permisos del chat cambiaron mientras se esperaba la aprobación.' };
+    }
+
     await this.options.appendInstallLog('agent_tool:call', {
       appId: session.appId,
       toolId,
@@ -950,7 +972,7 @@ export class ForgerMcpServer {
     }
 
     if (toolId === 'forger_list_installed_apps') {
-      const result = { success: true, apps: this.options.listInstalledApps() };
+      const result = { success: true, apps: whatsAppChannelVisibleApps(session, this.options.listInstalledApps()) };
       await this.options.appendInstallLog('agent_tool:call_result', { appId: session.appId, runId: session.runId, toolId, result });
       return withToolAuthorization(result, approval);
     }
@@ -1062,6 +1084,10 @@ export class ForgerMcpServer {
         return result;
       }
       const result = await this.options.listAgentPeers({ agentId: session.personalAgentId });
+      if (session.whatsappChannel) {
+        result.peers = result.peers.filter(peer => session.whatsappChannelPeerAgentIds?.includes(peer.agentId));
+        result.recentThreads = result.recentThreads?.filter(thread => whatsAppChannelThreadAllowed(session, thread));
+      }
       await this.options.appendInstallLog('agent_tool:call_result', { appId: session.appId, runId: session.runId, toolId, result });
       return result;
     }
@@ -1079,6 +1105,10 @@ export class ForgerMcpServer {
       const message = cleanString(args.message);
       const targetAgentId = cleanString(args.targetAgentId);
       const threadId = cleanString(args.threadId);
+      if (session.whatsappChannel && threadId) {
+        const existing = await this.options.readAgentThread?.({ agentId: session.personalAgentId, threadId });
+        if (!whatsAppChannelThreadAllowed(session, existing?.thread)) return { success: false, technicalCode: 'whatsapp_channel_thread_not_granted' };
+      }
       if (!message || (!targetAgentId && !threadId)) {
         const result = {
           success: false,
@@ -1122,6 +1152,9 @@ export class ForgerMcpServer {
         return result;
       }
       const result = await this.options.readAgentThread({ agentId: session.personalAgentId, threadId });
+      if (!whatsAppChannelThreadAllowed(session, result.thread)) {
+        return { success: false, technicalCode: 'whatsapp_channel_thread_not_granted' };
+      }
       await this.options.appendInstallLog('agent_tool:call_result', { appId: session.appId, runId: session.runId, toolId, result });
       return result;
     }

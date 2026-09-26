@@ -569,3 +569,34 @@ test('Given filesystem edge cases, auth discovery, serialization, permission fai
     fsPromises.chmod = originalChmod;
   }
 });
+
+test('Given known contacts, group details preserve usable participant names without changing authorization identities', async (t) => {
+  const root = await mkdtemp(join(tmpdir(), 'forger-whatsapp-participant-names-'));
+  t.after(async () => rm(root, { recursive: true, force: true }));
+  const store = new FakeStore(root);
+  const groupId = '120363999999999@g.us';
+  store.chats.set(groupId, { chatId: groupId, chatType: 'group' });
+  store.chats.set('known@s.whatsapp.net', { chatId: 'known@s.whatsapp.net', chatType: 'direct', title: 'Known contact' });
+  store.chats.set('untitled@s.whatsapp.net', { chatId: 'untitled@s.whatsapp.net', chatType: 'direct' });
+  const manager = new WhatsAppConnectionManager(store, async () => ({}));
+  manager.ensureStarted = async () => undefined;
+  manager.socket = { groupMetadata: async () => ({ participants: [
+    { id: 'named@s.whatsapp.net', name: '  Ana  ', notify: 'Other name', admin: 'admin' },
+    { id: 'notified@s.whatsapp.net', name: '', notify: '  Alex  ' },
+    { id: 'known@s.whatsapp.net', name: 3 },
+    { id: 'untitled@s.whatsapp.net' },
+    { id: 'unknown@s.whatsapp.net' },
+    { id: 9 },
+    'invalid',
+  ] }) };
+  const details = await manager.getChatDetails(createContext(root, [], []), { chatId: groupId });
+  assert.deepEqual(details.metadata.participants, [
+    { id: 'named@s.whatsapp.net', admin: 'admin', name: 'Ana' },
+    { id: 'notified@s.whatsapp.net', admin: undefined, name: 'Alex' },
+    { id: 'known@s.whatsapp.net', admin: undefined, name: 'Known contact' },
+    { id: 'untitled@s.whatsapp.net', admin: undefined },
+    { id: 'unknown@s.whatsapp.net', admin: undefined },
+    { id: 9, admin: undefined },
+    'invalid',
+  ]);
+});

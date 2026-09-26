@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { access, chmod, mkdir, mkdtemp, readFile, readdir, realpath, writeFile } from 'node:fs/promises';
+import { access, chmod, mkdir, mkdtemp, readFile, readdir, realpath, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { createRequire } from 'node:module';
@@ -1377,3 +1377,33 @@ const waitForConversation = async (manager, conversationId, predicate) => {
   }
   throw new Error('conversation_wait_timeout');
 };
+
+
+test('conversation provider updates preserve omitted sessions and explicitly clear sessions without inventing one', async (t) => {
+  const root = await mkdtemp(path.join(tmpdir(), 'forger-provider-session-contract-'));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const store = new AgentStore({ metadataRoot: root, forgerHomeRoot: root });
+  const agent = await store.createAgent({ name: 'Session policy agent' });
+  const manager = new AgentConversationManager({ store });
+  const conversation = await manager.createWhatsAppConversation({ agentId: agent.id });
+
+  const initial = await store.updateConversationProvider({ conversationId: conversation.id, provider: 'codex' });
+  assert.equal(initial.providerThreadId ?? null, null);
+
+  await store.updateConversationProvider({
+    conversationId: conversation.id,
+    provider: 'codex',
+    providerThreadId: 'existing-provider-session',
+  });
+  const preserved = await store.updateConversationProvider({ conversationId: conversation.id, provider: 'codex' });
+  assert.equal(preserved.providerThreadId, 'existing-provider-session');
+
+  const cleared = await store.updateConversationProvider({
+    conversationId: conversation.id,
+    provider: 'claude',
+    providerThreadId: null,
+  });
+  assert.equal(cleared.provider, 'claude');
+  assert.equal(cleared.providerThreadId ?? null, null);
+  assert.equal((await store.requireConversation(conversation.id)).providerThreadId ?? null, null);
+});

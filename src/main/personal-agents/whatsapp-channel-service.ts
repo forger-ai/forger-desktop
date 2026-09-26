@@ -1,4 +1,6 @@
+import { effectiveAgentForWhatsAppChannel } from './whatsapp-channel-policy';
 import fs from 'node:fs/promises';
+import { randomUUID } from 'node:crypto';
 import path from 'node:path';
 import type { ConnectionsService } from '../connections-service';
 import { encodeStableMessageRef } from '../connections/modules/whatsapp/normalizer';
@@ -15,7 +17,7 @@ import {
   type WhatsAppAgentBindingKey,
   type WhatsAppAgentContextMessage,
   type WhatsAppAgentRunInput,
-  type WhatsAppAgentSteerInput,
+  type WhatsAppAgentRunAdmission,
   type WhatsAppAgentUnsettledMessage,
 } from './whatsapp-channel';
 
@@ -41,7 +43,6 @@ export class WhatsAppAgentChannelService {
   private store: WhatsAppAgentChannelStore | null = null;
   private coordinator: WhatsAppAgentChannelCoordinator | null = null;
   private unsubscribe: (() => void) | null = null;
-  private readonly earlyRunEvents = new Map<string, PersonalAgentConversationEvent>();
 
   constructor(private readonly options: WhatsAppAgentChannelServiceOptions) {}
 
@@ -53,26 +54,71 @@ export class WhatsAppAgentChannelService {
     db.pragma?.('journal_mode = WAL');
     db.pragma?.('foreign_keys = ON');
     const store = new WhatsAppAgentChannelStore(db);
-    // No CLI child survives an Electron restart. Retire persisted active turns
-    // before admitting new messages; uncertain deliveries stay unknown.
+    const recoveredReplies: Array<{ binding: WhatsAppAgentBinding; turnId: string; revision: number; text: string }> =
+      [];
+    // Reconcile the authoritative conversation before admitting queued requests.
     for (const binding of store.listBindings()) {
+      if (binding.conversationId)
+        await this.options.getConversationManager().reconcileWhatsAppConversation(binding.conversationId);
+      for (const admission of store.listUnsettledMessages(binding.connectionId)) {
+        if (
+          admission.chatId !== binding.chatId ||
+          admission.agentId !== binding.agentId ||
+          admission.state !== 'admitting' ||
+          !admission.turnId
+        )
+          continue;
+        if (!store.listActivity(binding).some((request) => request.requestId === admission.turnId)) {
+          const now = new Date().toISOString();
+          store.queueRequest(
+            {
+              ...binding,
+              requestId: admission.turnId,
+              runId: randomUUID(),
+              requestText: '',
+              authorId: null,
+              isFromMe: false,
+              createdAt: now,
+              updatedAt: now,
+              stableMessageRef: admission.stableMessageRef,
+            },
+            'interrupted',
+            'legacy_admission_unconfirmed',
+          );
+        }
+        store.markMessageHandled(binding.connectionId, binding.chatId, admission.stableMessageRef);
+      }
       if (!binding.activeTurnId) continue;
       const orphan = store.findTurnByTurnId(binding.activeTurnId);
-      if (orphan) store.markTurnStatus(orphan.turnId, 'failed');
-      store.transition(binding, binding.revision, binding.enabled, null);
+      if (orphan) {
+        const run = await this.options.getAgentStore().getRun(orphan.runId);
+        const conversation = binding.conversationId
+          ? await this.options.getConversationManager().getConversation(binding.conversationId)
+          : null;
+        const response = conversation?.messages.find(
+          (message) => message.runId === orphan.runId && message.role === 'assistant' && message.kind === 'message',
+        );
+        if (run?.status === 'completed' && response?.content.trim()) {
+          recoveredReplies.push({ binding, turnId: orphan.turnId, revision: orphan.revision, text: response.content });
+          continue;
+        }
+        store.markTurnStatus(orphan.turnId, 'interrupted');
+        store.updateRequest(orphan.turnId, { status: 'interrupted', reason: 'desktop_restarted' });
+      }
+      store.finishTurn(binding, binding.activeTurnId, binding.revision);
     }
     const coordinator = new WhatsAppAgentChannelCoordinator(store, {
       readContext: async (binding, limit) => await this.readContext(binding, limit),
       startRun: async (input) => await this.startRun(input),
-      steerRun: async (input) => await this.steerRun(input),
       cancelRun: async (input) => {
         const turn = store.findTurnByTurnId(input.turnId);
         if (turn) await this.options.getConversationManager().cancelRun(turn.runId);
       },
       sendReply: async (input) => {
-        const text = input.text.length > 4000
-          ? `${input.text.slice(0, 3900).trimEnd()}\n\n[Respuesta abreviada; versión completa en Forger]`
-          : input.text;
+        const text =
+          input.text.length > 4000
+            ? `${input.text.slice(0, 3900).trimEnd()}\n\n[Respuesta abreviada; versión completa en Forger]`
+            : input.text;
         const result = await this.options.getConnectionsService().call({
           type: 'whatsapp',
           connectionId: input.binding.connectionId,
@@ -80,10 +126,18 @@ export class WhatsAppAgentChannelService {
           input: { chatId: input.binding.chatId, text },
         });
         const data = isRecord(result.data) ? result.data : {};
+        const transientCode = [
+          'whatsapp_send_rate_limited',
+          'whatsapp_send_unavailable',
+          'whatsapp_not_connected',
+          'whatsapp_offline',
+        ].includes(result.technicalCode ?? '');
         return {
           sent: result.success && data.sent === true,
           ...(typeof data.stableMessageRef === 'string' ? { stableMessageRef: data.stableMessageRef } : {}),
-          definiteFailure: !result.success,
+          definiteFailure: !result.success && (data.deliveryState === 'not_sent' || transientCode),
+          retryable: typeof data.retryable === 'boolean' ? data.retryable : transientCode,
+          reason: result.technicalCode,
         };
       },
     });
@@ -99,20 +153,25 @@ export class WhatsAppAgentChannelService {
         });
       });
     });
+    for (const candidate of recoveredReplies)
+      await coordinator.deliverCandidate({ ...candidate.binding, ...candidate });
+    await coordinator.resume();
   }
 
   close(): void {
+    this.coordinator?.close();
     this.unsubscribe?.();
     this.unsubscribe = null;
     (this.db as (SqliteDatabase & { close?: () => void }) | null)?.close?.();
     this.db = null;
     this.store = null;
     this.coordinator = null;
-    this.earlyRunEvents.clear();
   }
 
   listBindings(agentId?: string): WhatsAppAgentBinding[] {
-    return this.requireStore().listBindings().filter((binding) => !agentId || binding.agentId === agentId);
+    return this.requireStore()
+      .listBindings()
+      .filter((binding) => !agentId || binding.agentId === agentId);
   }
 
   getBinding(key: WhatsAppAgentBindingKey): WhatsAppAgentBinding | null {
@@ -125,6 +184,73 @@ export class WhatsAppAgentChannelService {
 
   listUnsettledMessages(connectionId?: string): WhatsAppAgentUnsettledMessage[] {
     return this.requireStore().listUnsettledMessages(connectionId);
+  }
+
+  listActivity(key: WhatsAppAgentBindingKey) {
+    return this.requireStore()
+      .listActivity(key)
+      .map((item) => ({
+        ...item,
+        canRetryDelivery:
+          item.deliveryState === 'failed' && item.reason !== 'channel_reconfigured' && Boolean(item.responseText),
+      }));
+  }
+
+  async getPolicyOptions(agentId: string) {
+    const store = this.options.getAgentStore();
+    return { agent: await store.requireAgent(agentId), memories: await store.listMemories(agentId) };
+  }
+
+  async updateAlias(connectionId: string, agentId: string, alias: string) {
+    this.requireStore().updateAlias(connectionId, agentId, alias);
+    return this.listBindings(agentId).filter((b) => b.connectionId === connectionId);
+  }
+
+  async setEnabled(key: WhatsAppAgentBindingKey, enabled: boolean, expectedConfigurationVersion?: number) {
+    return this.requireCoordinator().setEnabled(key, enabled, expectedConfigurationVersion);
+  }
+
+  async cancelRequest(key: WhatsAppAgentBindingKey, requestId: string) {
+    await this.requireCoordinator().cancelRequest(key, requestId);
+  }
+  async retryDelivery(key: WhatsAppAgentBindingKey, requestId: string) {
+    await this.requireCoordinator().retryDelivery(key, requestId);
+  }
+  async dismissRequest(key: WhatsAppAgentBindingKey, requestId: string) {
+    await this.requireCoordinator().dismissRequest(key, requestId);
+  }
+
+  isChannelCurrent(input: {
+    channel: PersonalAgentWhatsAppChannel;
+    runId: string;
+    agentId: string;
+    conversationId: string;
+  }): boolean {
+    const binding = this.requireStore().getBinding(input.channel.connectionId, input.channel.chatId, input.agentId);
+    const turn = this.requireStore().findTurnByRunId(input.runId);
+    return Boolean(
+      binding &&
+        turn &&
+        binding.enabled &&
+        bindingId(binding) === input.channel.bindingId &&
+        binding.conversationId === input.conversationId &&
+        binding.revision === input.channel.revision &&
+        binding.activeTurnId === turn.turnId &&
+        turn.status === 'active',
+    );
+  }
+
+  async getCurrentPolicyAgent(input: {
+    channel: PersonalAgentWhatsAppChannel;
+    runId: string;
+    agentId: string;
+    conversationId: string;
+  }) {
+    if (!this.isChannelCurrent(input)) return null;
+    const agent = await this.options.getAgentStore().requireAgent(input.agentId);
+    if (!this.isChannelCurrent(input)) return null;
+    const binding = this.requireStore().getBinding(input.channel.connectionId, input.channel.chatId, input.agentId)!;
+    return effectiveAgentForWhatsAppChannel(agent, binding.policy);
   }
 
   async readChannelHistory(input: {
@@ -144,10 +270,22 @@ export class WhatsAppAgentChannelService {
     const { channel } = input;
     const binding = this.requireStore().getBinding(channel.connectionId, channel.chatId, input.agentId);
     const turn = this.requireStore().findTurnByRunId(input.runId);
-    if (!binding || !turn || !binding.enabled || bindingId(binding) !== channel.bindingId
-      || binding.conversationId !== input.conversationId || binding.revision !== channel.revision
-      || binding.activeTurnId !== turn.turnId || turn.status !== 'active') {
-      return { success: false, messages: [], technicalCode: 'whatsapp_agent_channel_stale', userMessage: 'Este turno ya no tiene acceso al chat.' };
+    if (
+      !binding ||
+      !turn ||
+      !binding.enabled ||
+      bindingId(binding) !== channel.bindingId ||
+      binding.conversationId !== input.conversationId ||
+      binding.revision !== channel.revision ||
+      binding.activeTurnId !== turn.turnId ||
+      turn.status !== 'active'
+    ) {
+      return {
+        success: false,
+        messages: [],
+        technicalCode: 'whatsapp_agent_channel_stale',
+        userMessage: 'Este turno ya no tiene acceso al chat.',
+      };
     }
     const limit = Math.max(1, Math.min(50, Math.floor(input.limit || 20)));
     const result = await this.options.getConnectionsService().call({
@@ -161,7 +299,12 @@ export class WhatsAppAgentChannelService {
       },
     });
     if (!result.success || !isRecord(result.data) || !Array.isArray(result.data.messages)) {
-      return { success: false, messages: [], technicalCode: result.technicalCode ?? 'whatsapp_agent_history_unavailable', userMessage: 'No pude leer el historial de este chat.' };
+      return {
+        success: false,
+        messages: [],
+        technicalCode: result.technicalCode ?? 'whatsapp_agent_history_unavailable',
+        userMessage: 'No pude leer el historial de este chat.',
+      };
     }
     const messages = result.data.messages.filter(isRecord).map((message) => ({
       id: boundedText(message.stableMessageRef, 512),
@@ -172,9 +315,19 @@ export class WhatsAppAgentChannelService {
     // A channel may be disabled while the storage read is in progress.
     const current = this.requireStore().getBinding(channel.connectionId, channel.chatId, input.agentId);
     const currentTurn = this.requireStore().findTurnByRunId(input.runId);
-    if (!current || !current.enabled || current.revision !== channel.revision
-      || current.activeTurnId !== turn.turnId || currentTurn?.status !== 'active') {
-      return { success: false, messages: [], technicalCode: 'whatsapp_agent_channel_stale', userMessage: 'Este turno ya no tiene acceso al chat.' };
+    if (
+      !current ||
+      !current.enabled ||
+      current.revision !== channel.revision ||
+      current.activeTurnId !== turn.turnId ||
+      currentTurn?.status !== 'active'
+    ) {
+      return {
+        success: false,
+        messages: [],
+        technicalCode: 'whatsapp_agent_channel_stale',
+        userMessage: 'Este turno ya no tiene acceso al chat.',
+      };
     }
     return {
       success: true,
@@ -197,19 +350,33 @@ export class WhatsAppAgentChannelService {
     });
     if (!observed.success) throw new Error('whatsapp_agent_chat_not_observed');
     const previous = store.getBinding(input.connectionId, input.chatId, input.agentId);
-    const affected = store.listBindings(input.connectionId)
-      .filter((binding) => binding.agentId === input.agentId && binding.activeTurnId
-        && (binding.chatId === input.chatId || binding.alias !== input.alias.trim()));
-    if (previous && input.expectedRevision !== previous.revision) {
+    const affected = store
+      .listBindings(input.connectionId)
+      .filter(
+        (binding) =>
+          binding.agentId === input.agentId &&
+          binding.activeTurnId &&
+          (binding.chatId === input.chatId || binding.alias !== input.alias.trim()),
+      );
+    if (previous && input.expectedConfigurationVersion === undefined && input.expectedRevision !== previous.revision) {
       throw new Error('whatsapp_agent_binding_revision_conflict');
     }
+    const existingAlias = store
+      .listBindings(input.connectionId)
+      .find((binding) => binding.agentId === input.agentId)?.alias;
+    if (existingAlias && existingAlias !== input.alias.trim())
+      throw new Error('whatsapp_agent_alias_requires_explicit_update');
     const conversation = previous?.conversationId
       ? await this.options.getConversationManager().getConversation(previous.conversationId)
       : null;
-    const conversationId = conversation?.id ?? (await this.options.getConversationManager().createWhatsAppConversation({
-      agentId: input.agentId,
-      title: `WhatsApp · ${boundedText(input.chatId, 80)}`,
-    })).id;
+    const conversationId =
+      conversation?.id ??
+      (
+        await this.options.getConversationManager().createWhatsAppConversation({
+          agentId: input.agentId,
+          title: `WhatsApp · ${boundedText(input.chatId, 80)}`,
+        })
+      ).id;
     const saved = store.putBinding({
       ...input,
       conversationId,
@@ -217,8 +384,13 @@ export class WhatsAppAgentChannelService {
     });
     for (const binding of affected) {
       const turn = store.findTurnByTurnId(binding.activeTurnId!);
-      if (turn) await this.options.getConversationManager().cancelRun(turn.runId);
+      if (turn) {
+        store.updateRequest(turn.turnId, { status: 'canceled', reason: 'channel_reconfigured' });
+        store.markTurnStatus(turn.turnId, 'canceled');
+        await this.options.getConversationManager().cancelRun(turn.runId);
+      }
     }
+    await this.requireCoordinator().resumeBinding(saved);
     return saved;
   }
 
@@ -226,6 +398,14 @@ export class WhatsAppAgentChannelService {
     const store = this.requireStore();
     const previous = store.getBinding(key.connectionId, key.chatId, key.agentId);
     if (!previous) return false;
+    for (const request of store.listActivity(key)) {
+      if (request.status === 'queued' || request.status === 'active') {
+        store.updateRequest(request.requestId, { status: 'canceled', reason: 'channel_deleted' });
+        store.markTurnStatus(request.requestId, 'canceled');
+      }
+      if (request.deliveryState === 'pending')
+        store.updateRequest(request.requestId, { deliveryState: 'failed', reason: 'channel_reconfigured' });
+    }
     const removed = store.deleteBinding(key);
     if (removed && previous.activeTurnId) {
       const turn = store.findTurnByTurnId(previous.activeTurnId);
@@ -258,47 +438,41 @@ export class WhatsAppAgentChannelService {
         status: result.status,
       });
     }
-    await this.drainEarlyRunEvents();
   }
 
-  private async startRun(input: WhatsAppAgentRunInput): Promise<{ runId: string }> {
+  private async startRun(input: WhatsAppAgentRunInput): Promise<WhatsAppAgentRunAdmission> {
     const conversationId = input.binding.conversationId;
     if (!conversationId) throw new Error('whatsapp_agent_conversation_missing');
-    const conversation = await this.options.getConversationManager().sendWhatsAppMessage({
-      conversationId,
-      content: this.runPrompt(input),
-      channel: this.runChannel(input.binding, input.revision),
-    });
-    if (!conversation.activeRun) throw new Error('whatsapp_agent_run_missing');
-    return { runId: conversation.activeRun.id };
-  }
-
-  private async steerRun(input: WhatsAppAgentSteerInput): Promise<{ runId: string }> {
-    const conversationId = input.binding.conversationId;
-    if (!conversationId) throw new Error('whatsapp_agent_conversation_missing');
-    const previous = this.requireStore().findTurnByTurnId(input.previousTurnId);
-    if (!previous || previous.status !== 'active' || previous.agentId !== input.binding.agentId
-      || previous.connectionId !== input.binding.connectionId || previous.chatId !== input.binding.chatId) {
-      throw new Error('whatsapp_agent_previous_run_unverified');
+    try {
+      const conversation = await this.options.getConversationManager().sendWhatsAppMessage({
+        conversationId,
+        runId: input.runId,
+        content: this.runPrompt(input),
+        channel: this.runChannel(input.binding, input.revision),
+      });
+      if (!conversation.activeRun) throw new Error('whatsapp_agent_run_missing');
+      return { runId: conversation.activeRun.id };
+    } catch {
+      // A response failure after durable admission must not orphan a live run.
+      try {
+        const run = await this.options.getAgentStore().getRun(input.runId);
+        if (run?.conversationId === conversationId) return { status: 'accepted', runId: run.id };
+        return { status: 'rejected', reason: 'run_start_rejected' };
+      } catch {
+        return { status: 'unknown', runId: input.runId };
+      }
     }
-    const conversation = await this.options.getConversationManager().steerMessage({
-      conversationId,
-      expectedRunId: previous.runId,
-      content: this.runPrompt(input),
-      source: 'whatsapp',
-      channel: this.runChannel(input.binding, input.revision),
-    });
-    if (!conversation.activeRun) throw new Error('whatsapp_agent_run_missing');
-    return { runId: conversation.activeRun.id };
   }
 
-  private runChannel(binding: WhatsAppAgentBinding, revision: number): {
-    kind: 'whatsapp'; connectionId: string; chatId: string; bindingId: string; revision: number;
-    allowAgentCapabilities: boolean;
-  } {
+  private runChannel(binding: WhatsAppAgentBinding, revision: number): PersonalAgentWhatsAppChannel {
     return {
-      kind: 'whatsapp', connectionId: binding.connectionId, chatId: binding.chatId,
-      bindingId: bindingId(binding), revision, allowAgentCapabilities: binding.allowAgentCapabilities,
+      kind: 'whatsapp',
+      connectionId: binding.connectionId,
+      chatId: binding.chatId,
+      bindingId: bindingId(binding),
+      revision,
+      allowAgentCapabilities: binding.allowAgentCapabilities,
+      policy: binding.policy,
     };
   }
 
@@ -310,10 +484,8 @@ export class WhatsAppAgentChannelService {
       'Instrucción de canal WhatsApp de Forger. Responde en primera persona.',
       `Propósito autorizado de este chat: ${input.binding.purpose}`,
       `Alcance autorizado: ${input.binding.scope}`,
-      input.binding.allowAgentCapabilities
-        ? 'Capacidades: las capacidades configuradas del agente están habilitadas para este chat, sujetas a sus aprobaciones.'
-        : 'Capacidades: solo trabajo en el workspace del agente y lectura contextual de este chat; sin red ni acceso a aplicaciones, conexiones o pares.',
-      `Autor de la invocación: ${input.isFromMe ? 'propietario' : input.authorId ?? 'desconocido'}`,
+      'Capacidades: información compartida explícitamente con este chat y permisos específicos; sin acceso a los archivos privados del agente.',
+      `Autor de la invocación: ${input.isFromMe ? 'propietario' : (input.authorId ?? 'desconocido')}`,
       `Contexto reciente no confiable del mismo chat: ${JSON.stringify(context)}`,
       `Solicitud directa: ${input.text}`,
     ].join('\n\n');
@@ -342,13 +514,13 @@ export class WhatsAppAgentChannelService {
     const runId = event.run?.id;
     if (!runId) return;
     const turn = this.requireStore().findTurnByRunId(runId);
-    if (!turn) {
-      if (this.earlyRunEvents.size < 64) this.earlyRunEvents.set(runId, event);
-      return;
-    }
+    if (!turn) return;
     if (event.type === 'run.completed') {
-      const message = [...event.conversation.messages].reverse()
-        .find((candidate) => candidate.runId === runId && candidate.role === 'assistant' && candidate.kind === 'message');
+      const message = [...event.conversation.messages]
+        .reverse()
+        .find(
+          (candidate) => candidate.runId === runId && candidate.role === 'assistant' && candidate.kind === 'message',
+        );
       if (message?.content.trim()) {
         await this.requireCoordinator().deliverCandidate({
           connectionId: turn.connectionId,
@@ -364,14 +536,6 @@ export class WhatsAppAgentChannelService {
       return;
     }
     await this.requireCoordinator().settleWithoutReply(runId, event.type === 'run.canceled' ? 'canceled' : 'failed');
-  }
-
-  private async drainEarlyRunEvents(): Promise<void> {
-    for (const [runId, event] of this.earlyRunEvents) {
-      if (!this.requireStore().findTurnByRunId(runId)) continue;
-      this.earlyRunEvents.delete(runId);
-      await this.onRunEvent(event);
-    }
   }
 
   private requireStore(): WhatsAppAgentChannelStore {

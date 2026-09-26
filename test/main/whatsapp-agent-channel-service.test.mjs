@@ -18,7 +18,7 @@ const waitFor = async (check) => {
   assert.fail('Timed out waiting for WhatsApp agent delivery');
 };
 
-test('live wake runs an existing agent in its workspace and delivers once to the bound chat', async (t) => {
+test('live wake runs an existing agent in an isolated channel workspace and delivers once to the bound chat', async (t) => {
   const root = await mkdtemp(path.join(tmpdir(), 'forger-whatsapp-channel-service-'));
   t.after(async () => rm(root, { recursive: true, force: true }));
   const agentStore = new AgentStore({ metadataRoot: root, forgerHomeRoot: root });
@@ -74,14 +74,14 @@ test('live wake runs an existing agent in its workspace and delivers once to the
   assert.equal(seen.sends.length, 1);
   assert.equal(seen.sends[0].input.chatId, 'group-1');
   assert.equal(seen.sends[0].input.text, 'Ya quedó revisado.');
-  assert.equal(seen.runs[0].workspaceRoot, await agentStore.workspaceRootForAgent(agent.id));
+  assert.notEqual(seen.runs[0].workspaceRoot, await agentStore.workspaceRootForAgent(agent.id));
   assert.equal(seen.runs[0].channel.chatId, 'group-1');
   assert.match(seen.runs[0].prompt, /revisa la publicación/);
-  assert.match(seen.runs[0].prompt, /sin red ni acceso a aplicaciones, conexiones o pares/);
+  assert.match(seen.runs[0].prompt, /sin acceso a los archivos privados del agente/);
   assert.deepEqual(service.listUnsettledMessages(), []);
 });
 
-test('channel carries capability opt-in and an alias edit cancels runs in every affected chat', async (t) => {
+test('channel carries explicit policy and alias updates are explicit across affected chats', async (t) => {
   const root = await mkdtemp(path.join(tmpdir(), 'forger-whatsapp-channel-alias-'));
   t.after(async () => rm(root, { recursive: true, force: true }));
   const agentStore = new AgentStore({ metadataRoot: root, forgerHomeRoot: root });
@@ -98,7 +98,7 @@ test('channel carries capability opt-in and an alias edit cancels runs in every 
     },
     getConversation: async (id) => conversations.get(id) ?? null,
     sendWhatsAppMessage: async (input) => {
-      const id = `run-${runs.length + 1}`;
+      const id = input.runId;
       runs.push({ id, channel: input.channel });
       return { activeRun: { id } };
     },
@@ -138,7 +138,9 @@ test('channel carries capability opt-in and an alias edit cancels runs in every 
     });
   }
   assert.deepEqual(runs.map((run) => run.channel.allowAgentCapabilities), [true, false]);
-  await service.putBinding({ ...base, chatId: 'group-1', alias: 'Nuevo Casa', expectedRevision: service.getBinding(first).revision });
-  assert.deepEqual(canceled.sort(), ['run-1', 'run-2']);
-  assert.equal(service.getBinding({ connectionId: 'connection-1', chatId: 'group-2', agentId: agent.id }).activeTurnId, null);
+  await assert.rejects(service.putBinding({ ...base, chatId: 'group-1', alias: 'Nuevo Casa', expectedRevision: service.getBinding(first).revision }), /alias_requires_explicit_update/);
+  await service.updateAlias(base.connectionId, agent.id, 'Nuevo Casa');
+  assert.deepEqual(canceled, []);
+  assert.equal(service.listBindings(agent.id).every(binding => binding.alias === 'Nuevo Casa'), true);
+  assert.ok(service.getBinding({ connectionId: 'connection-1', chatId: 'group-2', agentId: agent.id }).activeTurnId);
 });

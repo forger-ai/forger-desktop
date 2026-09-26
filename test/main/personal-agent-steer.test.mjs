@@ -107,7 +107,7 @@ test('WhatsApp run entry rejects an ordinary personal-agent conversation', async
   await assert.rejects(manager.steerMessage({ conversationId: conversation.id, content: 'Wrong thread', channel }), /personal_agent_whatsapp_conversation_required/);
 });
 
-test('restricted WhatsApp runs receive an attenuated agent while explicit opt-in keeps configured capabilities', async () => {
+test('WhatsApp capabilities require explicit selections and never inherit unsafe or spawning permissions', async () => {
   const seen = [];
   const { store, manager, conversation } = await setup(async ({ agent }) => {
     seen.push(agent);
@@ -119,7 +119,7 @@ test('restricted WhatsApp runs receive an attenuated agent while explicit opt-in
     networkAccess: true,
     canSpawnAgents: true,
     appIds: ['app-one'],
-    toolIds: ['memory_list'],
+    toolIds: ['forger_list_catalog'],
     connectionGrants: [{ type: 'slack', actions: ['slack.send_message'], multiple: false, connectionIds: ['slack-one'] }],
   });
   await manager.sendWhatsAppMessage({ conversationId: conversation.id, content: 'Restricted task', channel });
@@ -135,14 +135,14 @@ test('restricted WhatsApp runs receive an attenuated agent while explicit opt-in
   const fullConversation = await manager.createWhatsAppConversation({ agentId: conversation.agentId });
   await manager.sendWhatsAppMessage({
     conversationId: fullConversation.id, content: 'Full capability task',
-    channel: { ...channel, bindingId: 'binding-full', allowAgentCapabilities: true },
+    channel: { ...channel, bindingId: 'binding-full', allowAgentCapabilities: true, policy: { appIds: ['app-one', 'not-granted'], toolIds: ['forger_list_catalog'], connectionGrants: [{ type: 'slack', actions: ['slack.send_message'], multiple: false, connectionIds: ['slack-one'] }], peerAgentIds: [], networkAccess: false, sharedMemoryIds: [] } },
   });
   await waitFor(manager, fullConversation.id, (item) => item.activeRun?.status === 'completed');
-  assert.equal(seen[1].permissionMode, 'unsafe');
-  assert.equal(seen[1].networkAccess, true);
-  assert.equal(seen[1].canSpawnAgents, true);
+  assert.equal(seen[1].permissionMode, 'safe');
+  assert.equal(seen[1].networkAccess, false);
+  assert.equal(seen[1].canSpawnAgents, false);
   assert.deepEqual(seen[1].appIds, ['app-one']);
-  assert.deepEqual(seen[1].toolIds, ['memory_list']);
+  assert.deepEqual(seen[1].toolIds, ['forger_list_catalog']);
   assert.equal(seen[1].connectionGrants[0].type, 'slack');
 });
 
@@ -249,17 +249,17 @@ test('steer rejects mismatched channel provenance, blank corrections, and schedu
   assert.equal(await manager.cancelRun('missing-run'), false);
 });
 
-test('a restricted WhatsApp run fails before a non-Codex provider can access its workspace', async () => {
+test('a WhatsApp run fails before a provider without channel isolation can access its workspace', async () => {
   let runnerCalls = 0;
   const { manager, conversation } = await setup(async () => {
     runnerCalls += 1;
     return { assistantText: 'Should not run' };
   }, 'whatsapp', {
-    getAgentRuntime: async () => ({ provider: 'claude', model: 'claude-sonnet', effort: 'medium' }),
+    getAgentRuntime: async () => ({ provider: 'antigravity', model: 'gemini', effort: 'medium' }),
   });
   await manager.sendWhatsAppMessage({ conversationId: conversation.id, content: 'Restricted task', channel });
   const failed = await waitFor(manager, conversation.id, (item) => item.activeRun?.status === 'failed');
-  assert.match(failed.activeRun.error, /personal_agent_whatsapp_restricted_mode_requires_codex/);
+  assert.match(failed.activeRun.error, /personal_agent_whatsapp_runtime_unsupported/);
   assert.equal(runnerCalls, 0);
 });
 

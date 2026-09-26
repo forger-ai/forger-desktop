@@ -39,3 +39,8 @@ export const createWhatsAppChannelHistoryReader = (
   getChannel: (() => WhatsAppAgentChannelService) | undefined,
 ): ((input: Parameters<WhatsAppAgentChannelService['readChannelHistory']>[0]) => ReturnType<WhatsAppAgentChannelService['readChannelHistory']>) | undefined =>
   getChannel ? (input) => getChannel().readChannelHistory(input) : undefined;
+
+export const createWhatsAppChannelAgentReader = (
+  getChannel: (() => WhatsAppAgentChannelService) | undefined,
+): import('../forger-mcp/whatsapp-channel-access').WhatsAppChannelAgentReader | undefined =>
+  getChannel ? (input) => getChannel().getCurrentPolicyAgent(input) : undefined;

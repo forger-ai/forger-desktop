@@ -1,6 +1,12 @@
-export type ParsedAgentWakeMessage = { kind: 'on' | 'off' } | { kind: 'task'; text: string };
+export type ParsedAgentWakeMessage =
+  | { kind: 'on' }
+  | { kind: 'off' }
+  | { kind: 'task'; text: string }
+  | { kind: 'correct'; requestId: string; text: string }
+  | { kind: 'correct-own'; text: string };
 
-export const normalizeAgentAliasKey = (alias: string): string => alias.normalize('NFKC').trim().replace(/\s+/gu, ' ').toLowerCase();
+export const normalizeAgentAliasKey = (alias: string): string =>
+  alias.normalize('NFKC').trim().replace(/\s+/gu, ' ').toLowerCase();
 
 export const parseAgentWakeMessage = (message: string, alias: string): ParsedAgentWakeMessage | null => {
   const normalizedAlias = normalizeAgentAliasKey(alias);
@@ -13,5 +19,9 @@ export const parseAgentWakeMessage = (message: string, alias: string): ParsedAge
   if (!command) return null;
   if (/^ON[.!]?$/iu.test(command)) return { kind: 'on' };
   if (/^OFF[.!]?$/iu.test(command)) return { kind: 'off' };
+  const ownCorrection = /^CORREGIR\s+MI\s+[ÚU]LTIMA\s+([\s\S]+)$/iu.exec(command);
+  if (ownCorrection) return { kind: 'correct-own', text: ownCorrection[1].trim() };
+  const correction = /^CORREGIR\s+(\S+)\s+([\s\S]+)$/iu.exec(command);
+  if (correction) return { kind: 'correct', requestId: correction[1], text: correction[2].trim() };
   return { kind: 'task', text: command };
 };

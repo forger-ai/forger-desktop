@@ -52,7 +52,7 @@ test('BDD: error reporting normalizes null rejection and task messages without r
   assert.equal(sent[2].operation, undefined);
 });
 
-test('BDD: memory maintenance records empty command failures, primitive failures, and invokes scheduled work', async () => {
+test('BDD: memory maintenance records failures and always schedules the next local 03:00', async (t) => {
   const modulePath = require.resolve('../../dist-electron/main/memory-maintenance-manager.js');
   const runnerPath = require.resolve('../../dist-electron/main/automation/agent-command-runner.js');
   const originalLoad = Module._load;
@@ -86,7 +86,14 @@ test('BDD: memory maintenance records empty command failures, primitive failures
   harness = createHarness(loadManager(async () => ({ code: 0, stdout: '', stderr: '' })));
   let scheduled = false;
   harness.manager.runNow = async (trigger) => { scheduled = trigger === 'scheduled'; };
+  // Exercise both sides of 03:00 independently of the CI host's wall clock.
+  const before = new Date(2026, 8, 20, 2, 0, 0);
+  t.mock.timers.enable({ apis: ['Date'], now: before.getTime() });
   await harness.manager.initialize();
+  assert.equal(harness.manager.timer._idleTimeout, 60 * 60 * 1000);
+  t.mock.timers.setTime(new Date(2026, 8, 20, 4, 0, 0).getTime());
+  await harness.manager.initialize();
+  assert.equal(harness.manager.timer._idleTimeout, 23 * 60 * 60 * 1000);
   harness.manager.timer._onTimeout();
   await new Promise((resolve) => setImmediate(resolve));
   assert.equal(scheduled, true);
