@@ -218,6 +218,19 @@ describe('AgentWhatsAppPanel', () => {
   it('validates a new chat, lets its group members be selected, and saves trimmed settings', async () => {
     const user = userEvent.setup();
     const api = makeApi();
+    const putBinding = api.personalAgentWhatsAppBindingPut.getMockImplementation()!;
+    api.personalAgentWhatsAppBindingPut.mockImplementation(async (input) => {
+      const saved = await putBinding(input);
+      // A status refresh must observe the binding persisted by the successful write.
+      api.personalAgentWhatsAppBindingsList.mockResolvedValue([saved]);
+      return saved;
+    });
+    let refresh: (() => void) | undefined;
+    vi.spyOn(window, 'setInterval').mockImplementation((callback, delay) => {
+      if (delay === 5_000) refresh = callback as () => void;
+      return 1;
+    });
+    vi.spyOn(window, 'clearInterval').mockImplementation(() => undefined);
     showPanel();
     await chooseChat(user);
     expect(screen.queryByText('Broadcast channel')).not.toBeInTheDocument();
@@ -244,7 +257,10 @@ describe('AgentWhatsAppPanel', () => {
       participantsAllowed: ['member-two'], allowAgentCapabilities: true, enabled: true, policy: { appIds: [], toolIds: [], connectionGrants: [], peerAgentIds: [], networkAccess: false, sharedMemoryIds: [], sharedFiles: [] },
     });
     expect(await screen.findByText('Settings saved.')).toBeVisible();
-    expect(screen.getByText('Active')).toBeVisible();
+    expect(refresh).toBeTypeOf('function');
+    await act(async () => { refresh?.(); });
+    expect(api.personalAgentWhatsAppBindingsList).toHaveBeenCalledTimes(2);
+    expect(await screen.findByText('Active')).toBeVisible();
   });
 
   it('loads existing work and delivery status, edits with the expected revision, then removes the chat', async () => {
