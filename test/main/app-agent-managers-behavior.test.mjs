@@ -2106,14 +2106,18 @@ test('app-agent manager guard helpers keep no-op edge cases safe', async () => {
   }
 });
 
-test('conversation manager steers active runs by canceling current work and queuing the next message', async () => {
+test('conversation manager steers active runs by canceling current work and queuing the next message', { timeout: 15_000 }, async () => {
   const roots = await createTempDesktopRoots('forger-conversation-steer-');
+  let manager;
+  let resolveAuth;
+  const executions = [];
+  const failures = [];
   try {
     await mkdir(path.join(roots.appsRoot, 'finance-os'), { recursive: true });
-    const authGate = new Promise(() => {});
+    const authGate = new Promise((resolve) => { resolveAuth = resolve; });
     const events = [];
     const { AppAgentConversationManager } = distRequire('main/app-agent-conversation-manager.js');
-    const manager = new AppAgentConversationManager({
+    manager = new AppAgentConversationManager({
       privateAppsRoot: roots.appsRoot,
       metadataRoot: roots.metadataRoot,
       codexHome: roots.codexHome,
@@ -2129,6 +2133,20 @@ test('conversation manager steers active runs by canceling current work and queu
       resolveAgents: async () => [],
       onConversationEvent: (event) => events.push(event),
     });
+
+    // Track real background work so fixture disposal cannot race its persistence.
+    const execute = manager.execute.bind(manager);
+    manager.execute = (...args) => {
+      const pending = execute(...args);
+      executions.push(pending.catch(() => undefined));
+      return pending;
+    };
+    const failRun = manager.failRun.bind(manager);
+    manager.failRun = (...args) => {
+      const pending = failRun(...args);
+      failures.push(pending);
+      return pending;
+    };
 
     await assert.rejects(() => manager.steerRun('finance-os', 'missing', 'run-1', {
       message: 'new instruction',
@@ -2157,7 +2175,18 @@ test('conversation manager steers active runs by canceling current work and queu
     assert.equal(events.some((event) => event.type === 'run.steering.accepted'), true);
     assert.equal(events.some((event) => event.type === 'run.canceled' && event.run.runId === activeRunId), true);
   } finally {
-    await roots.cleanup();
+    try {
+      if (manager) {
+        for (const run of manager.runs.values()) {
+          await manager.cancel(run.appId, run.conversationId, run.runId);
+        }
+      }
+      resolveAuth?.(false);
+      await Promise.all(executions);
+      await Promise.all(failures);
+    } finally {
+      await roots.cleanup();
+    }
   }
 });
 
