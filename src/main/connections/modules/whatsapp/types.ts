@@ -125,3 +125,10 @@ export interface WhatsAppChatDetailsInput {
 export interface WhatsAppDownloadAttachmentInput {
   attachmentId: string;
 }
+
+export interface WhatsAppCurrentMessageImagesResult {
+  success: boolean;
+  images?: Array<{ data: string; mimeType: 'image/png' | 'image/jpeg' }>;
+  userMessage?: string;
+  technicalCode?: string;
+}

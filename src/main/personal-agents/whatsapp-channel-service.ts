@@ -1,3 +1,4 @@
+import type { WhatsAppChannelAccessInput } from '../forger-mcp/whatsapp-channel-access';
 import { formatWhatsAppAgentReply } from './whatsapp-channel/reply-format';
 import { validateParticipantAccess } from './whatsapp-channel/participant-access';
 import { effectiveAgentForWhatsAppChannel } from './whatsapp-channel-policy';
@@ -6,7 +7,7 @@ import { randomUUID } from 'node:crypto';
 import path from 'node:path';
 import type { ConnectionsService } from '../connections-service';
 import { encodeStableMessageRef } from '../connections/modules/whatsapp/normalizer';
-import type { WhatsAppIndexedMessage } from '../connections/modules/whatsapp/types';
+import type { WhatsAppIndexedMessage, WhatsAppCurrentMessageImagesResult } from '../connections/modules/whatsapp/types';
 import { openPersonalAgentSqliteDatabase, type SqliteDatabase } from './sqlite';
 import type { AgentStore } from './agent-store';
 import type { AgentConversationManager, PersonalAgentWhatsAppChannel } from './agent-conversation-manager';
@@ -254,6 +255,29 @@ export class WhatsAppAgentChannelService {
     return effectiveAgentForWhatsAppChannel(agent, binding.policy);
   }
 
+  async readCurrentImages(input: WhatsAppChannelAccessInput): Promise<WhatsAppCurrentMessageImagesResult> {
+    const allowed = async () => {
+      const agent = await this.getCurrentPolicyAgent(input);
+      return Boolean(agent?.connectionGrants.some(grant => grant.type === 'whatsapp'
+        && grant.actions.includes('whatsapp.download_attachment')
+        && (!grant.connectionIds || grant.connectionIds.includes(input.channel.connectionId))));
+    };
+    const denied = (): WhatsAppCurrentMessageImagesResult => ({ success: false,
+      userMessage: 'Este turno necesita el permiso Descargar adjunto para esta cuenta, tanto en el agente como en este chat.',
+      technicalCode: 'whatsapp_current_images_not_allowed' });
+    try {
+      if (!await allowed()) return denied();
+      const request = this.requireStore().listActivity({ ...input.channel, agentId: input.agentId }).find(item => item.runId === input.runId);
+      if (!request) return denied();
+      const result = await this.options.getConnectionsService().readWhatsAppCurrentImages(
+        input.channel.connectionId, input.channel.chatId, request.stableMessageRef, allowed,
+      );
+      return await allowed() ? result : denied();
+    } catch {
+      return { success: false, userMessage: 'No pude leer la foto de esta petición.', technicalCode: 'whatsapp_current_images_unavailable' };
+    }
+  }
+
   async readChannelHistory(input: {
     channel: PersonalAgentWhatsAppChannel;
     runId: string;
@@ -458,11 +482,16 @@ export class WhatsAppAgentChannelService {
     const conversationId = input.binding.conversationId;
     if (!conversationId) throw new Error('whatsapp_agent_conversation_missing');
     try {
+      // Read metadata from the durable origin, including queued/restored requests.
+      // This never downloads bytes and never derives attachment presence from caption text.
+      const currentMessageHasImage = await this.options.getConnectionsService().hasWhatsAppCurrentImage?.(
+        input.binding.connectionId, input.binding.chatId, input.stableMessageRef,
+      ).catch(() => false) ?? false;
       const conversation = await this.options.getConversationManager().sendWhatsAppMessage({
         conversationId,
         runId: input.runId,
         content: this.runPrompt(input),
-        channel: this.runChannel(input.binding, input.revision),
+        channel: { ...this.runChannel(input.binding, input.revision), currentMessageHasImage },
         isChannelCurrent: () => this.isChannelCurrent({
           channel: this.runChannel(input.binding, input.revision),
           runId: input.runId,

@@ -93,6 +93,8 @@ export interface PersonalAgentWhatsAppChannel {
   revision: number;
   allowAgentCapabilities: boolean;
   policy?: PersonalAgentWhatsAppChannelPolicy;
+  /** Trusted indexed metadata for this request's durable originating message. */
+  currentMessageHasImage?: boolean;
 }
 
 export interface PersonalAgentSidekickMessageInput {
@@ -662,7 +664,7 @@ export class AgentConversationManager {
         await stageWhatsAppChannelFiles(workspaceRoot, shared);
       }
       prompt = context.channel
-        ? buildWhatsAppChannelPrompt(agent, conversationForRun, run, await this.options.store.listMemories(agent.id), context.channel.policy)
+        ? buildWhatsAppChannelPrompt(agent, conversationForRun, run, await this.options.store.listMemories(agent.id), context.channel.policy, context.channel.currentMessageHasImage)
         : await this.buildPrompt(agent, conversationForRun, run, context);
       sharedRoots = context.channel ? [] : await this.resolveAppTrustedRoots(agent.appIds);
       trustedRoots = context.channel ? [workspaceRoot] : [
@@ -890,7 +892,13 @@ export class AgentConversationManager {
         ...appMcpServers,
       ];
       const onOutput = (stream: 'stdout' | 'stderr' | 'meta', text: string): void => {
-        logWrites.push(appendRunLog(runLogPath, stream, text));
+        // Native MCP output can contain complete images, including fragmented base64.
+        // Channel logs keep only recognized human-readable progress, never raw output.
+        if (input.mcpContext.channel) {
+          if (stream === 'stdout') for (const message of toProviderProgressMessages(runtime.provider, stream, text)) {
+            logWrites.push(appendRunLog(runLogPath, stream, message));
+          }
+        } else logWrites.push(appendRunLog(runLogPath, stream, text));
         this.handleProviderOutput(input, runtime.provider, stream, text);
       };
       const providerRunService = createLlmProviderRunService({
@@ -945,12 +953,15 @@ export class AgentConversationManager {
         },
         onOutput,
         runCommandCapture,
+      }).catch((error: unknown) => {
+        // Provider failures may embed stdout/tool results; never persist them for a chat.
+        throw input.mcpContext.channel ? new Error('whatsapp_agent_provider_failed') : error;
       });
       this.activeChildren.delete(input.run.id);
       if (result.code !== 0) {
-        throw new Error((result.stderr || result.stdout || `${runtime.provider}_personal_agent_exec_failed`).trim());
+        throw new Error(input.mcpContext.channel ? 'whatsapp_agent_provider_failed'
+          : (result.stderr || result.stdout || `${runtime.provider}_personal_agent_exec_failed`).trim());
       }
-      await Promise.all(logWrites);
       return { assistantText: result.assistantText, ...(result.threadId ? { providerThreadId: result.threadId } : {}) };
     } finally {
       this.activeChildren.delete(input.run.id);
@@ -958,6 +969,7 @@ export class AgentConversationManager {
         this.options.releaseForgerMcpSession?.(forgerMcpSession.token);
       }
       this.options.releaseAppMcps?.(input.run.id);
+      await Promise.all(logWrites);
     }
   }
 
@@ -1000,6 +1012,10 @@ export class AgentConversationManager {
     text: string,
   ): void {
     if (this.canceledRunIds.has(input.run.id)) return;
+    if (input.mcpContext?.channel) {
+      if (stream === 'stdout') for (const message of toProviderProgressMessages(provider, stream, text)) input.onProgress(message);
+      return;
+    }
     const priorCount = this.activities.get(input.run.id)?.counts.total ?? 0;
     const activity = appendProviderActivity({
       activity: this.activities.get(input.run.id) ?? this.createActivityForRun(input.run, input.agent, input.conversation),

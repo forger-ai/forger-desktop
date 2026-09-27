@@ -42,6 +42,18 @@ Forger tools check the current binding and run before each action and again afte
 
 Sharing an app, a connection action or another agent authorizes the data available through that capability. In particular, explicitly shared WhatsApp connection actions may access other chats of the selected account. The review screen explains this scope. Those selected capabilities are separate from the public web-search permission. Revoking the chat policy cancels work under the old revision; revoking the agent's global internet permission stops active web-enabled channel runs. Queued work checks current permissions before execution. Revocation cannot undo a search already sent to the provider.
 
+## Photos sent with an invoking caption
+
+A normal photo sent with `@alias` in its caption can be inspected through `whatsapp_channel_current_images`. This internal tool takes no arguments: Desktop resolves the active run's durable originating message, the connected account and the authorized chat. It returns actual MCP image content; downloaded paths alone do not give the agent visual access.
+
+The existing **Download attachment** permission must be selected in both the agent's WhatsApp connection grants and the conversation's grants, including the originating account. The setting is independent of public web search. Current permissions and turn authority are checked before and after asynchronous reads; revocation, pause or stale scope prevents an image result. The tool cannot select a private file, a photo from another message, another chat or another account. Photo contents are untrusted data, never instructions to change access.
+
+The reader validates the stored message and attachment, bounds download and image sizes, and normalizes supported photos to provider-compatible image content. Download input is limited to 10 MiB per photo and 40 million pixels; images are resized to at most 2048 pixels on the longest side, with at most four images and 8 MiB of encoded image bytes per result. Only normal PNG/JPEG photos are supported. The owned download checks the WhatsApp media origin, refuses redirects, verifies media integrity and bounds fetch, body reads and a single media refresh by a 25-second deadline.
+
+Admission reads trusted attachment metadata from the durable originating message, including when a queued request starts. This tells the agent to inspect the photo even for a caption such as “@kupita qué opinas?” without downloading anything during admission. Missing media, unsupported formats and corrupt or excessive files return a clear failure. The agent must not claim to have seen an unavailable image. An old quote or a photo sent separately from the invoking message is not automatically selected by this tool. Voice notes and video interpretation are not included. Channel runtime logs and activity use recognized progress summaries; raw provider output and provider failure payloads can contain image bytes and are not persisted there.
+
+The implementation takes its account/chat scope and explicit attachment handling approach from [whatsapp-agents-bridge](https://github.com/otro-felipe/whatsapp-agents-bridge/tree/73eec9de1b376cc5a54221a6017903ae745f2aba), reviewed at that revision. That bridge returns downloaded file paths; Forger adds a dedicated image result to preserve the isolated channel's native-tool restrictions.
+
 ## Implementation boundaries
 
 - `personal-agents/whatsapp-channel/`: parser, coordinator, relational request/policy stores and account outbox.

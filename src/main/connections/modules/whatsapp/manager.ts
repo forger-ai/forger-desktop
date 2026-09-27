@@ -1,3 +1,5 @@
+import { downloadImageStream, type ImageDownloadInput } from './image-download';
+import { readCurrentMessageImages, type ImageCodec } from './current-images';
 import fs from 'node:fs/promises';
 import { createHash } from 'node:crypto';
 import path from 'node:path';
@@ -58,6 +60,8 @@ type BaileysSocket = {
 };
 
 export interface WhatsAppConnectionManagerOptions {
+  imageCodec?: ImageCodec;
+  imageFetch?: ImageDownloadInput['fetch'];
   /** Called after storing a live notification not sent through this manager; replays retry admission. */
   onLiveMessage?: (message: WhatsAppIndexedMessage, metadata: { newlyStored: boolean }) => void | Promise<void>;
 }
@@ -319,6 +323,41 @@ export class WhatsAppConnectionManager {
       type: 'direct',
       phoneNumber: chat.phoneNumber ?? phoneNumberFromJid(chat.chatId),
     };
+  }
+
+  async hasCurrentImage(chatId: string, stableMessageRef: string): Promise<boolean> {
+    const identityIds = await this.resolveIdentityIds(chatId);
+    const message = await this.store.getMessageInChat(stableMessageRef, [chatId, ...identityIds]);
+    return Boolean(message?.attachments.some(attachment => attachment.kind === 'image'));
+  }
+
+  async readCurrentImages(context: InternalToolContext, chatId: string, stableMessageRef: string, authorize: () => Promise<boolean>) {
+    const identityIds = await this.resolveIdentityIds(chatId);
+    return readCurrentMessageImages(this.store, { chatId, identityIds, stableMessageRef }, {
+      codec: this.options.imageCodec,
+      authorize,
+      download: async attachment => {
+        if (!attachment.rawMessageJson) throw new Error('image_unavailable');
+        await this.ensureStarted(context);
+        const socket = this.socket;
+        const generation = this.sessionGeneration;
+        const current = async () => socket === this.socket && generation === this.sessionGeneration && await authorize();
+        const baileys = await this.loadBaileys();
+        if (!await current()) throw new Error('image_access_revoked');
+        return downloadImageStream({
+          message: JSON.parse(attachment.rawMessageJson), expected: attachment.stableMessageRef,
+          keys: baileys.getMediaKeys as ImageDownloadInput['keys'],
+          fetch: this.options.imageFetch,
+          authorize: current,
+          reupload: async message => {
+            if (!socket?.updateMediaMessage || !await current()) throw new Error('image_access_revoked');
+            const updated = await socket.updateMediaMessage(message);
+            if (!await current()) throw new Error('image_access_revoked');
+            return updated;
+          },
+        });
+      },
+    });
   }
 
   async downloadAttachment(context: InternalToolContext, input: WhatsAppDownloadAttachmentInput): Promise<Record<string, unknown>> {

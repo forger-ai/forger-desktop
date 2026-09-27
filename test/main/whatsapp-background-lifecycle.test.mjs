@@ -90,3 +90,11 @@ test('WhatsApp startup forwards a live message to the channel service', async ()
     originalSetter(null);
   }
 });
+
+test('startup image reader delegates current-run authority and is absent without a channel service', async () => {
+  const { createWhatsAppChannelImageReader } = require('../../dist-electron/main/core/whatsapp-agent-channel-startup.js');
+  const input = { channel: { chatId: 'bound' }, runId: 'run', agentId: 'agent', conversationId: 'conversation' };
+  const reader = createWhatsAppChannelImageReader(() => ({ readCurrentImages: async value => ({ success: true, input: value }) }));
+  assert.deepEqual(await reader(input), { success: true, input });
+  assert.equal(createWhatsAppChannelImageReader(undefined), undefined);
+});

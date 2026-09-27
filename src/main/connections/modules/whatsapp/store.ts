@@ -333,6 +333,12 @@ export class WhatsAppLocalStore {
     return encodeStableMessageRef(ref);
   }
 
+  async getMessageInChat(stableRef: string, chatIds: string[]): Promise<WhatsAppIndexedMessage | null> {
+    await this.load();
+    const row = this.requireDb().prepare('SELECT * FROM messages WHERE stable_ref = ?').get(stableRef) as MessageRow | undefined;
+    return row && chatIds.includes(row.chat_id) ? this.rowToMessage(row) : null;
+  }
+
   async getAttachment(attachmentId: string): Promise<WhatsAppMessageAttachment | null> {
     await this.load();
     const row = this.requireDb().prepare('SELECT * FROM attachments WHERE attachment_id = ?').get(attachmentId) as AttachmentRow | undefined;

@@ -20,7 +20,7 @@ import type {
   OfficialToolDefinition,
 } from '../../shared/types';
 import { gmailToolModule } from './modules/gmail';
-import { getWhatsAppIdentityIds, getWhatsAppPairingStatus, whatsappToolModule } from './modules/whatsapp';
+import { getWhatsAppCurrentImages, hasWhatsAppCurrentImage, getWhatsAppIdentityIds, getWhatsAppPairingStatus, whatsappToolModule } from './modules/whatsapp';
 import { slackToolModule } from './modules/slack';
 import { trelloToolModule } from './modules/trello';
 import { calendarToolModule, docsToolModule, driveToolModule, sheetsToolModule } from './modules/google-workspace';
@@ -254,6 +254,10 @@ const createToolBackedConnectionModule = (
   return {
     definition,
     ...(type === 'whatsapp' ? {
+      hasCurrentImage: (context: ConnectionContext, connectionId: string, chatId: string, stableMessageRef: string) =>
+        hasWhatsAppCurrentImage(createConnectionToolContext(context, type, connectionId), chatId, stableMessageRef),
+      readCurrentImages: (context: ConnectionContext, connectionId: string, chatId: string, stableMessageRef: string, authorize: () => Promise<boolean>) =>
+        getWhatsAppCurrentImages(createConnectionToolContext(context, type, connectionId), chatId, stableMessageRef, authorize),
       resolveIdentityIds: (context: ConnectionContext, connectionId: string, id: string) =>
         getWhatsAppIdentityIds(createConnectionToolContext(context, type, connectionId), id),
       pairingStatus: (context: ConnectionContext, connectionId: string) =>

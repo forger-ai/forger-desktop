@@ -1,6 +1,7 @@
 import { whatsAppChannelVisibleApps, refreshWhatsAppChannelAccess, whatsAppChannelToolAllowed, whatsAppChannelThreadAllowed, type WhatsAppChannelAgentReader } from './forger-mcp/whatsapp-channel-access';
 import { isWhatsAppChannelToolSupported } from '../shared/whatsapp-channel-tool-support';
 import { callWhatsAppChannelFileTool, WHATSAPP_CHANNEL_FILE_TOOLS } from './forger-mcp/whatsapp-channel-files';
+import { readWhatsAppChannelImages, whatsAppChannelImagesAllowed, whatsAppChannelImagesResponse, WHATSAPP_CHANNEL_IMAGES_TOOL, WHATSAPP_CHANNEL_IMAGES_MCP_TOOL, type WhatsAppChannelImageReader } from './forger-mcp/whatsapp-channel-images';
 import { randomBytes } from 'node:crypto';
 import * as http from 'node:http';
 import type { IncomingMessage, ServerResponse } from 'node:http';
@@ -27,10 +28,7 @@ import type {
   CallOfficialToolResult,
   ConnectionSessionGrant,
   ConnectionsState,
-  MemoryCreateInput,
-  MemoryEntry,
-  MemoryListInput,
-  MemoryUpdateInput,
+  MemoryCreateInput, MemoryEntry, MemoryListInput, MemoryUpdateInput,
   ChatCreatedAppRequest,
   ChatQuestion,
   ChatQuestionRequest,
@@ -42,11 +40,7 @@ import type {
   TextToSpeechState,
   TextToSpeechSynthesizeInput,
   TextToSpeechSynthesizeResult,
-  Workflow,
-  WorkflowApplyInput,
-  WorkflowReviewReport,
-  WorkflowRunSummary,
-  WorkflowUpsertInput,
+  Workflow, WorkflowApplyInput, WorkflowReviewReport, WorkflowRunSummary, WorkflowUpsertInput,
   AutomationFrequency,
   PersonalAgentPeerGrant,
   PersonalAgentPeerThread,
@@ -158,6 +152,7 @@ interface ForgerMcpServerOptions extends PersonalAgentSpawnToolOptions {
   getToolDefinitions: () => AgentToolDefinition[];
   getConnectionToolDefinitions?: () => Promise<AgentToolDefinition[]>;
   readWhatsAppChannelHistory?: (input: WhatsAppChannelHistoryInput) => Promise<WhatsAppChannelHistoryResult>;
+  readWhatsAppChannelImages?: WhatsAppChannelImageReader;
   getWhatsAppChannelAgent?: WhatsAppChannelAgentReader;
   getToolSettings: () => AgentToolSettings;
   appendInstallLog: (event: string, payload?: Record<string, unknown>) => Promise<void>;
@@ -516,6 +511,9 @@ export class ForgerMcpServer {
     if (toolName === WHATSAPP_CHANNEL_HISTORY_TOOL) {
       return whatsappChannelToolResponse(id, await readWhatsAppChannelHistory(session, params?.arguments, this.options.readWhatsAppChannelHistory));
     }
+    if (toolName === WHATSAPP_CHANNEL_IMAGES_TOOL) {
+      return whatsAppChannelImagesResponse(id, await readWhatsAppChannelImages(session, params?.arguments, this.options.getWhatsAppChannelAgent, this.options.readWhatsAppChannelImages));
+    }
     if (WHATSAPP_CHANNEL_FILE_TOOLS.some(tool => tool.name === toolName)) {
       return whatsappChannelToolResponse(id, await callWhatsAppChannelFileTool(session, toolName as string, params?.arguments, this.options.getWhatsAppChannelAgent));
     }
@@ -596,6 +594,7 @@ export class ForgerMcpServer {
       hasWhatsAppHistory: Boolean(this.options.readWhatsAppChannelHistory),
     });
     if (session.whatsappChannel && session.whatsappChannelWorkspaceRoot) tools.push(...WHATSAPP_CHANNEL_FILE_TOOLS);
+    if (this.options.readWhatsAppChannelImages && whatsAppChannelImagesAllowed(session)) tools.push(WHATSAPP_CHANNEL_IMAGES_MCP_TOOL);
     await this.options.appendInstallLog('agent_tool:mcp_tools_list_built', {
       appId: session.appId,
       runId: session.runId,

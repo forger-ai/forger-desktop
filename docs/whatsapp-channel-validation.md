@@ -75,6 +75,19 @@ Specifications cover the owner's weather/clothing example, punctuation, case and
 
 - Installed arm64 `0.5.19-pr163.5` passes native SQLite, inline/prefix parser and command-boundary checks, reply formatting, web permission gates, WhatsApp import, all 460 production dependency checks and deep ad-hoc signature verification. The installed UI displays the updated invocation instructions. All five chat configuration tables match the pre-update backup and database integrity passes. No real WhatsApp message is sent by this follow-up.
 
+## Caption photo follow-up (2026-09-27)
+
+A photo whose caption invokes the agent supplies real visual input through a no-argument MCP tool. Trusted metadata identifies the current photo even when its caption only says “@kupita qué opinas?”. The tool resolves the durable request and exact stored message, checks the current agent/chat/account download grants and active turn, and rechecks authority across asynchronous work. Photos from an old message, quote or another chat cannot be substituted.
+
+Specifications cover authenticated chat aliases, queued captions, absent/corrupt media, oversized streams and dimensions, cache symlinks and races, media integrity, bounded renewal, revoked access and stale runs. Real Undici fetch tests exposed and fixed callback-receiver loss and an early-response termination race. The final implementation bounds both the fetch and each body read and owns cleanup. The runtime omits raw provider output from WhatsApp diagnostics and activity, including fragmented image blocks and failure payloads; ordinary personal-agent diagnostics retain their existing behavior.
+
+- A live Codex run with the connected account and a synthetic green-triangle image returns **GREEN TRIANGLE**, using exactly one MCP image call with native tools and public web search disabled. A second check uses the production prompt and generic caption, with the same result. No real WhatsApp photo or message is used.
+- Real Electron conversion checks verify PNG and JPEG decoding, 2048-pixel resizing, JPEG output fallback and rejection of invalid input.
+- Claude image tool boundaries and output privacy are covered by automated tests; no live Claude vision run is claimed.
+- Complete Electron suite: **2,370 tests pass**, zero skipped, with **100% statements, branches, functions and lines**. The final run uses two test-file workers; earlier concurrent runs hit unrelated existing timeout/temporary-file races. Coverage thresholds and exclusions are unchanged.
+- TypeScript, repository ESLint, production renderer/Electron builds and diff checks pass. No renderer behavior changes are included in this follow-up.
+- Installed arm64 **`0.5.19-pr163.6`** passes native SQLite, existing channel behavior, scoped MCP image packaging, WhatsApp import, all **461** production dependency checks and deep ad-hoc signature verification. Real Electron loads the packaged codec and passes PNG/JPEG conversion and resizing checks. The installed application reopens with Kupita and the existing WhatsApp grants available. All five chat configuration tables match the pre-update backup; database integrity passes. The previous app and consistent database backups are retained. The final installed ASAR SHA-256 is `f1168693f5c08f7793aee67d03dd2e13acebd46079d17d0f090e9d31121e9275`.
+
 ## Release boundary
 
 Automated tests use synthetic transport/provider doubles and do not contact real recipients. Controlled self-chat tests confirm delivery, `@` invocation, reply formatting and connection recovery after the local update. Live group authorization and pause/resume still need their own controlled account checks. The local package is ad-hoc signed, not notarized or published; this change does not merge the PR or deploy to production. Codex and Claude support the isolated channel contract; Antigravity is rejected for this channel.

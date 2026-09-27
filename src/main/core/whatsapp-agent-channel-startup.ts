@@ -44,3 +44,8 @@ export const createWhatsAppChannelAgentReader = (
   getChannel: (() => WhatsAppAgentChannelService) | undefined,
 ): import('../forger-mcp/whatsapp-channel-access').WhatsAppChannelAgentReader | undefined =>
   getChannel ? (input) => getChannel().getCurrentPolicyAgent(input) : undefined;
+
+export const createWhatsAppChannelImageReader = (
+  getChannel: (() => WhatsAppAgentChannelService) | undefined,
+): import('../forger-mcp/whatsapp-channel-images').WhatsAppChannelImageReader | undefined =>
+  getChannel ? (input) => getChannel().readCurrentImages(input) : undefined;

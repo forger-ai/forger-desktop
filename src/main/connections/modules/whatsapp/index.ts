@@ -180,6 +180,13 @@ const getManager = (context: InternalToolContext): WhatsAppConnectionManager => 
   return manager;
 };
 
+/** Internal visual input; never exposed as an arbitrary attachment action. */
+export const hasWhatsAppCurrentImage = (context: InternalToolContext, chatId: string, stableMessageRef: string) =>
+  getManager(context).hasCurrentImage(chatId, stableMessageRef);
+
+export const getWhatsAppCurrentImages = (context: InternalToolContext, chatId: string, stableMessageRef: string, authorize: () => Promise<boolean>) =>
+  getManager(context).readCurrentImages(context, chatId, stableMessageRef, authorize);
+
 /** Internal channel authorization lookup; not an agent connection action. */
 export const getWhatsAppIdentityIds = async (context: InternalToolContext, id: string): Promise<string[]> =>
   getManager(context).resolveIdentityIds(id);
