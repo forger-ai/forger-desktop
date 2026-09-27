@@ -64,8 +64,8 @@ async function verifiedFiles(directory, installers) {
 
 export async function stageReleaseAssets({ tag, repository, directory, installers, gh = runGh }) {
   const release = await releaseMetadata({ tag, repository, gh });
-  if (!release.draft && !release.prerelease) {
-    throw new Error('Prepare the release as a draft or prerelease with --latest=false before staging installers.');
+  if (!release.draft) {
+    throw new Error('Prepare the release as a draft with --latest=false before staging installers.');
   }
   const files = await verifiedFiles(directory, installers);
   // A retry may keep an identical completed upload; never delete or replace existing assets.

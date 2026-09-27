@@ -19,7 +19,7 @@ async function fixture(t) {
   }
   return directory;
 }
-const metadata = () => ({ body: notes, draft: false, prerelease: true, assets: [] });
+const metadata = () => ({ body: notes, draft: true, prerelease: false, assets: [] });
 
 test('staging uploads only verified platform installers and keeps the release unrecommended', async (t) => {
   const directory = await fixture(t); const calls = [];
@@ -30,7 +30,7 @@ test('staging uploads only verified platform installers and keeps the release un
 
 test('staging fails before upload for stable releases, missing changelog, or corrupted installer', async (t) => {
   const directory = await fixture(t);
-  for (const release of [{ ...metadata(), prerelease: false }, { ...metadata(), body: '' }, { ...metadata(), body: 'Forger Desktop v0.5.20' }]) {
+  for (const release of [{ ...metadata(), draft: false, prerelease: true }, { ...metadata(), draft: false, prerelease: false }, { ...metadata(), body: '' }, { ...metadata(), body: 'Forger Desktop v0.5.20' }]) {
     const calls = [];
     await assert.rejects(stageReleaseAssets({ tag, repository, directory, installers: [INSTALLERS[0]], gh: async (args) => { calls.push(args); return JSON.stringify(release); } }));
     assert.equal(calls.length, 1);

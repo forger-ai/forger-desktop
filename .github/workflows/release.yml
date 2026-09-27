@@ -165,7 +165,7 @@ jobs:
             fi
           done <<< "$ARTIFACTS"
 
-      - name: Stage verified installers on the prerelease
+      - name: Stage verified installers on the draft release
         shell: bash
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
