@@ -207,3 +207,15 @@ test('gateway deadline closes a stalled upstream stream', async (t) => {
     }),
   ]);
 });
+
+test('gateway validates malformed declarations, cumulative inventory and nested scopes', async (t) => {
+  const f = await setup(t, (_req, res) => res.end('{}'));
+  for (const tools of [[null], [[]], [{ type: 'namespace', name: 'a'.repeat(128), tools: [{ type: 'namespace', name: 'b', tools: [] }] }]]) {
+    assert.equal((await request(f.gateway, { body: JSON.stringify({ model: 'fixture:small', tools }) })).status, 400);
+  }
+  const fresh = await setup(t, (_req, res) => res.end('{}'));
+  assert.equal((await request(fresh.gateway, { body: JSON.stringify({ model: 'fixture:small', input: [null, { type: 'message' }], tools: Array.from({ length: 128 }, (_, i) => ({ type: 'function', name: `f${i}` })) }) })).status, 200);
+  assert.equal((await request(fresh.gateway, { body: JSON.stringify({ model: 'fixture:small', tools: [{ type: 'function', name: 'new' }] }) })).status, 400);
+  assert.equal((await request(fresh.gateway, { headers: { authorization: `Bearer ${'z'.repeat(64)}` } })).status, 401);
+  assert.equal((await request(fresh.gateway, { headers: { authorization: undefined } })).status, 401);
+});

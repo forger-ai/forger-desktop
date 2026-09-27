@@ -30,7 +30,7 @@ test('local runner replaces environment and forwards stdin and streamed output',
   assert.ok(result.stdout.startsWith('synthetic prompt'));
   const names = JSON.parse(result.stdout.slice('synthetic prompt'.length));
   assert.ok(names.includes('FORGER_TEST_ONLY'));
-  assert.deepEqual(names.filter((name) => name !== 'FORGER_TEST_ONLY' && name !== '__CF_USER_TEXT_ENCODING'), []);
+  assert.deepEqual(names.filter((name) => name !== 'FORGER_TEST_ONLY' && name !== '__CF_USER_TEXT_ENCODING' && name !== 'NODE_V8_COVERAGE'), []);
   assert.equal(chunks.join(''), result.stdout);
 });
 

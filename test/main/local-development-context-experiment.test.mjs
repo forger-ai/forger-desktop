@@ -17,6 +17,7 @@ test('v2 experiment explicitly selects its staged arm while retaining the fixed 
   const calls = [];
   try {
     const reports = await runContextExperiment({ config, stagedStrategy: 'staged-request-v2', limaCli: '/synthetic/limactl', vm: 'forger-local-eval', networkPolicy: 'codex-workspace', directOutput: path.join(temporary, 'direct.json'), stagedOutput: path.join(temporary, 'v2.json') }, {
+      platform: 'darwin',
       loadTask: async () => ({ catalogVersion: 'synthetic', task }), makeRecord: async () => structuredClone(record),
       runTask: async (input) => { calls.push([input.trial, input.config.contextStrategy]); return { taskId: 'bug-01', trial: input.trial, attempted: true, status: 'failed', elapsedMs: 1 }; },
       stopVm: async () => ({ code: 0 }), progress: () => undefined,
@@ -34,6 +35,7 @@ test('the experiment alternates all six real trial identities and persists each 
   const calls = []; let fingerprints = 0; let stops = 0;
   try {
     const reports = await runContextExperiment({ config, limaCli: '/synthetic/limactl', vm: 'forger-local-eval', networkPolicy: 'codex-workspace', directOutput, stagedOutput }, {
+      platform: 'darwin',
       loadTask: async () => ({ catalogVersion: 'synthetic', task }),
       makeRecord: async () => { fingerprints += 1; return structuredClone(record); },
       runTask: async (input) => {
@@ -63,6 +65,7 @@ test('unexpected scheduler failure preserves attempts, reports missing trials an
   let calls = 0; let stopped;
   try {
     const reports = await runContextExperiment({ config, limaCli: '/synthetic/limactl', vm: 'forger-local-eval', networkPolicy: 'codex-workspace', directOutput: path.join(temporary, 'direct.json'), stagedOutput: path.join(temporary, 'staged.json') }, {
+      platform: 'darwin',
       loadTask: async () => ({ catalogVersion: 'synthetic', task }), makeRecord: async () => structuredClone(record),
       runTask: async () => { calls += 1; if (calls === 2) throw new Error('synthetic_scheduler_failure'); return { taskId: task.id, trial: 1, attempted: true, status: 'failed', elapsedMs: 17 }; },
       stopVm: async (input) => { stopped = input.vm; return { code: 0 }; }, progress: () => undefined,
@@ -82,7 +85,7 @@ test('existing reports and identical output paths are rejected before any VM or 
     const directOutput = path.join(temporary, 'direct.json'); const stagedOutput = path.join(temporary, 'staged.json');
     await fs.writeFile(stagedOutput, 'existing evidence');
     const input = { config, limaCli: '/synthetic/limactl', vm: 'forger-local-eval', networkPolicy: 'codex-workspace', directOutput, stagedOutput };
-    const dependencies = { loadTask: async () => ({ catalogVersion: 'synthetic', task }), makeRecord: async () => structuredClone(record), runTask: async () => assert.fail('must not run'), stopVm: async () => assert.fail('must not stop') };
+    const dependencies = { platform: 'darwin', loadTask: async () => ({ catalogVersion: 'synthetic', task }), makeRecord: async () => structuredClone(record), runTask: async () => assert.fail('must not run'), stopVm: async () => assert.fail('must not stop') };
     await assert.rejects(runContextExperiment(input, dependencies), /EEXIST/);
     assert.equal(await fs.readFile(stagedOutput, 'utf8'), 'existing evidence');
     await assert.rejects(runContextExperiment({ ...input, stagedOutput: directOutput }, dependencies), /distinct_outputs_required/);

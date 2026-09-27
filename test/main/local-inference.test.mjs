@@ -362,3 +362,53 @@ test('digest prefix representation preserves exact digest identity', async (t) =
   f.input.localInference.modelDigest = `sha256:${digest}`;
   assert.equal((await f.service.run(f.input)).assistantText, 'Done');
 });
+
+test('local runtime preflight distinguishes missing metadata, malformed replies and unavailable transport', async (t) => {
+  for (const body of ['null', '[]', '{}', JSON.stringify({ models: [null, { model: 'other' }] }), 'x'.repeat(1024 * 1024 + 1)]) {
+    const f = await fixture(t, (_req, res) => { res.end(body); return true; });
+    await assert.rejects(f.service.run(f.input), /local_(runtime_invalid_response|runtime_response_too_large|model_missing)/);
+  }
+  const f = await fixture(t);
+  f.input.localInference.endpoint = 'http://127.0.0.1:1';
+  await assert.rejects(f.service.run(f.input), /local_runtime_unavailable/);
+});
+
+test('local run resolves an explicitly configured CLI without cloud readiness checks', async (t) => {
+  const f = await fixture(t);
+  delete f.input.cliPath;
+  const service = createLlmProviderRunService({ enableExperimentalLocalInference: true, getCodexCliPath: async () => '/fake/codex' });
+  assert.equal((await service.run(f.input)).assistantText, 'Done');
+});
+
+test('local capture bounds stderr and final output, handles rejection primitives and cancellation races', async (t) => {
+  for (const scenario of ['stderr', 'final-limit', 'stream-limit', 'primitive', 'child', 'inactivity', 'aborted']) {
+    const f = await fixture(t);
+    const controller = new AbortController();
+    f.input.signal = controller.signal;
+    f.input.inactivityTimeoutMs = 10;
+    let events = 0;
+    f.input.onEvent = () => { events++; };
+    f.input.onChild = () => {};
+    f.input.runCommandCapture = async (_command, _args, options) => {
+      if (scenario === 'primitive') throw 'failed';
+      if (scenario === 'final-limit') return { code: 0, stdout: 'x'.repeat(4 * 1024 * 1024 + 1), stderr: '' };
+      if (scenario === 'stream-limit') { options.onStdout('x'.repeat(4 * 1024 * 1024 + 1)); options.onStdout('late'); }
+      if (scenario === 'child') { options.onChild({}); controller.abort(); options.onChild({}); }
+      if (scenario === 'inactivity') await new Promise((resolve) => setTimeout(resolve, 30));
+      options.onStderr('synthetic diagnostic');
+      return { code: 0, stdout: completed, stderr: '' };
+    };
+    if (scenario === 'aborted') controller.abort();
+    if (scenario === 'stderr') assert.equal((await f.service.run(f.input)).assistantText, 'Done');
+    else await assert.rejects(f.service.run(f.input), /local_(output_limit|cli_failed|cancelled|inactivity_timeout)/);
+    if (scenario !== 'aborted') assert.ok(events > 0);
+  }
+});
+
+test('local scope rejects shared content and invalid timeout budgets before execution', async (t) => {
+  const f = await fixture(t);
+  const { assertLocalInput } = require('../../dist-electron/main/llm-provider/local/run.js');
+  for (const patch of [{ conversationId: 'other' }, { threadId: 'thread' }, { imagePaths: ['image'] }, { sharedRoots: ['shared'] }, { timeoutMs: 0 }, { timeoutMs: Infinity }, { timeoutMs: 3600001 }, { inactivityTimeoutMs: 0 }, { inactivityTimeoutMs: NaN }, { localInference: null }]) {
+    assert.throws(() => assertLocalInput({ ...f.input, ...patch }), /local_/);
+  }
+});

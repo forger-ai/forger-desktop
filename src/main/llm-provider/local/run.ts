@@ -130,21 +130,23 @@ export async function runLocalInference(originalInput: LlmProviderRunInput, cliP
   originalInput.signal?.addEventListener('abort', forwardAbort, { once: true });
   if (originalInput.signal?.aborted) controller.abort();
   try {
-    return await executeLocalInference({ ...originalInput, signal: controller.signal }, cliPath, (evidence) => {
-      observedEvidence = evidence;
-    });
-  } catch (error) {
-    if (controller.signal.aborted) {
-      const failure = new Error(originalInput.signal?.aborted ? 'local_cancelled' : 'local_timeout');
-      if (observedEvidence) Object.assign(failure, { localInference: observedEvidence });
-      throw failure;
-    }
-    if (observedEvidence) {
-      throw Object.assign(error instanceof Error ? error : new Error('local_cli_failed'), {
-        localInference: observedEvidence,
+    try {
+      return await executeLocalInference({ ...originalInput, signal: controller.signal }, cliPath, (evidence) => {
+        observedEvidence = evidence;
       });
+    } catch (error) {
+      if (controller.signal.aborted) {
+        const failure = new Error(originalInput.signal?.aborted ? 'local_cancelled' : 'local_timeout');
+        if (observedEvidence) Object.assign(failure, { localInference: observedEvidence });
+        throw failure;
+      }
+      if (observedEvidence) {
+        throw Object.assign(error instanceof Error ? error : new Error('local_cli_failed'), {
+          localInference: observedEvidence,
+        });
+      }
+      throw error;
     }
-    throw error;
   } finally {
     clearTimeout(deadline);
     originalInput.signal?.removeEventListener('abort', forwardAbort);
@@ -172,55 +174,57 @@ async function executeLocalInference(
   const home = await fs.mkdtemp(path.join(os.tmpdir(), 'forger-local-'));
   let gateway: LocalInferenceGateway | undefined;
   try {
-    const profile = await prepareLocalAgentProfile(config.agentProfile, home);
-    Object.assign(localInference, profile.evidence);
-    gateway = await createLocalInferenceGateway({
-      endpoint: validateLocalConfig(config), model: config.model, timeoutMs: input.timeoutMs,
-      onToolInventory: (inventory) => { localInference.observedToolContracts = inventory; },
-    });
-    await fs.mkdir(path.join(home, '.codex'), { mode: 0o700 });
-    const settings = [
-      'model_provider="forger_local"',
-      `model_providers.forger_local.name="Forger local experimental"`,
-      `model_providers.forger_local.base_url=${JSON.stringify(gateway.baseUrl)}`,
-      'model_providers.forger_local.env_key="FORGER_LOCAL_GATEWAY_TOKEN"',
-      'model_providers.forger_local.wire_api="responses"',
-      'model_providers.forger_local.requires_openai_auth=false',
-      'model_providers.forger_local.supports_websockets=false',
-      'model_providers.forger_local.request_max_retries=0',
-      'model_providers.forger_local.stream_max_retries=0',
-      `model_context_window=${config.contextWindow}`,
-      'sandbox_workspace_write.network_access=false',
-      'web_search="disabled"',
-      'analytics.enabled=false',
-      'feedback.enabled=false',
-      'otel.exporter="none"',
-      'otel.trace_exporter="none"',
-      'allow_login_shell=false',
-      'shell_environment_policy.inherit="none"',
-      'shell_environment_policy.experimental_use_profile=false',
-      `shell_environment_policy.set.HOME=${JSON.stringify(home)}`,
-      `shell_environment_policy.set.PATH=${JSON.stringify(resolved.pathEntries.join(path.delimiter))}`,
-      `shell_environment_policy.set.TMPDIR=${JSON.stringify(home)}`,
-      'features.shell_snapshot=false',
-      ...profile.settings,
-    ];
-    const args = [...resolved.prefixArgs, '--ask-for-approval', 'never',
-      ...settings.flatMap((setting) => ['--config', setting]),
-      'exec', '--ignore-user-config', '--json', '--ephemeral', '--sandbox', 'workspace-write', '--skip-git-repo-check',
-      '--model', config.model, '-C', input.workingDir, '--', '-'];
-    input.onEvent?.({ type: 'started', provider: 'codex', runId: input.runId });
-    const environment = isolatedEnvironment(home, resolved.pathEntries);
-    environment.FORGER_LOCAL_GATEWAY_TOKEN = gateway.token;
-    const result = await captureBounded(input, resolved.command, args, environment);
-    if (result.code !== 0) throw new Error('local_cli_failed');
-    const parsed = parseCodexJsonl(result.stdout, result.stderr);
-    input.onEvent?.({ type: 'finished', provider: 'codex', runId: input.runId, assistantText: parsed.assistantText });
-    return { ...result, ...parsed, code: 0, conversationId: undefined, threadId: undefined, localInference };
-  } catch (error) {
-    const failure = Object.assign(error instanceof Error ? error : new Error('local_cli_failed'), { localInference });
-    input.onEvent?.({ type: 'failed', provider: 'codex', runId: input.runId, error: failure });
-    throw failure;
+    try {
+      const profile = await prepareLocalAgentProfile(config.agentProfile, home);
+      Object.assign(localInference, profile.evidence);
+      gateway = await createLocalInferenceGateway({
+        endpoint: validateLocalConfig(config), model: config.model, timeoutMs: input.timeoutMs,
+        onToolInventory: (inventory) => { localInference.observedToolContracts = inventory; },
+      });
+      await fs.mkdir(path.join(home, '.codex'), { mode: 0o700 });
+      const settings = [
+        'model_provider="forger_local"',
+        `model_providers.forger_local.name="Forger local experimental"`,
+        `model_providers.forger_local.base_url=${JSON.stringify(gateway.baseUrl)}`,
+        'model_providers.forger_local.env_key="FORGER_LOCAL_GATEWAY_TOKEN"',
+        'model_providers.forger_local.wire_api="responses"',
+        'model_providers.forger_local.requires_openai_auth=false',
+        'model_providers.forger_local.supports_websockets=false',
+        'model_providers.forger_local.request_max_retries=0',
+        'model_providers.forger_local.stream_max_retries=0',
+        `model_context_window=${config.contextWindow}`,
+        'sandbox_workspace_write.network_access=false',
+        'web_search="disabled"',
+        'analytics.enabled=false',
+        'feedback.enabled=false',
+        'otel.exporter="none"',
+        'otel.trace_exporter="none"',
+        'allow_login_shell=false',
+        'shell_environment_policy.inherit="none"',
+        'shell_environment_policy.experimental_use_profile=false',
+        `shell_environment_policy.set.HOME=${JSON.stringify(home)}`,
+        `shell_environment_policy.set.PATH=${JSON.stringify(resolved.pathEntries.join(path.delimiter))}`,
+        `shell_environment_policy.set.TMPDIR=${JSON.stringify(home)}`,
+        'features.shell_snapshot=false',
+        ...profile.settings,
+      ];
+      const args = [...resolved.prefixArgs, '--ask-for-approval', 'never',
+        ...settings.flatMap((setting) => ['--config', setting]),
+        'exec', '--ignore-user-config', '--json', '--ephemeral', '--sandbox', 'workspace-write', '--skip-git-repo-check',
+        '--model', config.model, '-C', input.workingDir, '--', '-'];
+      input.onEvent?.({ type: 'started', provider: 'codex', runId: input.runId });
+      const environment = isolatedEnvironment(home, resolved.pathEntries);
+      environment.FORGER_LOCAL_GATEWAY_TOKEN = gateway.token;
+      const result = await captureBounded(input, resolved.command, args, environment);
+      if (result.code !== 0) throw new Error('local_cli_failed');
+      const parsed = parseCodexJsonl(result.stdout, result.stderr);
+      input.onEvent?.({ type: 'finished', provider: 'codex', runId: input.runId, assistantText: parsed.assistantText });
+      return { ...result, ...parsed, code: 0, conversationId: undefined, threadId: undefined, localInference };
+    } catch (error) {
+      const failure = Object.assign(error instanceof Error ? error : new Error('local_cli_failed'), { localInference });
+      input.onEvent?.({ type: 'failed', provider: 'codex', runId: input.runId, error: failure });
+      throw failure;
+    }
   } finally {
     await gateway?.close();
     await fs.rm(home, { recursive: true, force: true });
