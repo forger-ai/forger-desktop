@@ -52,7 +52,7 @@ test('BDD: error reporting normalizes null rejection and task messages without r
   assert.equal(sent[2].operation, undefined);
 });
 
-test('BDD: memory maintenance records empty command failures, primitive failures, and invokes scheduled work', async () => {
+test('BDD: memory maintenance records failures and runs at the next local 3 AM before, at, and after the boundary', async (t) => {
   const modulePath = require.resolve('../../dist-electron/main/memory-maintenance-manager.js');
   const runnerPath = require.resolve('../../dist-electron/main/automation/agent-command-runner.js');
   const originalLoad = Module._load;
@@ -83,12 +83,22 @@ test('BDD: memory maintenance records empty command failures, primitive failures
   await harness.manager.runNow();
   assert.equal(harness.runs[0].summary, 'memory_maintenance_failed');
 
-  harness = createHarness(loadManager(async () => ({ code: 0, stdout: '', stderr: '' })));
-  let scheduled = false;
-  harness.manager.runNow = async (trigger) => { scheduled = trigger === 'scheduled'; };
-  await harness.manager.initialize();
-  harness.manager.timer._onTimeout();
-  await new Promise((resolve) => setImmediate(resolve));
-  assert.equal(scheduled, true);
-  harness.manager.dispose();
+  const cases = [
+    { now: new Date(2026, 0, 15, 2, 30), delay: 30 * 60_000 },
+    { now: new Date(2026, 0, 15, 3), delay: 24 * 60 * 60_000 },
+    { now: new Date(2026, 0, 15, 3, 30), delay: 23.5 * 60 * 60_000 },
+  ];
+  t.mock.timers.enable({ apis: ['Date', 'setTimeout'], now: cases[0].now.getTime() });
+  for (const { now, delay } of cases) {
+    t.mock.timers.setTime(now.getTime());
+    harness = createHarness(loadManager(async () => ({ code: 0, stdout: '', stderr: '' })));
+    const triggers = [];
+    harness.manager.runNow = async (trigger) => { triggers.push(trigger); };
+    await harness.manager.initialize();
+    t.mock.timers.tick(delay - 1);
+    assert.deepEqual(triggers, [], 'maintenance does not run before the next local 3 AM');
+    t.mock.timers.tick(1);
+    assert.deepEqual(triggers, ['scheduled']);
+    harness.manager.dispose();
+  }
 });

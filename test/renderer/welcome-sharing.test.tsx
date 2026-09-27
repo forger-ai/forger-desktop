@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, renderHook, screen, waitFor } from '@testing-library/react';
 import type { CampaignMeasurementStatus } from '@shared/campaign-measurement';
 import { WelcomeSharingOption } from '@renderer/components/WelcomeSharingOption';
 import { useWelcomeSharing } from '@renderer/tour/useWelcomeSharing';
@@ -26,8 +26,9 @@ const checkbox = () => screen.getByRole('checkbox', { name: 'Share usage data wi
 async function ready() { await waitFor(() => expect(checkbox()).toBeEnabled()); }
 function deferred<T>() {
   let resolve!: (value: T) => void;
-  const promise = new Promise<T>((done) => { resolve = done; });
-  return { promise, resolve };
+  let reject!: (reason: Error) => void;
+  const promise = new Promise<T>((done, fail) => { resolve = done; reject = fail; });
+  return { promise, resolve, reject };
 }
 
 beforeEach(() => {
@@ -35,6 +36,98 @@ beforeEach(() => {
   initialize.mockResolvedValue(initial);
   consent.mockImplementation(async (input) => ({ ...initial, consent: input.enabled ? 'enabled' : 'disabled' }));
   Object.defineProperty(window, 'forger', { configurable: true, value: { getCampaignMeasurementStatus: vi.fn(async () => initial), setCampaignMeasurementConsent: consent } });
+});
+
+describe('welcome sharing asynchronous lifecycle', () => {
+  it('ignores inactive, loading, duplicate save and premature fallback actions', async () => {
+    const load = deferred<CampaignMeasurementStatus>();
+    initialize.mockReturnValueOnce(load.promise);
+    const hook = renderHook(({ active }) => useWelcomeSharing({ active }), { initialProps: { active: false } });
+    await act(async () => { await hook.result.current.complete(advance); hook.result.current.continueWithoutSaving(); });
+    hook.rerender({ active: true });
+    await act(async () => { await hook.result.current.complete(advance); hook.result.current.continueWithoutSaving(); });
+    expect(consent).not.toHaveBeenCalled(); expect(advance).not.toHaveBeenCalled();
+    await act(async () => load.resolve(initial));
+    const save = deferred<CampaignMeasurementStatus>(); consent.mockReturnValueOnce(save.promise);
+    let first!: Promise<void>;
+    act(() => { first = hook.result.current.complete(advance); });
+    await act(async () => { await hook.result.current.complete(skip); });
+    await act(async () => { save.reject(new Error('disk full')); await first; });
+    expect(hook.result.current.saveFailed).toBe(true);
+    act(() => { hook.result.current.continueWithoutSaving(); hook.result.current.continueWithoutSaving(); });
+    expect(consent).toHaveBeenCalledOnce(); expect(advance).toHaveBeenCalledOnce(); expect(skip).not.toHaveBeenCalled();
+  });
+
+  it.each(['resolve', 'reject'] as const)('does not advance when a consent write settles by %s after unmount', async (settle) => {
+    const save = deferred<CampaignMeasurementStatus>(); consent.mockReturnValueOnce(save.promise);
+    const hook = renderHook(() => useWelcomeSharing({ active: true }));
+    await waitFor(() => expect(hook.result.current.actionsDisabled).toBe(false));
+    let pending!: Promise<void>;
+    act(() => { pending = hook.result.current.complete(advance); });
+    hook.unmount();
+    await act(async () => {
+      if (settle === 'resolve') save.resolve({ ...initial, consent: 'enabled' });
+      else save.reject(new Error('disk full'));
+      await pending;
+    });
+    expect(advance).not.toHaveBeenCalled();
+  });
+
+  it('ignores a retained completion callback after an unavailable welcome is unmounted', async () => {
+    initialize.mockResolvedValue({ ...initial, available: false });
+    const hook = renderHook(() => useWelcomeSharing({ active: true }));
+    await waitFor(() => expect(hook.result.current.actionsDisabled).toBe(false));
+    const complete = hook.result.current.complete;
+    hook.unmount();
+    await act(async () => { await complete(advance); });
+    expect(consent).not.toHaveBeenCalled(); expect(advance).not.toHaveBeenCalled();
+  });
+
+  it.each(['resolve', 'reject'] as const)('ignores initialization that settles by %s after leaving welcome', async (settle) => {
+    const load = deferred<CampaignMeasurementStatus>(); initialize.mockReturnValueOnce(load.promise);
+    const hook = renderHook(() => useWelcomeSharing({ active: true }));
+    hook.unmount();
+    await act(async () => {
+      if (settle === 'resolve') load.resolve(initial);
+      else load.reject(new Error('offline'));
+    });
+    expect(consent).not.toHaveBeenCalled(); expect(advance).not.toHaveBeenCalled();
+  });
+
+  it('keeps the latest external choice when older refreshes and initialization finish late', async () => {
+    const load = deferred<CampaignMeasurementStatus>(); initialize.mockReturnValueOnce(load.promise);
+    const first = deferred<CampaignMeasurementStatus>();
+    const staleFailure = deferred<CampaignMeasurementStatus>();
+    const latest = deferred<CampaignMeasurementStatus>();
+    vi.mocked(window.forger.getCampaignMeasurementStatus)
+      .mockReturnValueOnce(first.promise).mockReturnValueOnce(staleFailure.promise).mockReturnValueOnce(latest.promise);
+    const hook = renderHook(() => useWelcomeSharing({ active: true }));
+    act(() => {
+      window.dispatchEvent(new Event('measurement-changed'));
+      window.dispatchEvent(new Event('measurement-changed'));
+      window.dispatchEvent(new Event('measurement-changed'));
+    });
+    await act(async () => { latest.resolve({ ...initial, consent: 'disabled' }); });
+    await act(async () => { first.resolve(initial); staleFailure.reject(new Error('offline')); load.reject(new Error('offline')); });
+    expect(hook.result.current.checked).toBe(false); expect(hook.result.current.loadFailed).toBe(false);
+    await act(async () => { await hook.result.current.complete(advance); });
+    expect(consent).not.toHaveBeenCalled(); expect(advance).toHaveBeenCalledOnce();
+  });
+
+  it('allows continuing when the latest refresh fails, and ignores a refresh rejected after unmount', async () => {
+    const load = deferred<CampaignMeasurementStatus>(); initialize.mockReturnValueOnce(load.promise);
+    const latest = deferred<CampaignMeasurementStatus>();
+    const late = deferred<CampaignMeasurementStatus>();
+    vi.mocked(window.forger.getCampaignMeasurementStatus).mockReturnValueOnce(latest.promise).mockReturnValueOnce(late.promise);
+    const hook = renderHook(() => useWelcomeSharing({ active: true }));
+    act(() => { window.dispatchEvent(new Event('measurement-changed')); });
+    await act(async () => { latest.reject(new Error('offline')); });
+    expect(hook.result.current.loadFailed).toBe(true); expect(hook.result.current.actionsDisabled).toBe(false);
+    act(() => { window.dispatchEvent(new Event('measurement-changed')); });
+    hook.unmount();
+    await act(async () => { late.reject(new Error('offline')); load.resolve(initial); });
+    expect(consent).not.toHaveBeenCalled();
+  });
 });
 
 describe('welcome sharing choice', () => {
