@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { act, fireEvent, render, screen } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
 import type { PersonalAgentWhatsAppChannelPolicy, WhatsAppAgentActivityItem } from '@shared/types';
@@ -171,7 +171,8 @@ describe('WhatsApp chat access and request recovery', () => {
       connectionsCall: vi.fn().mockImplementation(async ({ actionId }) => ({ success: true, data: actionId === 'whatsapp.list_chats' ? { chats: [{ chatId, chatType: 'group', title: 'Team' }] } : details })),
     });
     render(<AgentWhatsAppPanel agentId="agent" agentName="Ana" t={getDictionary('en')} />);
-    await user.click(await screen.findByRole('combobox', { name: 'Chat' }));
+    await waitFor(() => expect(screen.getByRole('combobox', { name: 'Chat' })).not.toBeDisabled());
+    await user.click(screen.getByRole('combobox', { name: 'Chat' }));
     await user.click(await screen.findByRole('option', { name: 'Team' }));
     await user.click(screen.getByRole('combobox', { name: 'Who can assign tasks' }));
     await user.click(screen.getByRole('option', { name: 'Selected people' }));

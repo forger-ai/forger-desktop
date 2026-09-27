@@ -21,6 +21,7 @@ import type {
   WhatsAppConnectionStatus,
   WhatsAppDownloadAttachmentInput,
   WhatsAppIndexedMessage,
+  WhatsAppIndexedChat,
   WhatsAppListChatsInput,
   WhatsAppPairingInput,
   WhatsAppReadMessagesInput,
@@ -207,10 +208,25 @@ export class WhatsAppConnectionManager {
   }
 
   async listChats(input: WhatsAppListChatsInput): Promise<Record<string, unknown>> {
-    const result = await this.store.listChats(input);
-    return { ...result, chats: await Promise.all(result.chats.map(async (chat) => ({
-      ...chat, identityIds: await this.resolveIdentityIds(chat.chatId),
-    }))) };
+    const result = await this.store.listChats({
+      ...input, identityAccountId: normalizeWhatsAppUserJid(this.socket?.user?.id ?? ''),
+    });
+    return { ...result, chats: await Promise.all(result.chats.map((chat) => this.chatDisplayMetadata(chat))) };
+  }
+
+  private async chatDisplayMetadata(chat: WhatsAppIndexedChat): Promise<WhatsAppIndexedChat> {
+    const identityIds = await this.resolveIdentityIds(chat.chatId);
+    if (chat.chatType !== 'direct') return { ...chat, identityIds };
+    const phoneNumber = identityIds.map(phoneNumberFromJid).find(Boolean);
+    let contactName = chat.contactName;
+    if (!contactName) {
+      for (const id of identityIds) {
+        if (id === chat.chatId) continue;
+        contactName = (await this.store.getChat(id))?.contactName;
+        if (contactName) break;
+      }
+    }
+    return { ...chat, identityIds, ...(phoneNumber ? { phoneNumber } : {}), ...(contactName ? { contactName } : {}) };
   }
 
   async readMessages(context: InternalToolContext, input: WhatsAppReadMessagesInput): Promise<Record<string, unknown>> {
@@ -276,12 +292,11 @@ export class WhatsAppConnectionManager {
   async getChatDetails(context: InternalToolContext, input: WhatsAppChatDetailsInput): Promise<Record<string, unknown>> {
     const chatId = normalizeWhatsAppJid(input.chatId);
     const storedChat = chatId ? await this.store.getChat(chatId) : null;
-    const chat = storedChat ? { ...storedChat, identityIds: [chatId] } : null;
-    if (!chatId || !chat) {
+    if (!chatId || !storedChat) {
       return { success: false, userMessage: 'Primero lee o lista ese chat antes de pedir detalles.', technicalCode: 'whatsapp_chat_not_observed' };
     }
     await this.ensureStarted(context);
-    chat.identityIds = await this.resolveIdentityIds(chatId);
+    const chat = await this.chatDisplayMetadata(storedChat);
     if (chat.chatType === 'group') {
       const metadata = await this.socket?.groupMetadata?.(chatId);
       return {

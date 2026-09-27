@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import type { ConnectionInstance, WhatsAppAgentBinding, WhatsAppAgentDeliveryStatus, WhatsAppAgentUnsettledMessage } from '@shared/types';
-import { blankDraft, emptyPolicy, participantAccess, observedChats, observedParticipants, uniqueChatChoices, type BindingDraft, type ObservedChat } from './model';
+import { blankDraft, emptyPolicy, chatLabel, participantAccess, observedChats, observedParticipants, uniqueChatChoices, type BindingDraft, type ObservedChat } from './model';
 import type { ChannelCopy } from './copy';
 
 export function useChannelEditor(agentId: string, agentName: string, c: ChannelCopy) {
@@ -132,7 +132,10 @@ export function useChannelEditor(agentId: string, agentName: string, c: ChannelC
   }, [draft.connectionId, search, chatRefresh, c.chatsFailed]);
 
   const selectedChat = knownChats[`${draft.connectionId}:${draft.chatId}`];
-  const chatTitle = (connectionId: string, chatId: string) => knownChats[`${connectionId}:${chatId}`]?.title ?? chatId;
+  const chatTitle = (connectionId: string, chatId: string) => {
+    const chat = knownChats[`${connectionId}:${chatId}`];
+    return chat ? chatLabel(chat) : chatId;
+  };
   const chatChoices = useMemo(() => {
     if (!draft.chatId) return uniqueChatChoices(chats);
     return uniqueChatChoices([selectedChat ?? { chatId: draft.chatId, title: draft.chatId, chatType: draft.chatId.endsWith('@g.us') ? 'group' as const : 'direct' as const }, ...chats]);
@@ -158,11 +161,13 @@ export function useChannelEditor(agentId: string, agentName: string, c: ChannelC
       if (!current) return;
       if (!result.success) throw new Error('participants_unavailable');
       setParticipants(observedParticipants(result.data));
-      const detail = result.data as { type?: string; chat?: { title?: string }; metadata?: { subject?: string } } | undefined;
+      const detail = result.data as { type?: string; chat?: { title?: string; contactName?: string; phoneNumber?: string }; metadata?: { subject?: string } } | undefined;
       if (detail?.type === 'group' || detail?.type === 'direct') {
         const chatType = detail.type;
         setKnownChats((known) => ({ ...known, [`${draft.connectionId}:${draft.chatId}`]: {
           ...known[`${draft.connectionId}:${draft.chatId}`], chatId: draft.chatId, chatType,
+          ...(typeof detail.chat?.contactName === 'string' ? { contactName: detail.chat.contactName } : {}),
+          ...(typeof detail.chat?.phoneNumber === 'string' ? { phoneNumber: detail.chat.phoneNumber } : {}),
           ...(detail.metadata?.subject ? { title: detail.metadata.subject } : detail.chat?.title ? { title: detail.chat.title } : {}),
         } }));
       }
@@ -174,6 +179,7 @@ export function useChannelEditor(agentId: string, agentName: string, c: ChannelC
 
   const beginEdit = (binding: WhatsAppAgentBinding) => {
     setConflicting(null);
+    setSearch('');
     setEditing(binding);
     setDraft({
       connectionId: binding.connectionId,

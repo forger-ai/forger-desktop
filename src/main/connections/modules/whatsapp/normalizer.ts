@@ -341,10 +341,12 @@ export const normalizeBaileysContact = (raw: unknown): WhatsAppIndexedChat[] => 
   ].filter(Boolean);
   const uniqueIds = [...new Set(ids)];
   const title = firstText(candidate.name, candidate.notify, candidate.verifiedName, candidate.username);
+  const contactName = firstText(candidate.name);
   const aliases = uniqueTexts([candidate.name, candidate.notify, candidate.verifiedName, candidate.username]);
   return uniqueIds.map((chatId) => ({
     chatId,
     chatType: classifyWhatsAppJid(chatId),
+    ...(classifyWhatsAppJid(chatId) === 'direct' && contactName ? { contactName } : {}),
     ...(title ? { title } : {}),
     ...(aliases ? { aliases } : {}),
     ...(phoneNumberFromJid(chatId) ? { phoneNumber: phoneNumberFromJid(chatId) } : {}),

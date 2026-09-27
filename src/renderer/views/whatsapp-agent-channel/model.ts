@@ -5,6 +5,7 @@ export const emptyPolicy = (): PersonalAgentWhatsAppChannelPolicy => ({ appIds: 
 export interface ObservedChat {
   chatId: string;
   title?: string;
+  contactName?: string;
   phoneNumber?: string;
   identityIds?: string[];
   chatType: 'direct' | 'group' | 'channel';
@@ -47,6 +48,7 @@ export const observedChats = (data: unknown): ObservedChat[] => {
     return [{
       chatId: candidate.chatId,
       chatType: candidate.chatType,
+      ...(typeof candidate.contactName === 'string' ? { contactName: candidate.contactName } : {}),
       ...(typeof candidate.title === 'string' ? { title: candidate.title } : {}),
       ...(typeof candidate.phoneNumber === 'string' ? { phoneNumber: candidate.phoneNumber } : {}),
       identityIds: [...new Set([candidate.chatId, ...(Array.isArray(candidate.identityIds) ? candidate.identityIds.filter((id): id is string => typeof id === 'string') : [])])],
@@ -74,3 +76,12 @@ export const observedParticipants = (data: unknown): { id: string; name: string 
   return data.metadata.participants.flatMap((candidate) =>
     isRecord(candidate) && typeof candidate.id === 'string' ? [{ id: candidate.id, name: typeof candidate.name === 'string' ? candidate.name : typeof candidate.notify === 'string' ? candidate.notify : candidate.id }] : []);
 };
+
+export const chatName = (chat: ObservedChat): string =>
+  (chat.chatType === 'direct' ? chat.contactName?.trim() : '') || chat.title?.trim() || (chat.chatType === 'direct' ? chat.phoneNumber : '') || chat.chatId;
+
+export const chatPhone = (chat: ObservedChat): string =>
+  chat.chatType === 'direct' && chat.phoneNumber !== chatName(chat) ? chat.phoneNumber ?? '' : '';
+
+export const chatLabel = (chat: ObservedChat): string =>
+  [chatName(chat), chatPhone(chat)].filter(Boolean).join(' · ');

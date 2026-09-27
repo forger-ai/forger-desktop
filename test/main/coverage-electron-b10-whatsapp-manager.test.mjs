@@ -75,7 +75,7 @@ test('Given observed chats, manager commands validate, send, read, describe, pai
   const context = createContext(root, logs, events);
   const manager = new WhatsAppConnectionManager(store, async () => ({}));
 
-  assert.deepEqual(await manager.listChats({ query: 'friend' }), { chats: [], input: { query: 'friend' } });
+  assert.deepEqual(await manager.listChats({ query: 'friend' }), { chats: [], input: { query: 'friend', identityAccountId: '' } });
   assert.equal((await manager.readMessages(context, { chatId: ' ' })).technicalCode, 'whatsapp_chat_id_required');
   store.messages = [{
     chatId: '56912345678@s.whatsapp.net',
@@ -123,7 +123,7 @@ test('Given observed chats, manager commands validate, send, read, describe, pai
   assert.equal((await manager.getChatDetails(context, { chatId: '56999999999' })).technicalCode, 'whatsapp_chat_not_observed');
   assert.equal((await manager.getChatDetails(context, { chatId })).phoneNumber, '56912345678');
   store.chats.set(chatId, directChat(chatId, 'stored-number'));
-  assert.equal((await manager.getChatDetails(context, { chatId })).phoneNumber, 'stored-number');
+  assert.equal((await manager.getChatDetails(context, { chatId })).phoneNumber, '56912345678');
   const groupId = '120363123456789@g.us';
   store.chats.set(groupId, { chatId: groupId, chatType: 'group' });
   manager.socket = { groupMetadata: async () => null };

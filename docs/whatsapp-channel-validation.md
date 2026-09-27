@@ -43,6 +43,17 @@ The next local build adds a deterministic agent reply header, optional `@` invoc
 
 After installing the update, the owner sent `@kupita responde: NUEVO FORMATO OK` in the designated self-chat. One request completed and its delivery was marked sent. The local transport record contains `🤖 Kupita: ` followed by a newline and `NUEVO FORMATO OK`; the owner confirmed that format on the phone. The connection remained available after the update/restart, with the self-chat still owner-only.
 
+## Searchable Chat follow-up (2026-09-27)
+
+The separate conversation search and select controls are replaced by one searchable Chat dropdown. It displays saved contact names and phone numbers, distinguishes same-name contacts, preserves selection across asynchronous search, and keeps group subjects without inventing phone numbers. The transport stores saved contact names separately from profile/message names and migrates existing databases without reclassifying old titles. Search supports formatted phone numbers and account-scoped verified phone/LID equivalents.
+
+- Transport regression suites: 89 tests pass with 100% statements, branches, functions and lines across manager, normalizer and store.
+- Focused renderer flows: 49 tests pass with 100% in all four metrics across the affected editor modules.
+- Complete renderer suite: 867 tests pass with 100% statements, branches, functions and lines.
+- TypeScript, repository ESLint, renderer build and Electron build pass.
+- Existing contact titles remain a fallback until WhatsApp supplies saved-contact metadata. This update does not trigger a full contact resynchronization or modify chat access.
+- Local arm64 `0.5.19-pr163.3` installs successfully; native SQLite, saved-contact normalization, channel behavior, WhatsApp import, all 460 production package dependencies and ad-hoc signature checks pass. Installed UI verification finds conversations by phone digits and by name in the single dropdown. The migrated database passes integrity checking, and existing bindings, allowed participants and aliases match the pre-update backup.
+
 ## Release boundary
 
 Automated tests use synthetic transport/provider doubles and do not contact real recipients. Controlled self-chat tests confirm delivery, `@` invocation, reply formatting and connection recovery after the local update. Live group authorization and pause/resume still need their own controlled account checks. The local package is ad-hoc signed, not notarized or published; this change does not merge the PR or deploy to production. Codex and Claude support the isolated channel contract; Antigravity is rejected for this channel.

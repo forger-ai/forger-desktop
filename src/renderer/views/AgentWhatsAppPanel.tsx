@@ -1,8 +1,9 @@
+import { ChatPicker } from './whatsapp-agent-channel/ChatPicker';
 import type { PersonalAgentWhatsAppChannelPolicy, WhatsAppAgentBinding } from '@shared/types';
 import { ActivityDialog } from './whatsapp-agent-channel/ActivityDialog';
 import { PolicyEditor } from './whatsapp-agent-channel/PolicyEditor';
 import { useState } from 'react';
-import { blankDraft, emptyPolicy, participantAccess } from './whatsapp-agent-channel/model';
+import { blankDraft, emptyPolicy, participantAccess, chatLabel } from './whatsapp-agent-channel/model';
 import { copy } from './whatsapp-agent-channel/copy';
 import { useChannelEditor } from './whatsapp-agent-channel/useChannelEditor';
 import DeleteOutlineRounded from '@mui/icons-material/DeleteOutlineRounded';
@@ -63,7 +64,7 @@ export function AgentWhatsAppPanel({ agentId, agentName, t, onOpenConversation, 
       </Box>
       {loading ? <CircularProgress size={22} /> : null}
       {error ? <Alert severity="error">{error}</Alert> : null}
-      {chatError ? <Alert severity="error">{chatError}</Alert> : null}
+      {chatError ? <Alert severity="error" action={<Button disabled={loadingChats || busy} onClick={() => void refreshConnections()}>{c.retry}</Button>}>{chatError}</Alert> : null}
       {conflicting ? <Alert severity="warning" action={<Button onClick={() => { setEditing(conflicting); setConflicting(null); }}>{c.useDraft}</Button>}>
         <Typography variant="subtitle2">{c.currentSettings}</Typography>
         <Typography>{c.alias}: {conflicting.alias}</Typography>
@@ -106,8 +107,8 @@ export function AgentWhatsAppPanel({ agentId, agentName, t, onOpenConversation, 
       ) : null}
       <Divider />
       <Stack direction="row" alignItems="center" justifyContent="space-between">
-        <Typography variant="subtitle2">{editing ? `${c.chat}: ${selectedChat?.title ?? editing.chatId}` : c.add}</Typography>
-        {editing ? <Button size="small" onClick={() => { setEditing(null); setDraft(blankDraft(bindings.find((item) => item.connectionId === connectedAccounts[0]?.id)?.alias ?? agentName, connectedAccounts[0]?.id ?? '')); setNotice(''); }}>{c.add}</Button> : null}
+        <Typography variant="subtitle2">{editing ? `${c.chat}: ${selectedChat ? chatLabel(selectedChat) : editing.chatId}` : c.add}</Typography>
+        {editing ? <Button size="small" onClick={() => { setEditing(null); setSearch(''); setDraft(blankDraft(bindings.find((item) => item.connectionId === connectedAccounts[0]?.id)?.alias ?? agentName, connectedAccounts[0]?.id ?? '')); setNotice(''); }}>{c.add}</Button> : null}
       </Stack>
       <TextField
         select
@@ -115,17 +116,22 @@ export function AgentWhatsAppPanel({ agentId, agentName, t, onOpenConversation, 
         label={c.account}
         value={draft.connectionId}
         disabled={busy || Boolean(editing) || availableConnections.length === 0}
-        onChange={(event) => updateDraft((current) => ({ ...current, ...blankDraft(bindings.find((item) => item.connectionId === event.target.value)?.alias ?? agentName, event.target.value) }))}
+        onChange={(event) => { setSearch(''); updateDraft((current) => ({ ...current, ...blankDraft(bindings.find((item) => item.connectionId === event.target.value)?.alias ?? agentName, event.target.value) })); }}
       >
         {availableConnections.map((item) => <MenuItem key={item.id} value={item.id}>{item.label || item.accountIdentity?.phoneNumber || item.id}</MenuItem>)}
       </TextField>
       <Stack direction="row" spacing={1} alignItems="flex-start">
-        <TextField
-          fullWidth
-          label={c.search}
-          value={search}
-          disabled={!draft.connectionId || busy}
-          onChange={(event) => setSearch(event.target.value)}
+        <ChatPicker
+          key={draft.connectionId}
+          choices={chatChoices}
+          chatId={draft.chatId}
+          disabled={!draft.connectionId || busy || Boolean(editing)}
+          loading={loadingChats}
+          error={chatError}
+          search={search}
+          onSearch={setSearch}
+          c={c}
+          onSelect={(chatId) => updateDraft((current) => ({ ...current, chatId, participantAccess: 'owner', participantsAllowed: [], policy: emptyPolicy(), enabled: false, purpose: '', scope: '' }))}
         />
         <Button
           startIcon={<RefreshRounded />}
@@ -135,18 +141,8 @@ export function AgentWhatsAppPanel({ agentId, agentName, t, onOpenConversation, 
           {c.refresh}
         </Button>
       </Stack>
-      <TextField
-        select
-        fullWidth
-        label={c.chat}
-        value={draft.chatId}
-        disabled={!draft.connectionId || busy || Boolean(editing)}
-        onChange={(event) => updateDraft((current) => ({ ...current, chatId: event.target.value, participantAccess: 'owner', participantsAllowed: [], policy: emptyPolicy(), enabled: false, purpose: '', scope: '' }))}
-      >
-        {chatChoices.map((chat) => <MenuItem key={chat.chatId} value={chat.chatId}>{chat.title || chat.phoneNumber || chat.chatId}</MenuItem>)}
-      </TextField>
-      {loadingChats ? <CircularProgress size={18} /> : null}
-      {!loadingChats && draft.connectionId && chats.length === 0 ? <Typography variant="caption" color="text.secondary">{c.noChats}</Typography> : null}
+      {loadingChats ? <CircularProgress size={18} aria-label={c.chatsLoading} /> : null}
+      {!loadingChats && !chatError && draft.connectionId && chats.length === 0 ? <Typography variant="caption" color="text.secondary">{search.trim() ? c.noMatches : c.noChats}</Typography> : null}
       <TextField
         fullWidth
         label={c.alias}

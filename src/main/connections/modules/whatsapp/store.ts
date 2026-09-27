@@ -18,6 +18,7 @@ interface ChatRow {
   chat_id: string;
   chat_type: WhatsAppChatType;
   title: string | null;
+  contact_name: string | null;
   phone_number: string | null;
   last_message_ref: string | null;
   unread_count: number | null;
@@ -81,7 +82,7 @@ export class WhatsAppLocalStore {
     this.loaded = true;
   }
 
-  async listChats(input: { chatType?: WhatsAppChatType; query?: string; limit?: number; cursor?: string }): Promise<{ chats: WhatsAppIndexedChat[]; nextCursor?: string }> {
+  async listChats(input: { chatType?: WhatsAppChatType; query?: string; limit?: number; cursor?: string; identityAccountId?: string }): Promise<{ chats: WhatsAppIndexedChat[]; nextCursor?: string }> {
     await this.load();
     const limit = clampLimit(input.limit, 25, 100);
     const offset = parseCursor(input.cursor);
@@ -93,10 +94,23 @@ export class WhatsAppLocalStore {
     }
     const query = normalizeQuery(input.query);
     if (query) {
+      // Keep text search intact; normalize only queries consisting of phone punctuation/digits.
+      const phoneQuery = /^[+\d\s().-]+$/.test(query) ? query.replace(/\D/g, '') : '';
       clauses.push(`(
         lower(coalesce(chats.chat_id, '')) LIKE @query
         OR lower(coalesce(chats.title, '')) LIKE @query
+        OR lower(coalesce(chats.contact_name, '')) LIKE @query
         OR lower(coalesce(chats.phone_number, '')) LIKE @query
+        OR (@phoneQuery != '' AND chats.phone_number LIKE @phoneQuery)
+        OR EXISTS (
+          SELECT 1 FROM identity_pairs
+          LEFT JOIN chats AS equivalent ON equivalent.chat_id = CASE
+            WHEN identity_pairs.phone_id = chats.chat_id THEN identity_pairs.lid ELSE identity_pairs.phone_id END
+          WHERE identity_pairs.account_id = @identityAccountId AND identity_pairs.valid = 1
+          AND (identity_pairs.phone_id = chats.chat_id OR identity_pairs.lid = chats.chat_id)
+          AND ((@phoneQuery != '' AND substr(identity_pairs.phone_id, 1, instr(identity_pairs.phone_id, '@') - 1) LIKE @phoneQuery)
+            OR lower(coalesce(equivalent.contact_name, '')) LIKE @query)
+        )
         OR EXISTS (
           SELECT 1 FROM chat_aliases
           WHERE chat_aliases.chat_id = chats.chat_id
@@ -104,6 +118,8 @@ export class WhatsAppLocalStore {
         )
       )`);
       params.query = `%${query}%`;
+      params.phoneQuery = phoneQuery ? `%${phoneQuery}%` : '';
+      params.identityAccountId = input.identityAccountId ?? '';
     }
     const where = clauses.length > 0 ? `WHERE ${clauses.join(' AND ')}` : '';
     const rows = this.requireDb().prepare(`
@@ -196,11 +212,12 @@ export class WhatsAppLocalStore {
   async upsertChat(chat: WhatsAppIndexedChat): Promise<void> {
     await this.load();
     this.requireDb().prepare(`
-      INSERT INTO chats (chat_id, chat_type, title, phone_number, last_message_ref, unread_count, is_muted, updated_at)
-      VALUES (@chatId, @chatType, @title, @phoneNumber, @lastMessageRef, @unreadCount, @isMuted, @updatedAt)
+      INSERT INTO chats (chat_id, chat_type, title, contact_name, phone_number, last_message_ref, unread_count, is_muted, updated_at)
+      VALUES (@chatId, @chatType, @title, @contactName, @phoneNumber, @lastMessageRef, @unreadCount, @isMuted, @updatedAt)
       ON CONFLICT(chat_id) DO UPDATE SET
         chat_type = excluded.chat_type,
         title = coalesce(excluded.title, chats.title),
+        contact_name = coalesce(excluded.contact_name, chats.contact_name),
         phone_number = coalesce(excluded.phone_number, chats.phone_number),
         last_message_ref = coalesce(excluded.last_message_ref, chats.last_message_ref),
         unread_count = coalesce(excluded.unread_count, chats.unread_count),
@@ -210,6 +227,7 @@ export class WhatsAppLocalStore {
       chatId: chat.chatId,
       chatType: chat.chatType,
       title: chat.title ?? null,
+      contactName: chat.contactName ?? null,
       phoneNumber: chat.phoneNumber ?? null,
       lastMessageRef: chat.lastMessageRef ? encodeStableMessageRef(chat.lastMessageRef) : null,
       unreadCount: chat.unreadCount ?? null,
@@ -427,6 +445,7 @@ export class WhatsAppLocalStore {
         chat_id TEXT PRIMARY KEY,
         chat_type TEXT NOT NULL,
         title TEXT,
+        contact_name TEXT,
         phone_number TEXT,
         last_message_ref TEXT,
         unread_count INTEGER,
@@ -484,6 +503,10 @@ export class WhatsAppLocalStore {
       CREATE INDEX IF NOT EXISTS idx_attachments_stable_ref ON attachments(stable_ref);
       CREATE INDEX IF NOT EXISTS idx_attachments_chat ON attachments(chat_id);
     `);
+    const columns = this.requireDb().prepare('PRAGMA table_info(chats)').all() as Array<{ name: string }>;
+    if (!columns.some((column) => column.name === 'contact_name')) {
+      this.requireDb().exec('ALTER TABLE chats ADD COLUMN contact_name TEXT');
+    }
   }
 
   private rowToChat(row: ChatRow): WhatsAppIndexedChat {
@@ -493,6 +516,7 @@ export class WhatsAppLocalStore {
       chatId: row.chat_id,
       chatType: row.chat_type,
       ...(row.title ? { title: row.title } : {}),
+      ...(row.contact_name ? { contactName: row.contact_name } : {}),
       ...(aliases.length > 0 ? { aliases: aliases.map((alias) => alias.alias) } : {}),
       ...(phoneNumberFromJid(row.chat_id) ? { phoneNumber: phoneNumberFromJid(row.chat_id) } : {}),
       ...(lastMessageRef ? { lastMessageRef } : {}),

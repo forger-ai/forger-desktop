@@ -29,3 +29,9 @@ Only the Desktop repository changes. Affected boundaries are the transport ident
 3. Run typecheck, lint, backend and renderer suites, with coverage checks; build the renderer and Electron output.
 4. Package a local arm64 update with native dependency and signature checks, preserve the existing installed version for rollback, and retain the linked WhatsApp session.
 5. Verify the installed settings UI and existing self-chat configuration. Real group activation requires the owner's choice of a specific group and access mode; development never enables arbitrary groups.
+
+## Searchable chat picker follow-up
+
+The Chat control combines conversation search and selection in one dropdown. Direct-contact options show the saved address-book name and real phone number when WhatsApp provides them; groups show their subject. Searching by name or number preserves the selected conversation and its access draft. Same-name contacts remain distinct, and authenticated phone/LID duplicates remain one choice.
+
+Renderer ownership covers the picker, editor state and flow tests. Transport ownership covers saved-name provenance, a nullable relational contact-name field, metadata enrichment and store/manager regression tests. Saved contact names survive incoming profile-name updates; display metadata never grants access or establishes identity. The orchestrator integrates both, checks types/lint/builds and relevant coverage, then verifies the locally installed update without changing conversation permissions.

@@ -70,6 +70,44 @@ const chooseChat = async (user: ReturnType<typeof userEvent.setup>, name = 'Proj
 };
 
 describe('AgentWhatsAppPanel', () => {
+  it('searches in Chat and distinguishes saved contacts by phone without filtering server matches', async () => {
+    const user = userEvent.setup();
+    const contacts = [
+      { chatId: 'ana-one', contactName: 'Ana Trabajo', title: 'Old nickname', phoneNumber: '+56 9 1111 9446', chatType: 'direct' },
+      { chatId: 'ana-two', contactName: 'Ana Trabajo', phoneNumber: '+56 9 2222 9446', chatType: 'direct' },
+      { chatId: 'team@g.us', title: 'Equipo', phoneNumber: '12345', chatType: 'group' },
+    ];
+    const api = makeApi({ listChats: { chats: contacts } }); showPanel();
+    expect(screen.queryByRole('textbox', { name: 'Search conversations' })).not.toBeInTheDocument();
+    await waitFor(() => expect(screen.getByRole('combobox', { name: 'Chat' })).not.toBeDisabled());
+    const input = screen.getByRole('combobox', { name: 'Chat' });
+    await user.type(input, '9446');
+    await waitFor(() => expect(api.connectionsCall).toHaveBeenCalledWith(expect.objectContaining({ input: { limit: 100, query: '9446' } })));
+    expect(await screen.findByRole('option', { name: 'Ana Trabajo +56 9 1111 9446' })).toBeVisible();
+    expect(screen.getByRole('option', { name: 'Ana Trabajo +56 9 2222 9446' })).toBeVisible();
+    expect(screen.getByRole('option', { name: 'Equipo' })).toBeVisible();
+    await user.click(screen.getByRole('option', { name: 'Ana Trabajo +56 9 2222 9446' }));
+    expect(input).toHaveValue('Ana Trabajo · +56 9 2222 9446');
+    api.connectionsCall.mockResolvedValue({ success: true, data: { chats: [] } });
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Refresh chats' })).not.toBeDisabled());
+    await user.click(screen.getByRole('button', { name: 'Refresh chats' }));
+    await waitFor(() => expect(screen.queryByRole('progressbar')).not.toBeInTheDocument());
+    expect(input).toHaveValue('Ana Trabajo · +56 9 2222 9446');
+    await user.click(screen.getByRole('button', { name: 'Save chat' }));
+    await waitFor(() => expect(api.personalAgentWhatsAppBindingPut).toHaveBeenCalledWith(expect.objectContaining({ chatId: 'ana-two' })));
+    expect(input).toBeDisabled();
+  });
+
+  it('distinguishes an empty search from an account with no observed conversations', async () => {
+    const user = userEvent.setup(); const api = makeApi({ listChats: { chats: [] } }); showPanel();
+    expect(await screen.findByText(copy.en.noChats)).toBeVisible();
+    await user.type(screen.getByRole('combobox', { name: 'Chat' }), 'Missing person');
+    await waitFor(() => expect(api.connectionsCall).toHaveBeenCalledWith(expect.objectContaining({ input: { limit: 100, query: 'Missing person' } })));
+    await waitFor(() => expect(screen.queryByRole('progressbar')).not.toBeInTheDocument());
+    expect(screen.getAllByText(copy.en.noMatches).length).toBeGreaterThan(0);
+    expect(screen.queryByText(copy.en.noChats)).not.toBeInTheDocument();
+  });
+
   it('offers equivalent phone and LID chats once while retaining saved identities and filtered titles', async () => {
     const pn = '15550001111@s.whatsapp.net'; const lid = '123456@lid';
     const pair = [pn, lid];
@@ -102,9 +140,10 @@ describe('AgentWhatsAppPanel', () => {
     expect(result.current.chatChoices[0].chatType).toBe('group');
     await act(async () => result.current.save());
     expect(api.personalAgentWhatsAppBindingPut).toHaveBeenCalledWith(expect.objectContaining({ participantAccess: 'all', participantsAllowed: [] }));
-    api.connectionsCall.mockResolvedValue({ success: true, data: { type: 'direct', chat: { title: 'A person' } } });
+    api.connectionsCall.mockResolvedValue({ success: true, data: { type: 'direct', chat: { title: 'A person', contactName: 'Saved person', phoneNumber: '+12345678' } } });
     act(() => result.current.updateDraft((value) => ({ ...value, chatId: 'a-person' })));
     await waitFor(() => expect(result.current.selectedChat?.title).toBe('A person'));
+    expect(result.current.chatTitle(account.id, 'a-person')).toBe('Saved person · +12345678');
     await act(async () => result.current.save());
     expect(result.current.error).toBe(copy.en.groupOnly);
     api.connectionsCall.mockResolvedValue({ success: true, data: {} });
@@ -139,7 +178,7 @@ describe('AgentWhatsAppPanel', () => {
     await user.type(screen.getByRole('textbox', { name: 'Purpose in this chat' }), 'Help');
     await user.click(screen.getByRole('switch', { name: 'Allow automatic replies in this chat' }));
     api.connectionsCall.mockImplementation(async ({ actionId }) => actionId === 'whatsapp.list_chats' ? { success: true, data: { chats: [] } } : { success: true, data: {} });
-    await user.type(screen.getByRole('textbox', { name: 'Search conversations' }), 'missing');
+    await user.type(screen.getByRole('combobox', { name: 'Chat' }), 'missing');
     await user.click(screen.getByRole('button', { name: 'Save chat' }));
     expect(within(screen.getByRole('dialog')).getByText(/Everyone in the group/)).toBeVisible();
     await user.click(screen.getByRole('button', { name: 'Apply settings' }));
@@ -437,8 +476,11 @@ describe('AgentWhatsAppPanel', () => {
     api.connectionsCall.mockResolvedValueOnce({ success: false });
     showPanel();
     expect(await screen.findByText('Could not load conversations.')).toBeVisible();
+    api.connectionsCall.mockResolvedValueOnce({ success: false });
+    await user.click(screen.getByRole('button', { name: 'Retry' }));
+    await screen.findByText('Could not load conversations.');
     api.connectionsCall.mockResolvedValue({ success: true, data: { chats: [{ chatId: 'direct-one', title: 'Direct chat', chatType: 'direct' }] } });
-    await user.type(screen.getByRole('textbox', { name: 'Search conversations' }), '  Direct  ');
+    await user.type(screen.getByRole('combobox', { name: 'Chat' }), '  Direct  ');
     await waitFor(() => expect(api.connectionsCall).toHaveBeenCalledWith(expect.objectContaining({
       actionId: 'whatsapp.list_chats', input: { limit: 100, query: 'Direct' },
     })));

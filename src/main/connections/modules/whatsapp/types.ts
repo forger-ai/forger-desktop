@@ -63,6 +63,8 @@ export interface WhatsAppIndexedChat {
   chatId: string;
   chatType: WhatsAppChatType;
   title?: string;
+  /** Name saved in the address book; profile and message names are not saved names. */
+  contactName?: string;
   aliases?: string[];
   phoneNumber?: string;
   lastMessageRef?: WhatsAppStableMessageRef;
