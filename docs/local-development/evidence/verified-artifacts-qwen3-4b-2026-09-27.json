@@ -1,0 +1,140 @@
+{
+  "schemaVersion": 1,
+  "protocol": "forger-local-artifact-verification-v1",
+  "status": "verified",
+  "startedAt": "2026-09-27T01:19:34.455Z",
+  "networkUsed": false,
+  "model": {
+    "runtimeModel": "qwen3:4b",
+    "store": "/Users/kupa/Library/Application Support/ForgerLocalEvaluation/models",
+    "status": "verified",
+    "files": [
+      {
+        "kind": "manifest",
+        "sourceUrl": "https://registry.ollama.ai/v2/library/qwen3/manifests/4b",
+        "path": "/Users/kupa/Library/Application Support/ForgerLocalEvaluation/models/manifests/registry.ollama.ai/library/qwen3/4b",
+        "status": "verified",
+        "expected": {
+          "sha256": "359d7dd4bcdab3d86b87d73ac27966f4dbb9f5efdfcc75d34a8764a09474fae7",
+          "sizeBytes": 859
+        },
+        "observed": {
+          "sizeBytes": 859,
+          "sha256": "359d7dd4bcdab3d86b87d73ac27966f4dbb9f5efdfcc75d34a8764a09474fae7"
+        },
+        "hashing": "sha256_stream"
+      },
+      {
+        "kind": "config",
+        "mediaType": "application/vnd.docker.container.image.v1+json",
+        "sourceUrl": "https://registry.ollama.ai/v2/library/qwen3/blobs/sha256:e18a783aae5525fd2852fc94c985541a77e791e034abc2d3056474d59de336fc",
+        "path": "/Users/kupa/Library/Application Support/ForgerLocalEvaluation/models/blobs/sha256-e18a783aae5525fd2852fc94c985541a77e791e034abc2d3056474d59de336fc",
+        "status": "verified",
+        "expected": {
+          "sha256": "e18a783aae5525fd2852fc94c985541a77e791e034abc2d3056474d59de336fc",
+          "sizeBytes": 487
+        },
+        "observed": {
+          "sizeBytes": 487,
+          "sha256": "e18a783aae5525fd2852fc94c985541a77e791e034abc2d3056474d59de336fc"
+        },
+        "hashing": "sha256_stream"
+      },
+      {
+        "kind": "layer",
+        "layerIndex": 0,
+        "mediaType": "application/vnd.ollama.image.model",
+        "sourceUrl": "https://registry.ollama.ai/v2/library/qwen3/blobs/sha256:3e4cb14174460404e7a233e531675303b2fbf7749c02f91864fe311ab6344e4f",
+        "path": "/Users/kupa/Library/Application Support/ForgerLocalEvaluation/models/blobs/sha256-3e4cb14174460404e7a233e531675303b2fbf7749c02f91864fe311ab6344e4f",
+        "status": "verified",
+        "expected": {
+          "sha256": "3e4cb14174460404e7a233e531675303b2fbf7749c02f91864fe311ab6344e4f",
+          "sizeBytes": 2497280480
+        },
+        "observed": {
+          "sizeBytes": 2497280480,
+          "sha256": "3e4cb14174460404e7a233e531675303b2fbf7749c02f91864fe311ab6344e4f"
+        },
+        "hashing": "sha256_stream"
+      },
+      {
+        "kind": "layer",
+        "layerIndex": 1,
+        "mediaType": "application/vnd.ollama.image.template",
+        "sourceUrl": "https://registry.ollama.ai/v2/library/qwen3/blobs/sha256:2d54db2b9bb29ce7db54fea63a891f5859603813c555b1f88b5e0994652897f9",
+        "path": "/Users/kupa/Library/Application Support/ForgerLocalEvaluation/models/blobs/sha256-2d54db2b9bb29ce7db54fea63a891f5859603813c555b1f88b5e0994652897f9",
+        "status": "verified",
+        "expected": {
+          "sha256": "2d54db2b9bb29ce7db54fea63a891f5859603813c555b1f88b5e0994652897f9",
+          "sizeBytes": 1506
+        },
+        "observed": {
+          "sizeBytes": 1506,
+          "sha256": "2d54db2b9bb29ce7db54fea63a891f5859603813c555b1f88b5e0994652897f9"
+        },
+        "hashing": "sha256_stream"
+      },
+      {
+        "kind": "layer",
+        "layerIndex": 2,
+        "mediaType": "application/vnd.ollama.image.license",
+        "sourceUrl": "https://registry.ollama.ai/v2/library/qwen3/blobs/sha256:d18a5cc71b84bc4af394a31116bd3932b42241de70c77d2b76d69a314ec8aa12",
+        "path": "/Users/kupa/Library/Application Support/ForgerLocalEvaluation/models/blobs/sha256-d18a5cc71b84bc4af394a31116bd3932b42241de70c77d2b76d69a314ec8aa12",
+        "status": "verified",
+        "expected": {
+          "sha256": "d18a5cc71b84bc4af394a31116bd3932b42241de70c77d2b76d69a314ec8aa12",
+          "sizeBytes": 11338
+        },
+        "observed": {
+          "sizeBytes": 11338,
+          "sha256": "d18a5cc71b84bc4af394a31116bd3932b42241de70c77d2b76d69a314ec8aa12"
+        },
+        "hashing": "sha256_stream"
+      },
+      {
+        "kind": "layer",
+        "layerIndex": 3,
+        "mediaType": "application/vnd.ollama.image.params",
+        "sourceUrl": "https://registry.ollama.ai/v2/library/qwen3/blobs/sha256:cff3f395ef3756ab63e58b0ad1b32bb6f802905cae1472e6a12034e4246fbbdb",
+        "path": "/Users/kupa/Library/Application Support/ForgerLocalEvaluation/models/blobs/sha256-cff3f395ef3756ab63e58b0ad1b32bb6f802905cae1472e6a12034e4246fbbdb",
+        "status": "verified",
+        "expected": {
+          "sha256": "cff3f395ef3756ab63e58b0ad1b32bb6f802905cae1472e6a12034e4246fbbdb",
+          "sizeBytes": 120
+        },
+        "observed": {
+          "sizeBytes": 120,
+          "sha256": "cff3f395ef3756ab63e58b0ad1b32bb6f802905cae1472e6a12034e4246fbbdb"
+        },
+        "hashing": "sha256_stream"
+      }
+    ],
+    "catalogId": "qwen3-4b-q4_k_m",
+    "manifestUrl": "https://registry.ollama.ai/v2/library/qwen3/manifests/4b"
+  },
+  "runtimeArchive": {
+    "status": "not_requested",
+    "signatureVerification": {
+      "status": "not_performed",
+      "reason": "This tool verifies archive bytes only. It does not execute codesign, verify notarization or attest an extracted executable."
+    }
+  },
+  "provenance": {
+    "catalogPath": "/Users/kupa/Documents/Forger/desktop/docs/local-development/models.json",
+    "catalogSha256": "4ff6bbf75c5f7af24a024c74ef2653638e8f702305c6477be9c72553a10061b3",
+    "catalogVersion": "2026-09-27.2",
+    "verifierSha256": "64a904a6875446bb19e0e4dd047e5f32dcdf8703c1f20dca716e05b01397009a",
+    "nodeVersion": "v24.18.0"
+  },
+  "bufferingPolicy": {
+    "maxStreamingChunkBytes": 1048576,
+    "maxRetainedMetadataBytes": 1048576
+  },
+  "limits": [
+    "Hash matches establish byte identity against the local catalog pins; the catalog is not independently authenticated by this tool.",
+    "Model compatibility, licenses, publisher conversion provenance and task capability require separate review.",
+    "Filesystem checks reject observed symlinks and file changes; they do not attest a compromised operating system or eliminate every concurrent directory-replacement race."
+  ],
+  "finishedAt": "2026-09-27T01:19:36.845Z",
+  "verificationElapsedMs": 2390.384834
+}

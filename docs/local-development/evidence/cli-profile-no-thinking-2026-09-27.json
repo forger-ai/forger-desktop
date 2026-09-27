@@ -1,0 +1,195 @@
+{
+  "schemaVersion": 1,
+  "evidenceClass": "real_cli_synthetic_runtime",
+  "observedAt": "2026-09-27T01:27:17.069Z",
+  "cliVersion": "codex-cli 0.144.1",
+  "passed": true,
+  "toolName": "exec_command",
+  "responseTurns": 2,
+  "requests": [
+    "/api/tags",
+    "/api/show",
+    "/api/version",
+    "/v1/responses",
+    "/v1/responses"
+  ],
+  "agentProfile": "single-agent-no-thinking-v1",
+  "profileObservations": {
+    "invocation": {
+      "agentProfile": "single-agent-no-thinking-v1",
+      "checks": [
+        {
+          "name": "workspace_sandbox",
+          "passed": true
+        },
+        {
+          "name": "no_interactive_approval",
+          "passed": true
+        },
+        {
+          "name": "network_access_disabled",
+          "passed": true
+        },
+        {
+          "name": "web_search_disabled",
+          "passed": true
+        },
+        {
+          "name": "user_config_ignored",
+          "passed": true
+        },
+        {
+          "name": "no_sandbox_bypass",
+          "passed": true
+        },
+        {
+          "name": "compact_permissions_included",
+          "passed": true
+        }
+      ],
+      "passed": true,
+      "evidence": "Observed CLI invocation options; permission instructions in the serialized model request are not verified by this check."
+    },
+    "requests": [
+      {
+        "agentProfile": "single-agent-no-thinking-v1",
+        "multiAgentNamespacePresent": false,
+        "reasoningEffort": "none",
+        "compactContractPresent": false,
+        "compactContractSha256": null,
+        "checks": [
+          {
+            "name": "single_agent_tools",
+            "passed": true
+          },
+          {
+            "name": "explicit_no_thinking",
+            "passed": true
+          },
+          {
+            "name": "compact_forger_contract",
+            "passed": true
+          }
+        ],
+        "passed": true
+      },
+      {
+        "agentProfile": "single-agent-no-thinking-v1",
+        "multiAgentNamespacePresent": false,
+        "reasoningEffort": "none",
+        "compactContractPresent": false,
+        "compactContractSha256": null,
+        "checks": [
+          {
+            "name": "single_agent_tools",
+            "passed": true
+          },
+          {
+            "name": "explicit_no_thinking",
+            "passed": true
+          },
+          {
+            "name": "compact_forger_contract",
+            "passed": true
+          }
+        ],
+        "passed": true
+      }
+    ]
+  },
+  "profileEvidence": {
+    "agentProfile": "single-agent-no-thinking-v1",
+    "requestedReasoning": "none",
+    "appliedSettings": {
+      "features.multi_agent": false,
+      "model_reasoning_effort": "none",
+      "model_supports_reasoning_summaries": true,
+      "model_reasoning_summary": "none"
+    },
+    "contractSha256": null
+  },
+  "syntheticRuntimeVersion": "0.34.4",
+  "fileEditVerified": true,
+  "realModelInference": false,
+  "performanceMeasured": false,
+  "processEgressVerified": false,
+  "networkSandboxRequested": false,
+  "outerNetworkPolicy": null,
+  "toolLoopSucceededUnderPolicy": false,
+  "syntheticDiagnostics": {
+    "events": [
+      {
+        "type": "thread.started",
+        "thread_id": "01a0e079-3d00-7273-8802-1a0be62c761a"
+      },
+      {
+        "type": "item.completed",
+        "item": {
+          "id": "item_0",
+          "type": "error",
+          "message": "Model metadata for `forger-protocol-probe:synthetic` not found. Defaulting to fallback metadata; this can degrade performance and cause issues."
+        }
+      },
+      {
+        "type": "turn.started"
+      },
+      {
+        "type": "item.completed",
+        "item": {
+          "id": "item_1",
+          "type": "error",
+          "message": "Skill descriptions were shortened to fit the 2% skills context budget. Codex can still see every skill, but some descriptions are shorter. Disable unused skills or plugins to leave more room for the rest."
+        }
+      },
+      {
+        "type": "item.started",
+        "item": {
+          "id": "item_2",
+          "type": "command_execution",
+          "command": "/bin/zsh -c \"printf 'local-protocol-tool-ok\\\\n' > probe-result.txt\"",
+          "aggregated_output": "",
+          "exit_code": null,
+          "status": "in_progress"
+        }
+      },
+      {
+        "type": "item.completed",
+        "item": {
+          "id": "item_2",
+          "type": "command_execution",
+          "command": "/bin/zsh -c \"printf 'local-protocol-tool-ok\\\\n' > probe-result.txt\"",
+          "aggregated_output": "",
+          "exit_code": 0,
+          "status": "completed"
+        }
+      },
+      {
+        "type": "item.completed",
+        "item": {
+          "id": "item_3",
+          "type": "agent_message",
+          "text": "Synthetic protocol probe complete."
+        }
+      },
+      {
+        "type": "turn.completed",
+        "usage": {
+          "input_tokens": 2,
+          "cached_input_tokens": 0,
+          "output_tokens": 2,
+          "reasoning_output_tokens": 0
+        }
+      }
+    ],
+    "stderr": "",
+    "toolOutputs": [
+      {
+        "type": "function_call_output",
+        "call_id": "call_probe",
+        "output": "Chunk ID: b49d67\nWall time: 0.0000 seconds\nProcess exited with code 0\nOriginal token count: 0\nOutput:\n"
+      }
+    ],
+    "unparsedStdoutLines": 0,
+    "truncated": false
+  }
+}

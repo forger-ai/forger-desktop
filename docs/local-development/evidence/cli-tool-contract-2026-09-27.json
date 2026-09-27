@@ -1,0 +1,100 @@
+{
+  "schemaVersion": 1,
+  "evidenceClass": "real_cli_synthetic_runtime",
+  "observedAt": "2026-09-27T00:51:12.054Z",
+  "cliVersion": "codex-cli 0.144.1",
+  "passed": true,
+  "toolName": "exec_command",
+  "responseTurns": 2,
+  "requests": [
+    "/api/tags",
+    "/api/show",
+    "/api/version",
+    "/v1/responses",
+    "/v1/responses"
+  ],
+  "syntheticRuntimeVersion": "0.34.4",
+  "fileEditVerified": true,
+  "realModelInference": false,
+  "performanceMeasured": false,
+  "processEgressVerified": false,
+  "networkSandboxRequested": false,
+  "outerNetworkPolicy": null,
+  "toolLoopSucceededUnderPolicy": false,
+  "syntheticDiagnostics": {
+    "events": [
+      {
+        "type": "thread.started",
+        "thread_id": "01a0e058-332b-7bf2-933f-a30cdedf22ba"
+      },
+      {
+        "type": "item.completed",
+        "item": {
+          "id": "item_0",
+          "type": "error",
+          "message": "Model metadata for `forger-protocol-probe:synthetic` not found. Defaulting to fallback metadata; this can degrade performance and cause issues."
+        }
+      },
+      {
+        "type": "turn.started"
+      },
+      {
+        "type": "item.completed",
+        "item": {
+          "id": "item_1",
+          "type": "error",
+          "message": "Skill descriptions were shortened to fit the 2% skills context budget. Codex can still see every skill, but some descriptions are shorter. Disable unused skills or plugins to leave more room for the rest."
+        }
+      },
+      {
+        "type": "item.started",
+        "item": {
+          "id": "item_2",
+          "type": "command_execution",
+          "command": "/bin/zsh -c \"printf 'local-protocol-tool-ok\\\\n' > probe-result.txt\"",
+          "aggregated_output": "",
+          "exit_code": null,
+          "status": "in_progress"
+        }
+      },
+      {
+        "type": "item.completed",
+        "item": {
+          "id": "item_2",
+          "type": "command_execution",
+          "command": "/bin/zsh -c \"printf 'local-protocol-tool-ok\\\\n' > probe-result.txt\"",
+          "aggregated_output": "",
+          "exit_code": 0,
+          "status": "completed"
+        }
+      },
+      {
+        "type": "item.completed",
+        "item": {
+          "id": "item_3",
+          "type": "agent_message",
+          "text": "Synthetic protocol probe complete."
+        }
+      },
+      {
+        "type": "turn.completed",
+        "usage": {
+          "input_tokens": 2,
+          "cached_input_tokens": 0,
+          "output_tokens": 2,
+          "reasoning_output_tokens": 0
+        }
+      }
+    ],
+    "stderr": "",
+    "toolOutputs": [
+      {
+        "type": "function_call_output",
+        "call_id": "call_probe",
+        "output": "Chunk ID: da68ae\nWall time: 0.0003 seconds\nProcess exited with code 0\nOriginal token count: 0\nOutput:\n"
+      }
+    ],
+    "unparsedStdoutLines": 0,
+    "truncated": false
+  }
+}

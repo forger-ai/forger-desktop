@@ -1,0 +1,41 @@
+{
+  "schemaVersion": 1,
+  "observedAt": "2026-09-26T14:27:38.351Z",
+  "os": {
+    "platform": "darwin",
+    "architecture": "arm64",
+    "release": "25.5.0"
+  },
+  "cpu": {
+    "model": "Apple M1",
+    "logicalCores": 8
+  },
+  "memory": {
+    "totalBytes": 8589934592,
+    "freeBytes": 765984768,
+    "availableForModelBytes": null,
+    "unified": true
+  },
+  "gpu": {
+    "devices": [
+      {
+        "name": "Apple M1",
+        "backendReported": "metal",
+        "usableMemoryBytes": null
+      }
+    ],
+    "accelerationTested": false
+  },
+  "disk": {
+    "availableBytes": 26761392128
+  },
+  "performance": null,
+  "recommendation": {
+    "status": "insufficient_evidence",
+    "reason": "Hardware detection does not demonstrate app-development success. Run the measured task suite before recommending a configuration."
+  },
+  "unavailable": [
+    "available_model_memory_not_measured",
+    "performance_not_measured"
+  ]
+}

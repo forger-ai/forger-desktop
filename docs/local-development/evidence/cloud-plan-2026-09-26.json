@@ -1,0 +1,135 @@
+{
+  "schemaVersion": 1,
+  "createdAt": "2026-09-26T21:40:47.546Z",
+  "protocol": "forger-common-local-v1",
+  "comparisonMode": "controlled",
+  "forger": {
+    "version": "0.5.17",
+    "revision": "7fa965edc9408211d8f4336bb0ed0a4f30a88102",
+    "dirty": true,
+    "sourceSha256": "1550f12adabb8ca80c04e3c806f7cf218c4ad65b07afdbc06730cf78f32a5b06",
+    "compiledProviderSha256": "94188a2672c5a983ff2831ee60ef7ab4d1f43c8b9f6f6c86f86280bf0b49eddc",
+    "harnessSha256": "2dce3b278a9b197337ebaa57eda7fe84ed963c288562bcef7b80cd5e2fbc4f57"
+  },
+  "hardware": {
+    "platform": "darwin",
+    "architecture": "arm64",
+    "cpu": "Apple M1",
+    "logicalCpuCount": 8,
+    "totalMemoryBytes": 8589934592,
+    "freeMemoryBytes": 212549632,
+    "availableForModelBytes": null,
+    "availableForModelReason": "Free RAM does not include the runtime, KV cache, unified GPU memory, OS, Forger, browser and build headroom; no available-for-model estimate is derived.",
+    "classification": "detection only, not a calibration or performance measurement"
+  },
+  "catalogVersion": "0.1.0",
+  "results": [],
+  "executionEnabled": false,
+  "state": "prepared_not_executed",
+  "reason": "Cloud execution requires explicit provider/model configuration, approved synthetic-only context and the existing supported authentication path. This CLI does not implement a cloud runner.",
+  "authorization": {
+    "fixtureClassification": "synthetic",
+    "userPrivateRepositoryIncluded": false,
+    "inferenceTransmissionAuthorized": false
+  },
+  "tasks": [
+    {
+      "id": "template-01",
+      "taskHash": "435cca0cc22e91483e4e30deda89a2c0aea50556423a95b2134499106d9837ca",
+      "prompt": "This is an authorized synthetic Forger benchmark in a disposable private workspace.\n\nUse the existing supported stack. Preserve commons, manifests, dependencies/configuration and all original tests.\n\nYou may add tests, but may not weaken or delete tests. No Internet, new dependencies, MCP, cloud, or external file access.\n\nThe evaluator builds, starts and browser-tests the application independently. A completion statement is not evidence.\n\nDo not run dependency/framework/build/test commands on the host: this app is Dockerized. Docker access is not granted to the agent; report unavailable checks honestly.\n\nTime budget 600000 ms; tool budget 60; no retries or human assistance.\n\nStarting from this supported Vite/FastAPI/SQLite skeleton, create a local desk page at /. Show heading My local desk, count initially 0 and a button Add that increments it. Add GET /api/desk returning {\"name\":\"My local desk\",\"storage\":\"local\"}. Preserve existing health, context, shell route and regression contracts. Keep all dependency/config/test files unchanged. Add tests for new behavior without modifying existing tests.",
+      "promptHash": "8e7fc07d8f76ce57f6224cae6f856143e9e7556954197afb3f04de322f8443d6",
+      "budget": {
+        "timeMs": 600000,
+        "toolCalls": 60,
+        "retries": 0,
+        "evaluationTimeMs": 240000
+      },
+      "acceptance": [
+        "Frontend TypeScript/Vite build passes.",
+        "Browser loads /, heading My local desk is visible, Add moves count from 0 to 1.",
+        "GET /api/desk returns exactly name/storage contract.",
+        "Backend and frontend original regression suites pass."
+      ]
+    },
+    {
+      "id": "crud-01",
+      "taskHash": "34bccd03b9487880c31e35d248af5fcc4cd25d30a3ab6e89c804742f00a2b91a",
+      "prompt": "This is an authorized synthetic Forger benchmark in a disposable private workspace.\n\nUse the existing supported stack. Preserve commons, manifests, dependencies/configuration and all original tests.\n\nYou may add tests, but may not weaken or delete tests. No Internet, new dependencies, MCP, cloud, or external file access.\n\nThe evaluator builds, starts and browser-tests the application independently. A completion statement is not evidence.\n\nDo not run dependency/framework/build/test commands on the host: this app is Dockerized. Docker access is not granted to the agent; report unavailable checks honestly.\n\nTime budget 600000 ms; tool budget 60; no retries or human assistance.\n\nThe synthetic notes app has a screen and read endpoint but cannot save changes. Implement POST /api/notes (201), PUT /api/notes/{id} (200) and DELETE /api/notes/{id} (204) backed by the existing SQLite engine. Notes have id and title (trim whitespace, 1–120 nonblank characters), updates preserve id, missing ids return 404, invalid titles 422. The existing labeled Note title field, Save, per-note Edit and Delete buttons must work and persistence must survive a backend restart. Preserve original tests, package/config and commons files; add tests for new paths.",
+      "promptHash": "4f78b9e689e4aafa6f31973e1cdb3bcb34ce4103c2d42bb3d17bbe762364ad9a",
+      "budget": {
+        "timeMs": 600000,
+        "toolCalls": 60,
+        "retries": 0,
+        "evaluationTimeMs": 240000
+      },
+      "acceptance": [
+        "POST/GET/PUT/DELETE round trip uses expected status and preserves id.",
+        "Invalid blank/overlong titles return 422 and missing ids return 404.",
+        "Record survives actual backend stop/start.",
+        "Browser saves, edits and deletes a note through accessible controls."
+      ]
+    },
+    {
+      "id": "modify-01",
+      "taskHash": "4d82b412436c5f235c13ec6d02afffa476bbecff9fb6e30ae81ee7336128be7a",
+      "prompt": "This is an authorized synthetic Forger benchmark in a disposable private workspace.\n\nUse the existing supported stack. Preserve commons, manifests, dependencies/configuration and all original tests.\n\nYou may add tests, but may not weaken or delete tests. No Internet, new dependencies, MCP, cloud, or external file access.\n\nThe evaluator builds, starts and browser-tests the application independently. A completion statement is not evidence.\n\nDo not run dependency/framework/build/test commands on the host: this app is Dockerized. Docker access is not granted to the agent; report unavailable checks honestly.\n\nTime budget 600000 ms; tool budget 60; no retries or human assistance.\n\nAdd case-insensitive title search to this existing persistent notes app. A field labeled Search filters notes through GET /api/notes?q=term. Empty q returns all; unmatched query returns []; original title spelling is preserved. Search and editing/deleting results must work in the UI. Preserve CRUD, persisted records, health and all existing tests/config; add regression tests.",
+      "promptHash": "37c125f3202c1ae7fc5ab46c74ee757cc9d987b195d9ea48a1a8dbaca9c45f2e",
+      "budget": {
+        "timeMs": 600000,
+        "toolCalls": 60,
+        "retries": 0,
+        "evaluationTimeMs": 240000
+      },
+      "acceptance": [
+        "q search matches mixed case as substring without mutating data.",
+        "Empty q returns all records; unmatched q returns empty list.",
+        "Browser filters visible notes and clears search.",
+        "Persisted notes and CRUD regression checks pass."
+      ]
+    },
+    {
+      "id": "bug-01",
+      "taskHash": "26c659f3f12554db115a3ab113090a552b7fb6a8ae222b51666489261b296443",
+      "prompt": "This is an authorized synthetic Forger benchmark in a disposable private workspace.\n\nUse the existing supported stack. Preserve commons, manifests, dependencies/configuration and all original tests.\n\nYou may add tests, but may not weaken or delete tests. No Internet, new dependencies, MCP, cloud, or external file access.\n\nThe evaluator builds, starts and browser-tests the application independently. A completion statement is not evidence.\n\nDo not run dependency/framework/build/test commands on the host: this app is Dockerized. Docker access is not granted to the agent; report unavailable checks honestly.\n\nTime budget 600000 ms; tool budget 60; no retries or human assistance.\n\nReproduce and fix the note-title whitespace bug: POST and PUT accept boundary whitespace without normalizing it. A title \"  Alpha  \" must persist as \"Alpha\"; all-whitespace titles must return 422, and titles over 120 characters must return 422. Preserve CRUD statuses and ids, edits, deletion and existing records. Keep existing tests/config unchanged and add regression tests that fail before the fix.",
+      "promptHash": "08309827290c145ab31d9dde4f8acf4ebe5b42b8cd6b7a5ad7a7c3640e89682c",
+      "budget": {
+        "timeMs": 600000,
+        "toolCalls": 60,
+        "retries": 0,
+        "evaluationTimeMs": 240000
+      },
+      "acceptance": [
+        "POST/PUT trim leading and trailing whitespace before persistence.",
+        "Blank and >120-character titles fail 422; no invalid row persists.",
+        "Browser can save and edit valid notes.",
+        "Original tests and CRUD persistence regression checks pass."
+      ]
+    },
+    {
+      "id": "multi-01",
+      "taskHash": "9fef58fcae4895482485ab30918583ab4b91e3a990a0ca082b94a00e392a5228",
+      "prompt": "This is an authorized synthetic Forger benchmark in a disposable private workspace.\n\nUse the existing supported stack. Preserve commons, manifests, dependencies/configuration and all original tests.\n\nYou may add tests, but may not weaken or delete tests. No Internet, new dependencies, MCP, cloud, or external file access.\n\nThe evaluator builds, starts and browser-tests the application independently. A completion statement is not evidence.\n\nDo not run dependency/framework/build/test commands on the host: this app is Dockerized. Docker access is not granted to the agent; report unavailable checks honestly.\n\nTime budget 1200000 ms; tool budget 100; no retries or human assistance.\n\nAdd persistent archiving across database, API, client types and UI. Existing notes default archived=false without data loss. PATCH /api/notes/{id}/archive with {\"archived\":true|false} returns the updated note or 404. GET /api/notes returns active notes by default; GET /api/notes?include_archived=true returns all. Each active note exposes Archive; a Show archived checkbox reveals archived notes with a Restore button. Restore makes the note active. Preserve normal CRUD, validation, search-independent behavior, health and existing tests/config. Add tests for migration/defaults and archive/restore.",
+      "promptHash": "5b30a3962bd8fc0590c7a6e83b952d663db17d24465f092fb43c545d29130a27",
+      "budget": {
+        "timeMs": 1200000,
+        "toolCalls": 100,
+        "retries": 0,
+        "evaluationTimeMs": 240000
+      },
+      "acceptance": [
+        "Existing rows remain readable and default archived false.",
+        "Archive/restore endpoints persist across a real backend restart.",
+        "Default listing hides archived rows and include_archived exposes them.",
+        "Browser Archive/Show archived/Restore controls complete the flow."
+      ]
+    }
+  ],
+  "requiredCloudEvidence": [
+    "exact provider/model revision",
+    "same task and acceptance hashes",
+    "same sandbox/tool/context policy and budgets",
+    "exact Forger revision and harness hash",
+    "usage and billing source or null reason",
+    "no provider-model fallback; explicit model identity confirmed"
+  ]
+}

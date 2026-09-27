@@ -18,7 +18,7 @@ export default tseslint.config(
   js.configs.recommended,
   ...tseslint.configs.recommended,
   {
-    files: ['src/main/**/*.ts', 'src/preload/**/*.ts', 'src/shared/**/*.ts', 'scripts/**/*.mjs', 'test/**/*.mjs'],
+    files: ['src/main/**/*.ts', 'src/preload/**/*.ts', 'src/shared/**/*.ts', 'scripts/**/*.mjs', 'test/**/*.mjs', 'benchmarks/local-development/evaluator/**/*.mjs'],
     languageOptions: {
       globals: {
         ...globals.node,
@@ -26,7 +26,7 @@ export default tseslint.config(
     },
   },
   {
-    files: ['src/renderer/**/*.{ts,tsx}', 'vite.config.ts'],
+    files: ['src/renderer/**/*.{ts,tsx}', 'benchmarks/local-development/fixtures/**/*.{ts,tsx}', 'vite.config.ts'],
     languageOptions: {
       globals: {
         ...globals.browser,

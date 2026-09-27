@@ -1,0 +1,35 @@
+{
+  "schemaVersion": 1,
+  "version": "2026-09-26.1",
+  "definedBeforeRealModelEvaluation": true,
+  "status": "evaluation_policy_not_performance_evidence",
+  "experimentalPilot": {
+    "realTaskFamiliesRequired": ["supported_template", "persistent_crud", "modification", "test_proven_bug_fix", "coordinated_multifile"],
+    "successRequires": ["immutable_acceptance", "original_regressions", "build", "real_startup", "visible_flow", "no_unauthorized_change", "within_budget"],
+    "humanInterventionIsAutonomousSuccess": false,
+    "missingHardwareOrPrerequisiteIsModelSuccess": false,
+    "fakeRuntimeTestIsModelEvidence": false
+  },
+  "validatedConfiguration": {
+    "minimumExecutableTasks": 30,
+    "minimumUntunedHoldoutTasks": 6,
+    "repeatedSubsetMinimumTasks": 5,
+    "repetitionsPerSubsetTask": 3,
+    "requiredFamilyCoverage": "Every advertised family has independent acceptance coverage and at least one autonomous success. Failed families are excluded from the offered product scope, not from the overall report.",
+    "minimumAutonomousSuccessFraction": 0.8,
+    "fractionDenominator": "All attempted tasks in the preregistered suite; failures and timeouts included. Assisted results reported separately. Blocked tasks prevent completing the suite and are separately counted.",
+    "thresholdRationale": "A provisional product acceptance gate chosen before any model runs, not a measured expectation or a relative cloud-quality claim. Changes require a new gate version and a fresh holdout evaluation.",
+    "maximumResourceCrashes": 0,
+    "maximumUnauthorizedExternalContextTransmissions": 0,
+    "mandatoryEvidence": ["exact_model_and_runtime_identity", "context_and_tokenizer_identity", "host_and_acceleration", "peak_memory_and_swap", "end_to_end_time_distribution", "acceptance_and_regression_results", "cancellation_of_generation_and_children", "process_egress_evaluation"],
+    "validationScope": "Only the stated hardware, configuration, task families and privacy boundary; no transfer to another machine based solely on RAM."
+  },
+  "stableRollout": {
+    "requiresValidatedConfiguration": true,
+    "requiresManagedInstallIntegrityAndRecovery": true,
+    "requiresExplicitVisibleModality": true,
+    "requiresBackgroundPrivacyAudit": true,
+    "requiresRollback": true,
+    "currentStatus": "blocked_by_unmeasured_model_utility_and_unimplemented_product_controls"
+  }
+}

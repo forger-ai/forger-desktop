@@ -1,0 +1,217 @@
+agent-detector==2.0.0
+annotated-doc==0.0.5
+annotated-types==0.8.0
+anyio==4.15.1
+certifi==2026.7.22
+click==8.5.0
+coverage==7.16.1
+detect-installer==0.2.1
+dnspython==2.8.0
+email-validator==2.3.0
+fastapi==0.136.3
+fastapi-cli==0.0.32
+fastapi-cloud-cli==0.26.0
+fastar==0.12.0
+greenlet==3.5.6
+h11==0.16.0
+httpcore==1.0.9
+httptools==0.8.0
+httpx==0.28.1
+idna==3.20
+iniconfig==2.3.0
+Jinja2==3.1.6
+markdown-it-py==4.2.0
+MarkupSafe==3.0.3
+mdurl==0.1.2
+packaging==26.3
+pluggy==1.6.0
+pydantic==2.13.5
+pydantic-extra-types==2.11.1
+pydantic-settings==2.15.0
+pydantic_core==2.46.5
+Pygments==2.21.0
+pytest==9.1.1
+pytest-asyncio==1.4.0
+pytest-cov==7.1.0
+python-dotenv==1.2.3
+python-multipart==0.0.32
+PyYAML==6.0.3
+rich==15.0.0
+rich-toolkit==0.20.5
+rignore==0.8.1
+ruff==0.16.9
+sentry-sdk==2.70.0
+shellingham==1.5.4
+skeleton @ file:///opt/backend
+SQLAlchemy==2.0.54
+sqlmodel==0.0.47
+starlette==1.7.0
+typer==0.27.2
+typing-inspection==0.4.4
+typing_extensions==4.16.0
+urllib3==2.8.0
+uvicorn==0.54.0
+uvloop==0.22.1
+watchfiles==1.3.0
+websockets==17.1
+{
+  "version": "0.1.0",
+  "name": "skeleton-frontend",
+  "dependencies": {
+    "@eslint/js": {
+      "version": "9.39.5",
+      "resolved": "https://registry.npmjs.org/@eslint/js/-/js-9.39.5.tgz",
+      "overridden": false
+    },
+    "@radix-ui/react-dialog": {
+      "version": "1.1.23",
+      "resolved": "https://registry.npmjs.org/@radix-ui/react-dialog/-/react-dialog-1.1.23.tgz",
+      "overridden": false
+    },
+    "@radix-ui/react-dropdown-menu": {
+      "version": "2.1.24",
+      "resolved": "https://registry.npmjs.org/@radix-ui/react-dropdown-menu/-/react-dropdown-menu-2.1.24.tgz",
+      "overridden": false
+    },
+    "@radix-ui/react-label": {
+      "version": "2.1.15",
+      "resolved": "https://registry.npmjs.org/@radix-ui/react-label/-/react-label-2.1.15.tgz",
+      "overridden": false
+    },
+    "@radix-ui/react-select": {
+      "version": "2.3.7",
+      "resolved": "https://registry.npmjs.org/@radix-ui/react-select/-/react-select-2.3.7.tgz",
+      "overridden": false
+    },
+    "@radix-ui/react-separator": {
+      "version": "1.1.15",
+      "resolved": "https://registry.npmjs.org/@radix-ui/react-separator/-/react-separator-1.1.15.tgz",
+      "overridden": false
+    },
+    "@radix-ui/react-slot": {
+      "version": "1.3.3",
+      "resolved": "https://registry.npmjs.org/@radix-ui/react-slot/-/react-slot-1.3.3.tgz",
+      "overridden": false
+    },
+    "@shadcn/react": {
+      "version": "0.2.1",
+      "resolved": "https://registry.npmjs.org/@shadcn/react/-/react-0.2.1.tgz",
+      "overridden": false
+    },
+    "@tailwindcss/vite": {
+      "version": "4.3.3",
+      "resolved": "https://registry.npmjs.org/@tailwindcss/vite/-/vite-4.3.3.tgz",
+      "overridden": false
+    },
+    "@tanstack/react-query": {
+      "version": "5.104.0",
+      "resolved": "https://registry.npmjs.org/@tanstack/react-query/-/react-query-5.104.0.tgz",
+      "overridden": false
+    },
+    "@tanstack/react-router": {
+      "version": "1.170.39",
+      "resolved": "https://registry.npmjs.org/@tanstack/react-router/-/react-router-1.170.39.tgz",
+      "overridden": false
+    },
+    "@types/node": {
+      "version": "22.20.4",
+      "resolved": "https://registry.npmjs.org/@types/node/-/node-22.20.4.tgz",
+      "overridden": false
+    },
+    "@types/react-dom": {
+      "version": "19.3.0",
+      "resolved": "https://registry.npmjs.org/@types/react-dom/-/react-dom-19.3.0.tgz",
+      "overridden": false
+    },
+    "@types/react": {
+      "version": "19.3.0",
+      "resolved": "https://registry.npmjs.org/@types/react/-/react-19.3.0.tgz",
+      "overridden": false
+    },
+    "@vitejs/plugin-react": {
+      "version": "4.7.0",
+      "resolved": "https://registry.npmjs.org/@vitejs/plugin-react/-/plugin-react-4.7.0.tgz",
+      "overridden": false
+    },
+    "@vitest/coverage-v8": {
+      "version": "2.1.9",
+      "resolved": "https://registry.npmjs.org/@vitest/coverage-v8/-/coverage-v8-2.1.9.tgz",
+      "overridden": false
+    },
+    "class-variance-authority": {
+      "version": "0.7.1",
+      "resolved": "https://registry.npmjs.org/class-variance-authority/-/class-variance-authority-0.7.1.tgz",
+      "overridden": false
+    },
+    "clsx": {
+      "version": "2.1.1",
+      "resolved": "https://registry.npmjs.org/clsx/-/clsx-2.1.1.tgz",
+      "overridden": false
+    },
+    "eslint-plugin-react-hooks": {
+      "version": "5.2.0",
+      "resolved": "https://registry.npmjs.org/eslint-plugin-react-hooks/-/eslint-plugin-react-hooks-5.2.0.tgz",
+      "overridden": false
+    },
+    "eslint-plugin-react-refresh": {
+      "version": "0.4.26",
+      "resolved": "https://registry.npmjs.org/eslint-plugin-react-refresh/-/eslint-plugin-react-refresh-0.4.26.tgz",
+      "overridden": false
+    },
+    "eslint": {
+      "version": "9.39.5",
+      "resolved": "https://registry.npmjs.org/eslint/-/eslint-9.39.5.tgz",
+      "overridden": false
+    },
+    "globals": {
+      "version": "15.15.0",
+      "resolved": "https://registry.npmjs.org/globals/-/globals-15.15.0.tgz",
+      "overridden": false
+    },
+    "lucide-react": {
+      "version": "0.468.0",
+      "resolved": "https://registry.npmjs.org/lucide-react/-/lucide-react-0.468.0.tgz",
+      "overridden": false
+    },
+    "react-dom": {
+      "version": "19.3.0",
+      "resolved": "https://registry.npmjs.org/react-dom/-/react-dom-19.3.0.tgz",
+      "overridden": false
+    },
+    "react": {
+      "version": "19.3.0",
+      "resolved": "https://registry.npmjs.org/react/-/react-19.3.0.tgz",
+      "overridden": false
+    },
+    "tailwind-merge": {
+      "version": "2.6.1",
+      "resolved": "https://registry.npmjs.org/tailwind-merge/-/tailwind-merge-2.6.1.tgz",
+      "overridden": false
+    },
+    "tailwindcss": {
+      "version": "4.3.3",
+      "resolved": "https://registry.npmjs.org/tailwindcss/-/tailwindcss-4.3.3.tgz",
+      "overridden": false
+    },
+    "typescript-eslint": {
+      "version": "8.70.1",
+      "resolved": "https://registry.npmjs.org/typescript-eslint/-/typescript-eslint-8.70.1.tgz",
+      "overridden": false
+    },
+    "typescript": {
+      "version": "5.9.3",
+      "resolved": "https://registry.npmjs.org/typescript/-/typescript-5.9.3.tgz",
+      "overridden": false
+    },
+    "vite": {
+      "version": "5.4.21",
+      "resolved": "https://registry.npmjs.org/vite/-/vite-5.4.21.tgz",
+      "overridden": false
+    },
+    "vitest": {
+      "version": "2.1.9",
+      "resolved": "https://registry.npmjs.org/vitest/-/vitest-2.1.9.tgz",
+      "overridden": false
+    }
+  }
+}

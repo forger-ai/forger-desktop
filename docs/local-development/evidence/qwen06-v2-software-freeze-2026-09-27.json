@@ -1,0 +1,53 @@
+{
+  "schemaVersion": 1,
+  "observedAt": "2026-09-27T12:33:09.486Z",
+  "evidenceClass": "software_checks_not_model_evaluation",
+  "forger": {
+    "version": "0.5.17",
+    "revision": "7fa965edc9408211d8f4336bb0ed0a4f30a88102",
+    "dirty": true,
+    "sourceSha256": "4bfdf0014afbeb0706e023f7698d1588d292fbe070d6fd6f7ac4a505951e4521",
+    "compiledProviderSha256": "47f56ed66162ae7c9248d08234ec1f83acb0a27c7b54e947c833cdc94bf37e4e",
+    "harnessSha256": "2e23508defb37ca1b6ba951a4f18f25d47b6dd756830baa3cf333097f4749efb"
+  },
+  "tests": {
+    "command": "node --test test/main/local-inference*.test.mjs test/main/local-development*.test.mjs test/main/llm-provider-run-service.test.mjs test/main/chat-orchestrator.test.mjs test/contracts/llm-provider-boundaries.test.mjs",
+    "passed": 266,
+    "failed": 0,
+    "skipped": 0,
+    "logSha256": "65fc8bc6bd05130384e8d3e72dfacaa0d654947a9d0f1a710820566c85d57704"
+  },
+  "build": {
+    "command": "npm run build:electron",
+    "status": "passed",
+    "performedBy": "context_preprocessor_worker_after_v2_implementation"
+  },
+  "typecheck": {
+    "command": "npm run typecheck",
+    "status": "passed",
+    "logSha256": "d14d280d3d83b8cc8550b35b443aab1fc55e4598c3ef0dbea1847812124abbca"
+  },
+  "lint": {
+    "command": "npm run lint",
+    "status": "passed",
+    "logSha256": "98cf67e3f5188a31a9df5f1db5927339818b183fc1cda43d56fd7479f8f38acc"
+  },
+  "protocol": {
+    "file": "QWEN06-REQUEST-V2-EXPERIMENT.md",
+    "sha256": "2b2fdcaa1611677e3a854aae3c73416d738aef3a355a439f0d0eea2069f173cb",
+    "strategies": [
+      "direct-v1",
+      "staged-request-v2"
+    ],
+    "distinctTasks": 1,
+    "attemptsPerStrategy": 3,
+    "task": "bug-01",
+    "originalRequestPreserved": true,
+    "codeFrozenBeforeMeasuredAttempts": true
+  },
+  "knownLimitations": [
+    "One English synthetic bug task, three repetitions per arm; not a generalization evaluation.",
+    "No in-loop application test feedback; identical constraint in both strategies.",
+    "Strict whole-CLI filesystem/network privacy remains unverified."
+  ]
+}

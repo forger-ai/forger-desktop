@@ -1,0 +1,29 @@
+{
+  "schemaVersion": 1,
+  "createdAt": "2026-09-26T14:43:56.881Z",
+  "protocol": "forger-common-local-v1",
+  "comparisonMode": "controlled",
+  "forger": {
+    "version": "0.5.17",
+    "revision": "7fa965edc9408211d8f4336bb0ed0a4f30a88102",
+    "dirty": true,
+    "harnessSha256": "8b06c81371467640ada974aca27491837d0b347097c8cec4612097fd53e3d80c"
+  },
+  "hardware": {
+    "platform": "darwin",
+    "architecture": "arm64",
+    "cpu": "Apple M1",
+    "logicalCpuCount": 8,
+    "totalMemoryBytes": 8589934592,
+    "freeMemoryBytes": 384532480,
+    "availableForModelBytes": null,
+    "classification": "detection only, not a calibration or performance measurement"
+  },
+  "catalogVersion": "0.1.0",
+  "results": [],
+  "state": "preflight_only",
+  "prerequisites": {
+    "ready": false,
+    "reason": "immutable_evaluator_image_required"
+  }
+}

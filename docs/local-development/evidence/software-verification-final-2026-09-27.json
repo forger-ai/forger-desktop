@@ -1,0 +1,59 @@
+{
+  "schemaVersion": 1,
+  "observedAt": "2026-09-27T01:43:44.257Z",
+  "evidenceClass": "software_verification",
+  "nodeVersion": "v24.18.0",
+  "forger": {
+    "version": "0.5.17",
+    "revision": "7fa965edc9408211d8f4336bb0ed0a4f30a88102",
+    "dirty": true,
+    "sourceSha256": "ebcb6f8a354fc3776edf1ff688686a67f3b98ac8c726539d5d30e0fcbee7e120",
+    "compiledProviderSha256": "b1550b369b58b6caf323bb2d8a1ee1bd8a63e8cbd6e6be7c08c06e75ba678812",
+    "harnessSha256": "1a7b7614bbda8b9a86be51e96e3f9247b9f28b534227c16e292bb6ca2b649273"
+  },
+  "checks": [
+    {
+      "name": "tests",
+      "command": "node --test test/main/local-inference*.test.mjs test/main/local-development*.test.mjs test/main/llm-provider-run-service.test.mjs test/main/chat-orchestrator.test.mjs test/contracts/llm-provider-boundaries.test.mjs",
+      "exitCode": 0,
+      "logSha256": "d98ac52228c9b24f2a168063a57c8e694b52b63c73d0914cfcb73691d07f1446",
+      "tests": 213,
+      "passed": 213,
+      "failed": 0,
+      "skipped": 0
+    },
+    {
+      "name": "typecheck",
+      "command": "npm run typecheck",
+      "exitCode": 0,
+      "logSha256": "d14d280d3d83b8cc8550b35b443aab1fc55e4598c3ef0dbea1847812124abbca",
+      "sourceUnchangedSincePreviousVerification": true
+    },
+    {
+      "name": "lint",
+      "command": "npm run lint",
+      "exitCode": 0,
+      "logSha256": "98cf67e3f5188a31a9df5f1db5927339818b183fc1cda43d56fd7479f8f38acc"
+    },
+    {
+      "name": "build",
+      "command": "npm run build:electron",
+      "exitCode": 0,
+      "logSha256": "6aa29c0982a6cb5239deb754c6a0142e7056463528ba81e42b563dd1f1a5ad80",
+      "sourceUnchangedSincePreviousVerification": true
+    }
+  ],
+  "realCliSyntheticProfiles": [
+    "cli-profile-single-agent-2026-09-27.json",
+    "cli-profile-no-thinking-2026-09-27.json",
+    "cli-profile-compact-2026-09-27.json"
+  ],
+  "limits": [
+    "Focused relevant software suite, not repository-wide coverage or a real-model success count.",
+    "Tests with simulated hardware do not establish performance on that hardware.",
+    "The real CLI probes use synthetic inference and validate only their recorded contracts.",
+    "No production release, live cloud request, new credential or model recommendation."
+  ],
+  "supersedes": "software-verification-2026-09-27.json",
+  "change": "Preserve final file inspection on failed agent attempts; distinguish unavailable observation from verified zero changes."
+}
