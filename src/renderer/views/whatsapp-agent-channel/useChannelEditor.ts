@@ -1,9 +1,11 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import type { ConnectionInstance, WhatsAppAgentBinding, WhatsAppAgentDeliveryStatus, WhatsAppAgentUnsettledMessage } from '@shared/types';
 import { blankDraft, emptyPolicy, chatLabel, participantAccess, observedChats, observedParticipants, uniqueChatChoices, type BindingDraft, type ObservedChat } from './model';
 import type { ChannelCopy } from './copy';
 
 export function useChannelEditor(agentId: string, agentName: string, c: ChannelCopy) {
+  const removalPending = useRef(false);
+  const refreshRevision = useRef(0);
   const [connections, setConnections] = useState<ConnectionInstance[]>([]);
   const [bindings, setBindings] = useState<WhatsAppAgentBinding[]>([]);
   const [unsettled, setUnsettled] = useState<WhatsAppAgentUnsettledMessage[]>([]);
@@ -71,6 +73,8 @@ export function useChannelEditor(agentId: string, agentName: string, c: ChannelC
   useEffect(() => {
     let current = true;
     const refresh = async () => {
+      if (removalPending.current) return;
+      const revision = refreshRevision.current;
       try {
         const [nextBindings, nextUnsettled, connectionState] = await Promise.all([
           window.forger.personalAgentWhatsAppBindingsList({ agentId }),
@@ -83,7 +87,7 @@ export function useChannelEditor(agentId: string, agentName: string, c: ChannelC
           }).catch(() => null);
           return [`${binding.connectionId}:${binding.chatId}:${binding.agentId}`, latest] as const;
         }));
-        if (!current) return;
+        if (!current || revision !== refreshRevision.current) return;
         setConnections(connectionState.instances.filter((item) => item.type === 'whatsapp'));
         setBindings(nextBindings);
         setUnsettled(nextUnsettled);
@@ -254,29 +258,40 @@ export function useChannelEditor(agentId: string, agentName: string, c: ChannelC
     }
   };
 
-  const remove = async () => {
-    if (!editing || busy) return;
+  const remove = async (binding: WhatsAppAgentBinding): Promise<boolean> => {
+    if (busy || removalPending.current || binding.agentId !== agentId) return false;
+    removalPending.current = true;
+    refreshRevision.current += 1;
     setBusy(true);
-    setError('');
+    setNotice('');
+    const matches = (item: { connectionId: string; chatId: string; agentId: string | null }) =>
+      item.connectionId === binding.connectionId && item.chatId === binding.chatId && item.agentId === binding.agentId;
     try {
+      // An already absent binding is also a successful removal of the stale local card.
       await window.forger.personalAgentWhatsAppBindingDelete({
-        connectionId: editing.connectionId,
-        chatId: editing.chatId,
-        agentId,
+        connectionId: binding.connectionId,
+        chatId: binding.chatId,
+        agentId: binding.agentId,
       });
-      setBindings((items) => items.filter((item) => !(item.connectionId === editing.connectionId && item.chatId === editing.chatId && item.agentId === agentId)));
-      setUnsettled((items) => items.filter((item) => !(item.connectionId === editing.connectionId && item.chatId === editing.chatId && item.agentId === agentId)));
+      setBindings((items) => items.filter((item) => !matches(item)));
+      setUnsettled((items) => items.filter((item) => !matches(item)));
       setDeliveries((current) => {
         const next = { ...current };
-        delete next[`${editing.connectionId}:${editing.chatId}:${agentId}`];
+        delete next[`${binding.connectionId}:${binding.chatId}:${binding.agentId}`];
         return next;
       });
-      setDraft(blankDraft(agentName, connections.find((item) => item.status === 'connected')?.id ?? ''));
-      setEditing(null);
+      if (editing && matches(editing)) {
+        setDraft(blankDraft(agentName, connections.find((item) => item.status === 'connected')?.id ?? ''));
+        setEditing(null);
+        setConflicting(null);
+        setSearch('');
+        setError('');
+      }
       setNotice(c.deleted);
-    } catch {
-      setError(c.deleteFailed);
+      return true;
     } finally {
+      refreshRevision.current += 1;
+      removalPending.current = false;
       setBusy(false);
     }
   };

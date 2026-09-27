@@ -71,6 +71,173 @@ const chooseChat = async (user: ReturnType<typeof userEvent.setup>, name = 'Proj
 };
 
 describe('AgentWhatsAppPanel', () => {
+  it.each(['en', 'es'] as const)('removes a missing-account chat directly with a localized confirmation (%s)', async (locale) => {
+    const c = copy[locale];
+    const api = makeApi({ instances: [], bindings: [{ ...binding, enabled: false }] });
+    api.personalAgentWhatsAppBindingDelete.mockResolvedValue(false);
+    const user = userEvent.setup();
+    render(<AgentWhatsAppPanel agentId="agent-one" agentName="Helper" t={getDictionary(locale)} />);
+    await user.click(await screen.findByRole('button', { name: c.delete }));
+    const dialog = screen.getByRole('dialog', { name: c.delete });
+    expect(within(dialog).getByText('Helper · group-one')).toBeVisible();
+    expect(within(dialog).getByText(c.connectionMissing)).toBeVisible();
+    expect(within(dialog).getByText(c.removeConfirm)).toBeVisible();
+    expect(api.personalAgentWhatsAppBindingDelete).not.toHaveBeenCalled();
+    await user.click(within(dialog).getByRole('button', { name: c.cancel }));
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+    expect(api.personalAgentWhatsAppBindingDelete).not.toHaveBeenCalled();
+    await user.click(screen.getByRole('button', { name: c.delete }));
+    await user.click(within(screen.getByRole('dialog')).getByRole('button', { name: c.delete }));
+    await screen.findByText(c.deleted);
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+    expect(screen.queryByText('Helper · group-one')).not.toBeInTheDocument();
+    expect(api.personalAgentWhatsAppBindingDelete).toHaveBeenCalledExactlyOnceWith({ connectionId: account.id, chatId: binding.chatId, agentId: binding.agentId });
+  });
+
+  it.each([false, true])('preserves an unrelated %s editing draft when removing the selected configured chat', async (editExisting) => {
+    const stale = { ...binding, connectionId: 'old-phone', enabled: false };
+    const other = { ...binding };
+    const api = makeApi({ bindings: [stale, other] });
+    const user = userEvent.setup();
+    showPanel();
+    await screen.findAllByRole('button', { name: 'Remove chat' });
+    if (editExisting) await user.click(screen.getAllByRole('button', { name: 'Edit' })[1]);
+    else await chooseChat(user);
+    await user.clear(screen.getByRole('textbox', { name: 'Purpose in this chat' }));
+    await user.type(screen.getByRole('textbox', { name: 'Purpose in this chat' }), 'Unsaved work');
+    await user.click(screen.getAllByRole('button', { name: 'Remove chat' })[0]);
+    expect(within(screen.getByRole('dialog')).getByText('Helper · group-one')).toBeVisible();
+    await user.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Remove chat' }));
+    await screen.findByText('Chat removed.');
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+    expect(screen.getByRole('textbox', { name: 'Purpose in this chat' })).toHaveValue('Unsaved work');
+    expect(screen.getByRole('combobox', { name: 'Chat' })).toHaveValue('Project group');
+    expect(screen.getAllByRole('button', { name: 'Edit' })).toHaveLength(1);
+    expect(api.personalAgentWhatsAppBindingDelete).toHaveBeenCalledExactlyOnceWith({ connectionId: stale.connectionId, chatId: stale.chatId, agentId: stale.agentId });
+  });
+
+  it.each([undefined, '+56123456789'])('identifies an available unlabeled account without claiming it is missing (%s)', async (phoneNumber) => {
+    makeApi({ instances: [{ ...account, label: '', ...(phoneNumber ? { accountIdentity: { phoneNumber } } : {}) }], bindings: [binding] });
+    showPanel();
+    await userEvent.click(await screen.findByRole('button', { name: 'Remove chat' }));
+    const dialog = screen.getByRole('dialog', { name: 'Remove chat' });
+    expect(within(dialog).getByText(phoneNumber ?? copy.en.account)).toBeVisible();
+    expect(within(dialog).queryByText(copy.en.connectionMissing)).not.toBeInTheDocument();
+  });
+
+  it('keeps removal errors in the dialog and blocks duplicate submissions and dismissal until retry finishes', async () => {
+    const api = makeApi({ bindings: [binding] });
+    api.personalAgentWhatsAppBindingDelete.mockRejectedValueOnce(new Error('private implementation failure'));
+    const user = userEvent.setup();
+    showPanel();
+    await user.click(await screen.findByRole('button', { name: 'Remove chat' }));
+    const dialog = screen.getByRole('dialog', { name: 'Remove chat' });
+    expect(within(dialog).getByText('Personal phone')).toBeVisible();
+    await user.click(within(dialog).getByRole('button', { name: 'Remove chat' }));
+    expect(await within(dialog).findByRole('alert')).toHaveTextContent(copy.en.deleteFailed);
+    const gate = deferred<boolean>();
+    api.personalAgentWhatsAppBindingDelete.mockReturnValueOnce(gate.promise);
+    await user.click(within(dialog).getByRole('button', { name: 'Remove chat' }));
+    expect(within(dialog).queryByRole('alert')).not.toBeInTheDocument();
+    expect(within(dialog).getByRole('button', { name: 'Cancel' })).toBeDisabled();
+    const removing = within(dialog).getByRole('button', { name: 'Removing…' });
+    expect(removing).toBeDisabled();
+    fireEvent.click(removing);
+    await user.keyboard('{Escape}');
+    expect(dialog).toBeVisible();
+    expect(api.personalAgentWhatsAppBindingDelete).toHaveBeenCalledTimes(2);
+    await act(async () => gate.resolve(true));
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+    expect(screen.queryByRole('button', { name: 'Edit' })).not.toBeInTheDocument();
+  });
+
+  it('does not restore a removed chat or its work from an older in-flight refresh', async () => {
+    const pending = { agentId: binding.agentId, connectionId: binding.connectionId, chatId: binding.chatId, stableMessageRef: 'message-one', state: 'pending', turnId: null, revision: 4 };
+    const api = makeApi({ bindings: [binding], unsettled: [pending], delivery: { state: 'sent' } });
+    let refresh: (() => void) | undefined;
+    const originalInterval = window.setInterval;
+    vi.spyOn(window, 'setInterval').mockImplementation((callback, delay) => {
+      if (delay === 5_000) { refresh = callback as () => void; return 1; }
+      return originalInterval(callback, delay);
+    });
+    const { result } = renderHook(() => useChannelEditor('agent-one', 'Helper', copy.en));
+    await waitFor(() => expect(result.current.loading).toBe(false));
+    const gate = deferred<object[]>();
+    api.personalAgentWhatsAppBindingsList.mockReturnValueOnce(gate.promise);
+    act(() => refresh?.());
+    await act(async () => { await result.current.remove(binding); });
+    expect(result.current.bindings).toEqual([]);
+    expect(result.current.unsettled).toEqual([]);
+    expect(result.current.deliveries).toEqual({});
+    await act(async () => gate.resolve([binding]));
+    expect(result.current.bindings).toEqual([]);
+    expect(result.current.unsettled).toEqual([]);
+    expect(result.current.deliveries).toEqual({});
+  });
+
+  it('blocks repeated removals and status refreshes while the exact removal is pending', async () => {
+    const api = makeApi({ bindings: [binding] });
+    const gate = deferred<boolean>();
+    api.personalAgentWhatsAppBindingDelete.mockReturnValueOnce(gate.promise);
+    let refresh: (() => void) | undefined;
+    const originalInterval = window.setInterval;
+    vi.spyOn(window, 'setInterval').mockImplementation((callback, delay) => {
+      if (delay === 5_000) { refresh = callback as () => void; return 1; }
+      return originalInterval(callback, delay);
+    });
+    const { result } = renderHook(() => useChannelEditor('agent-one', 'Helper', copy.en));
+    await waitFor(() => expect(result.current.loading).toBe(false));
+    const remove = result.current.remove;
+    let pending: Promise<boolean>;
+    await act(async () => {
+      pending = remove(binding);
+      expect(await remove(binding)).toBe(false);
+      refresh?.();
+    });
+    await act(async () => { expect(await result.current.remove(binding)).toBe(false); });
+    expect(api.personalAgentWhatsAppBindingDelete).toHaveBeenCalledTimes(1);
+    expect(api.personalAgentWhatsAppBindingsList).toHaveBeenCalledTimes(1);
+    await act(async () => { gate.resolve(true); expect(await pending).toBe(true); });
+    expect(result.current.bindings).toEqual([]);
+  });
+
+  it('prevents same-event duplicate confirmations from issuing another removal', async () => {
+    const api = makeApi({ bindings: [binding] });
+    const gate = deferred<boolean>();
+    api.personalAgentWhatsAppBindingDelete.mockReturnValueOnce(gate.promise);
+    showPanel();
+    await userEvent.click(await screen.findByRole('button', { name: 'Remove chat' }));
+    const dialog = screen.getByRole('dialog', { name: 'Remove chat' });
+    const confirm = within(dialog).getByRole('button', { name: 'Remove chat' });
+    act(() => { fireEvent.click(confirm); fireEvent.click(confirm); });
+    expect(api.personalAgentWhatsAppBindingDelete).toHaveBeenCalledTimes(1);
+    expect(dialog).toBeVisible();
+    await act(async () => gate.resolve(true));
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+  });
+
+  it('rejects a removal target belonging to another agent', async () => {
+    const api = makeApi({ bindings: [binding] });
+    const { result } = renderHook(() => useChannelEditor('agent-one', 'Helper', copy.en));
+    await waitFor(() => expect(result.current.loading).toBe(false));
+    await act(async () => { expect(await result.current.remove({ ...binding, agentId: 'another-agent' })).toBe(false); });
+    expect(api.personalAgentWhatsAppBindingDelete).not.toHaveBeenCalled();
+    expect(result.current.bindings).toEqual([binding]);
+  });
+
+  it('clears an edited removed chat and its conflict while preserving other configured chats', async () => {
+    const api = makeApi({ bindings: [binding, { ...binding, chatId: 'other' }] });
+    const { result } = renderHook(() => useChannelEditor('agent-one', 'Helper', copy.en));
+    await waitFor(() => expect(result.current.loading).toBe(false));
+    act(() => { result.current.beginEdit(binding); result.current.setConflicting(binding); });
+    await act(async () => { await result.current.remove(binding); });
+    expect(result.current.editing).toBeNull();
+    expect(result.current.conflicting).toBeNull();
+    expect(result.current.draft.chatId).toBe('');
+    expect(result.current.bindings.map((item) => item.chatId)).toEqual(['other']);
+    expect(api.personalAgentWhatsAppBindingDelete).toHaveBeenCalledTimes(1);
+  });
+
   it('reviews, saves and reopens web search permission and retains it when agent internet is revoked', async () => {
     const api = makeApi({ bindings: [binding] }); const user = userEvent.setup();
     const view = render(<AgentWhatsAppPanel agentId="agent-one" agentName="Helper" agentNetworkAccess t={t} />);
@@ -324,7 +491,7 @@ describe('AgentWhatsAppPanel', () => {
     expect(within(screen.getByRole('dialog')).getByText('another-chat')).toBeVisible();
     expect(api.personalAgentWhatsAppAliasUpdate).not.toHaveBeenCalled();
     await user.keyboard('{Escape}'); await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
-    await user.click(screen.getByRole('button', { name: 'Remove chat' }));
+    await user.click(screen.getAllByRole('button', { name: 'Remove chat' }).at(-1)!);
     await user.keyboard('{Escape}'); await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
     expect(api.personalAgentWhatsAppBindingDelete).not.toHaveBeenCalled();
   });
@@ -347,8 +514,6 @@ describe('AgentWhatsAppPanel', () => {
     const api = makeApi({ bindings: [binding] });
     const { result } = renderHook(() => useChannelEditor('agent-one', 'Helper', copy.en));
     await waitFor(() => expect(result.current.loading).toBe(false));
-    await act(async () => result.current.remove());
-    expect(api.personalAgentWhatsAppBindingDelete).not.toHaveBeenCalled();
     act(() => result.current.beginEdit(binding));
     api.personalAgentWhatsAppBindingPut.mockRejectedValueOnce(new Error('configuration_conflict'));
     api.personalAgentWhatsAppBindingGet.mockRejectedValueOnce(new Error('offline'));
@@ -484,11 +649,11 @@ describe('AgentWhatsAppPanel', () => {
     expect(await screen.findByText('Settings saved.')).toBeVisible();
 
 
-    await user.click(screen.getByRole('button', { name: 'Remove chat' }));
+    await user.click(screen.getAllByRole('button', { name: 'Remove chat' }).at(-1)!);
     expect(api.personalAgentWhatsAppBindingDelete).not.toHaveBeenCalled();
     await user.click(screen.getByRole('button', { name: 'Cancel' }));
     await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
-    await user.click(screen.getByRole('button', { name: 'Remove chat' }));
+    await user.click(screen.getAllByRole('button', { name: 'Remove chat' }).at(-1)!);
     await user.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Remove chat' }));
     await waitFor(() => expect(api.personalAgentWhatsAppBindingDelete).toHaveBeenCalledWith({
       connectionId: account.id, chatId: 'group-one', agentId: 'agent-one',
@@ -528,9 +693,10 @@ describe('AgentWhatsAppPanel', () => {
     if (screen.queryByRole('button', { name: 'Apply settings' })) { await user.click(screen.getByRole('button', { name: 'Apply settings' })); await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument()); }
     expect(await screen.findByText('Could not save this chat.')).toBeVisible();
     api.personalAgentWhatsAppBindingDelete.mockRejectedValueOnce(new Error('delete failed'));
-    await user.click(screen.getByRole('button', { name: 'Remove chat' }));
+    await user.click(screen.getAllByRole('button', { name: 'Remove chat' }).at(-1)!);
     await user.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Remove chat' }));
     expect(await screen.findByText('Could not remove this chat.')).toBeVisible();
+    await user.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Cancel' }));
     expect(await screen.findByRole('button', { name: 'Edit' })).toBeVisible();
   });
 
@@ -783,7 +949,7 @@ describe('AgentWhatsAppPanel', () => {
     await user.click(screen.getByRole('button', { name: 'Add chat' }));
     expect(screen.getByRole('combobox', { name: 'WhatsApp account' })).toHaveTextContent('​');
     await user.click(screen.getByRole('button', { name: 'Edit' }));
-    await user.click(screen.getByRole('button', { name: 'Remove chat' }));
+    await user.click(screen.getAllByRole('button', { name: 'Remove chat' }).at(-1)!);
     await user.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Remove chat' }));
     expect(await screen.findByText('Chat removed.')).toBeVisible();
     expect(api.personalAgentWhatsAppBindingDelete).toHaveBeenCalledTimes(1);
