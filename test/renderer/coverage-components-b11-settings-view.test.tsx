@@ -510,8 +510,9 @@ describe('SettingsView storage, privacy, and developer settings', () => {
     await user.click(screen.getByRole('button', { name: t.settings.secretKeyRegenerate }));
     expect(view.props.onRegenerateCloudSecretKey).toHaveBeenCalledOnce();
     expect(keyField).toHaveAttribute('type', 'password');
-    await user.click(screen.getByRole('switch', { name: t.settings.usageAnalyticsToggle }));
-    expect(view.props.onUsageAnalyticsChange).toHaveBeenCalledWith(true);
+    expect(screen.queryByRole('switch', { name: t.settings.usageAnalyticsToggle })).not.toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Optional measurement' })).toBeInTheDocument();
+    expect(view.props.onUsageAnalyticsChange).not.toHaveBeenCalled();
     view.unmount();
 
     renderSettings({ initialSubview: 'privacySecurity', cloudIdentity: null });

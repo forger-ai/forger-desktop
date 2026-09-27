@@ -175,7 +175,24 @@ test('Given observed chats and messages, when filtering, paginating, and reading
     beforeMessageRef: store.encodeRef(makeRef('m2', true)),
     limit: 0,
   })).map((message) => message.stableMessageRef.id), ['m1']);
-  assert.equal((await store.readMessages({ chatId: '56911112222@s.whatsapp.net', beforeMessageRef: store.encodeRef(makeRef('missing')) })).length, 3);
+  assert.equal((await store.readMessages({ chatId: '56911112222@s.whatsapp.net', beforeMessageRef: store.encodeRef(makeRef('missing')) })).length, 0);
+  await store.upsertMessages([{
+    stableMessageRef: { remoteJid: '120363000000001@g.us', id: 'other-chat', fromMe: false },
+    chatId: '120363000000001@g.us',
+    chatType: 'group',
+    fromMe: false,
+    timestamp: 5,
+    text: 'Other chat',
+    messageType: 'conversation',
+    isGroup: true,
+    isChannel: false,
+    hasAttachments: false,
+    attachments: [],
+  }]);
+  assert.equal((await store.readMessages({
+    chatId: '56911112222@s.whatsapp.net',
+    beforeMessageRef: store.encodeRef({ remoteJid: '120363000000001@g.us', id: 'other-chat', fromMe: false }),
+  })).length, 0);
   assert.equal((await store.readMessages({ chatId: '56911112222@s.whatsapp.net', beforeMessageRef: 'invalid', limit: Number.NaN })).length, 3);
 
   await store.clear();

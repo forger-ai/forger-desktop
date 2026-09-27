@@ -1,3 +1,4 @@
+import type { WhatsAppCurrentMessageImagesResult } from './connections/modules/whatsapp/types';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
@@ -166,6 +167,16 @@ export class ConnectionsService {
     this.loaded = true;
   }
 
+  async startType(type: string): Promise<void> {
+    await this.load();
+    await this.modulesByType.get(type)?.start?.(this.getContext());
+  }
+
+  async stopType(type: string): Promise<void> {
+    if (!this.loaded) return;
+    await this.modulesByType.get(type)?.stop?.(this.getContext());
+  }
+
   async listTypes(locale?: string): Promise<ConnectionTypeDefinition[]> {
     await this.load();
     const effectiveLocale = locale ?? this.options.locale;
@@ -251,6 +262,41 @@ export class ConnectionsService {
       userMessage: 'Default connection updated.',
       instance: toConnectionInstance(this.registry.instances[connectionId], this.registry.defaults),
     };
+  }
+
+  /** The caller supplies a durable channel scope; this is not an agent action. */
+  async hasWhatsAppCurrentImage(connectionId: string, chatId: string, stableMessageRef: string): Promise<boolean> {
+    await this.load();
+    const instance = this.registry.instances[cleanString(connectionId)];
+    const module = instance?.type === 'whatsapp' ? this.modulesByType.get('whatsapp') : undefined;
+    return module?.hasCurrentImage ? module.hasCurrentImage(this.getContext(), instance.id, chatId, stableMessageRef) : false;
+  }
+
+  async readWhatsAppCurrentImages(connectionId: string, chatId: string, stableMessageRef: string, authorize: () => Promise<boolean>): Promise<WhatsAppCurrentMessageImagesResult> {
+    await this.load();
+    const instance = this.registry.instances[cleanString(connectionId)];
+    const module = instance?.type === 'whatsapp' ? this.modulesByType.get('whatsapp') : undefined;
+    return module?.readCurrentImages
+      ? module.readCurrentImages(this.getContext(), instance.id, chatId, stableMessageRef, authorize)
+      : { success: false, userMessage: 'La conexión de WhatsApp no está disponible.', technicalCode: 'whatsapp_current_images_connection_unavailable' };
+  }
+
+  /** Main-process only: resolves authenticated WhatsApp identities for channel authorization. */
+  async resolveWhatsAppIdentityIds(connectionId: string, id: string): Promise<string[]> {
+    await this.load();
+    const instance = this.registry.instances[cleanString(connectionId)];
+    const module = instance?.type === 'whatsapp' ? this.modulesByType.get('whatsapp') : undefined;
+    return module?.resolveIdentityIds ? module.resolveIdentityIds(this.getContext(), instance.id, id) : [id];
+  }
+
+  async pairingStatus(connectionId: string): Promise<CallConnectionActionResult> {
+    await this.load();
+    const instance = this.registry.instances[cleanString(connectionId)];
+    const module = instance && this.modulesByType.get(instance.type);
+    if (!instance || !module?.pairingStatus) {
+      return { success: false, userMessage: 'WhatsApp connection was not found.', technicalCode: 'connection_instance_not_found' };
+    }
+    return module.pairingStatus(this.getContext(), instance.id);
   }
 
   async call(input: ServiceCallConnectionActionInput): Promise<CallConnectionActionResult> {

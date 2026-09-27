@@ -6,6 +6,16 @@ import { clearDistModule, createElectronAppMock, withMockedElectron } from './el
 const require = createRequire(import.meta.url);
 const { extractDeepLinkFromArgv, parseForgerUrl } = require('../../dist-electron/main/deep-links.js');
 
+test('campaign links accept only exact public campaign codes and never retain a raw URL', () => {
+  assert.deepEqual(parseForgerUrl('forger://campaign?code=ig_202609_paid_01'), { kind: 'campaign', code: 'ig_202609_paid_01' });
+  for (const url of [
+    'forger://campaign?code=unknown', 'forger://campaign?code=ig_202609_paid_01&email=private',
+    'forger://campaign?code=ig_202609_paid_01&code=ig_202609_paid_02',
+    'forger://campaign/path?code=ig_202609_paid_01', 'forger://campaign?code=ig_202609_paid_01#private',
+    'forger://user:secret@campaign?code=ig_202609_paid_01', 'forger://campaign:123?code=ig_202609_paid_01',
+  ]) assert.equal(parseForgerUrl(url), null);
+});
+
 test('parseForgerUrl returns chat deep links with app and prompt payloads', () => {
   assert.deepEqual(parseForgerUrl('forger://chat'), {
     kind: 'chat',

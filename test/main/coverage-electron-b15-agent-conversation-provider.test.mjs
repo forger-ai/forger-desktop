@@ -73,7 +73,7 @@ test('given missing provider prerequisites, unavailable runtime and workspace fa
   }
 });
 
-test('given a Codex provider run with MCPs, process output, thread persistence, logs, and cleanup stay scoped', async () => {
+test('given a Codex provider run with MCPs, process output, thread identity, logs, and cleanup stay scoped', async () => {
   const released = [];
   const cli = await writeExecutable(os.tmpdir(), `forger-codex-b15-${process.pid}.cjs`, [
     "console.log(JSON.stringify({ type: 'thread.started', thread_id: 'provider-thread-b15' }));",
@@ -101,8 +101,8 @@ test('given a Codex provider run with MCPs, process output, thread persistence, 
     input.onProgress = (message, options) => progress.push({ message, options });
     const result = await harness.manager.runWithConfiguredProvider(input);
     assert.equal(result.assistantText, 'Provider completed.');
-    assert.equal(input.conversation.providerThreadId, 'provider-thread-b15');
-    assert.equal((await harness.store.requireConversation(input.conversation.id)).providerThreadId, 'provider-thread-b15');
+    assert.equal(result.providerThreadId, 'provider-thread-b15');
+    assert.equal((await harness.store.requireConversation(input.conversation.id)).providerThreadId, undefined);
     assert.deepEqual(released.sort(), [`app:${harness.run.id}`, 'forger:forger-token'].sort());
     assert.equal(harness.manager.activeChildren.has(harness.run.id), false);
     assert.equal(progress.length > 0, true);
@@ -127,6 +127,25 @@ test('given absent optional provider integrations, defaults run without MCP clea
     const result = await harness.manager.runWithConfiguredProvider(input);
     assert.equal(result.assistantText, 'No integrations.');
   } finally {
+    await harness.cleanup();
+    await fs.rm(cli, { force: true });
+  }
+});
+
+test('given cancellation before provider child registration, the process is stopped at launch', async () => {
+  const cli = await writeExecutable(os.tmpdir(), `forger-codex-canceled-b15-${process.pid}.cjs`,
+    "setTimeout(() => console.log('Late provider output'), 1000);");
+  const harness = await createProviderHarness({
+    getAgentRuntime: async () => ({ provider: 'codex', model: 'gpt-5.4', effort: 'medium' }),
+    getCodexCliPath: async () => cli,
+    getCodexAuthenticated: async () => true,
+  });
+  try {
+    harness.manager.canceledRunIds.add(harness.run.id);
+    await assert.rejects(() => harness.manager.runWithConfiguredProvider(harness.input()));
+    assert.equal(harness.manager.activeChildren.has(harness.run.id), false);
+  } finally {
+    harness.manager.canceledRunIds.delete(harness.run.id);
     await harness.cleanup();
     await fs.rm(cli, { force: true });
   }

@@ -121,11 +121,8 @@ describe('Forger onboarding service flow', () => {
     expect(tour.result.current.activeStep?.id).toBe('chat');
     expect(tour.result.current.highlightRect).toBe(rect);
     expect(tour.input().setCurrentView).toHaveBeenCalledWith('chat');
-    expect(window.localStorage.getItem('forger.usageAnalytics.enabled')).toBe('false');
-    expect(submittedEvents.map((event) => event.eventName)).toEqual([
-      'forger_installed',
-      'usage_analytics_declined',
-    ]);
+    expect(window.localStorage.getItem('forger.usageAnalytics.enabled')).toBeNull();
+    expect(submittedEvents).toEqual([]);
 
     act(() => {
       window.dispatchEvent(new Event('resize'));
@@ -170,14 +167,14 @@ describe('Forger onboarding service flow', () => {
 
     expect(tour.result.current.activeStep).toBeNull();
     expect(window.localStorage.getItem('forger.onboarding.global.dismissed')).toBe('true');
-    expect(submittedEvents.at(-1)?.eventName).toBe('onboarding_completed');
+    expect(submittedEvents).toEqual([]);
   });
 
   it('skips welcome and later global steps while respecting analytics choice and route blocking', () => {
     const welcome = renderTour();
+    act(() => welcome.result.current.setWelcomeUsageAnalyticsEnabled(true)); // Legacy opt-in is deliberately inert.
     act(() => welcome.result.current.skipTour());
-    expect(submittedEvents.map((event) => event.eventName)).toContain('usage_analytics_accepted');
-    expect(submittedEvents.map((event) => event.eventName)).toContain('onboarding_skipped');
+    expect(submittedEvents).toEqual([]);
     welcome.unmount();
 
     window.localStorage.clear();
@@ -185,17 +182,18 @@ describe('Forger onboarding service flow', () => {
     const declined = renderTour();
     act(() => declined.result.current.setWelcomeUsageAnalyticsEnabled(false));
     act(() => declined.result.current.skipTour());
-    expect(submittedEvents.map((event) => event.eventName)).toContain('usage_analytics_declined');
+    expect(submittedEvents).toEqual([]);
     declined.unmount();
 
     window.localStorage.clear();
     submittedEvents.length = 0;
     const later = renderTour();
+    act(() => later.result.current.setWelcomeUsageAnalyticsEnabled(true));
     act(() => later.result.current.continueTour());
     const acceptedBeforeSkip = submittedEvents.filter((event) => event.eventName === 'usage_analytics_accepted').length;
     act(() => later.result.current.skipTour());
     expect(submittedEvents.filter((event) => event.eventName === 'usage_analytics_accepted')).toHaveLength(acceptedBeforeSkip);
-    expect(submittedEvents.at(-1)?.eventName).toBe('onboarding_skipped');
+    expect(submittedEvents).toEqual([]);
 
     act(() => window.dispatchEvent(new CustomEvent(FORGER_TOUR_RESET_EVENT)));
     expect(later.result.current.activeStep?.id).toBe('welcome');
@@ -287,10 +285,7 @@ describe('Forger onboarding service flow', () => {
     act(() => tour.result.current.continueTour());
 
     expect(window.localStorage.getItem('forger.onboarding.connections.module')).toBe('true');
-    expect(submittedEvents.at(-1)).toMatchObject({
-      eventName: 'onboarding_module_completed',
-      stringParameters: { module: 'connections' },
-    });
+    expect(submittedEvents).toEqual([]);
 
     tour.rerenderInput({ currentView: 'connections' });
     expect(tour.result.current.activeStep).toBeNull();
@@ -298,10 +293,7 @@ describe('Forger onboarding service flow', () => {
     expect(tour.result.current.activeStep?.id).toBe('workflows-list');
     act(() => tour.result.current.skipTour());
     expect(window.localStorage.getItem('forger.onboarding.workflows.module')).toBe('true');
-    expect(submittedEvents.at(-1)).toMatchObject({
-      eventName: 'onboarding_module_skipped',
-      stringParameters: { module: 'workflows' },
-    });
+    expect(submittedEvents).toEqual([]);
   });
 
   it('keeps reset and completion deterministic across batched advances', () => {

@@ -1,0 +1,93 @@
+# PR 163 refactor validation
+
+Date: 2026-09-26. Baseline reviewed: `57bc694f9baa3c75c27eda2c76a47bb7e09b89aa`. Scope: Desktop implementation and synthetic local verification.
+
+## Review findings addressed
+
+| Finding | Implementation and acceptance evidence |
+| --- | --- |
+| Restart blocks the next task | Reconcile authoritative AgentStore runs, recover durable completed replies, interrupt orphaned executions and preserve unstarted queue entries. Real SQLite/ConversationManager restart tests. |
+| Completion races with a correction | Independent FIFO requests and explicit author-scoped corrections; durable admission identity; atomic request/turn settlement. Concurrent completion, correction and denied-author tests. |
+| Restricted chat receives private context | Separate workspace, explicit memories/files, fresh provider sessions and enforced runtime restrictions. Canary prompt tests and a native Codex sandbox read/write denial test. |
+| Account rate limit loses a reply | Persistent account outbox, proven pre-send failure markers, conservative uncertain delivery. Real WhatsApp manager with synthetic socket exercises offline → rate-limited → sent. |
+| Unrelated completions exhaust the buffer | Correlation persists before execution; no global early-event buffer. More than 100 unrelated events and immediate completion tests. |
+| History and recovery are inaccessible | WhatsApp history, activity with full text, safe explanations, local pause/cancel/retry/dismiss and reconnect navigation. Renderer flow tests and visual inspection. |
+| Global alias and edit conflicts are misleading | Explicit global alias operation and affected-chat review, stable configuration version and retained draft comparison. Active runs continue across alias edits. |
+| Capability changes are not enforced during a run | Current grant intersection and host authorization on each MCP action, after approval, and during app MCP response streaming. HTTP tests verify revocation. |
+| Participant labels or chat options become stale | Metadata/contact names retain stable authorization IDs; account changes invalidate chats and shared-file selection. Manager-to-renderer tests. |
+
+The independent final review found two additional defects: saving policy could leave the queue idle, and an authorized peer thread could not be continued using only its thread ID. Both have regression tests and fixes. A fresh-session test also found and fixed explicit null session clearing in AgentStore.
+
+## Checks
+
+- Electron suite: 2,194 tests pass, no skipped tests on this host; 100% statements, branches, functions and lines.
+- Renderer suite: 848 tests in 93 files pass; 100% statements, branches, functions and lines.
+- TypeScript and repository ESLint pass.
+- Production renderer/Electron build passes.
+- Real Electron smoke: both tests pass using a temporary isolated user profile; renderer isolation and unsafe child-window denial remain intact.
+- Python resource suite: five tests pass in a temporary modern Python environment with the repository's pinned test requirements.
+- Visual inspection covers desktop and narrow layouts with synthetic data.
+- Coverage thresholds and exclusions remain unchanged. The memory-maintenance clock test explicitly covers both sides of 03:00 to eliminate dependence on CI wall-clock time.
+
+## Personal-account follow-up (2026-09-27)
+
+The owner designated their self-chat for a controlled live test. QR renewal/expiry handling is corrected and linking succeeds. A phone/LID identity mismatch initially prevented routing; the selected self-chat was corrected without replaying earlier messages. One subsequent live task completed and delivered the exact requested answer in about seven seconds, and the owner confirmed receipt. No group was activated during this test.
+
+The next local build adds a deterministic agent reply header, optional `@` invocation, and owner/selected/all-group-member access. It preserves legacy access in a transactional relational migration, resolves authenticated phone/LID identity for routing and participant authorization, and retains original transport references. Equivalent message copies and outbound echoes do not duplicate execution. Concurrent attempts to activate equivalent bindings cannot both succeed. Configuration summaries, conflict review and available-chat selection preserve names and access modes while searching.
+
+- Complete Electron suite: 2,227 tests pass, 100% statements, branches, functions and lines.
+- Complete renderer suite: 861 tests in 94 files pass, 100% in all four metrics. Focused picker/access flows also pass after integration.
+- TypeScript, repository ESLint, renderer build and Electron build pass.
+- Packaged arm64 `0.5.19-pr163.2`: native SQLite, parser, reply formatter, access persistence, WhatsApp module import and 460 production package dependency checks pass. Ad-hoc signature verification passes.
+- Independent review identified a concurrent equivalent-chat activation race; the fix includes concurrent save and ON-command regression tests.
+
+After installing the update, the owner sent `@kupita responde: NUEVO FORMATO OK` in the designated self-chat. One request completed and its delivery was marked sent. The local transport record contains `🤖 Kupita: ` followed by a newline and `NUEVO FORMATO OK`; the owner confirmed that format on the phone. The connection remained available after the update/restart, with the self-chat still owner-only.
+
+## Searchable Chat follow-up (2026-09-27)
+
+The separate conversation search and select controls are replaced by one searchable Chat dropdown. It displays saved contact names and phone numbers, distinguishes same-name contacts, preserves selection across asynchronous search, and keeps group subjects without inventing phone numbers. The transport stores saved contact names separately from profile/message names and migrates existing databases without reclassifying old titles. Search supports formatted phone numbers and account-scoped verified phone/LID equivalents.
+
+- Transport regression suites: 89 tests pass with 100% statements, branches, functions and lines across manager, normalizer and store.
+- Focused renderer flows: 49 tests pass with 100% in all four metrics across the affected editor modules.
+- Complete renderer suite: 867 tests pass with 100% statements, branches, functions and lines.
+- TypeScript, repository ESLint, renderer build and Electron build pass.
+- Existing contact titles remain a fallback until WhatsApp supplies saved-contact metadata. This update does not trigger a full contact resynchronization or modify chat access.
+- Local arm64 `0.5.19-pr163.3` installs successfully; native SQLite, saved-contact normalization, channel behavior, WhatsApp import, all 460 production package dependencies and ad-hoc signature checks pass. Installed UI verification finds conversations by phone digits and by name in the single dropdown. The migrated database passes integrity checking, and existing bindings, allowed participants and aliases match the pre-update backup.
+
+## Per-conversation web search follow-up (2026-09-27)
+
+The chat policy's existing internet field is exposed as **Allow web searches** and retained through edit, save, review and conflict flows. It requires the agent's global internet permission and defaults to off for new chats. The editor explains a global restriction without discarding the saved conversation choice. Codex enables only hosted live web search while keeping the local network blocked; Claude exposes only WebSearch alongside explicitly authorized MCP tools.
+
+- Complete renderer suite: 871 tests in 95 files pass with 100% statements, branches, functions and lines. The 53 focused configuration flows also pass with complete changed-module coverage.
+- An isolated live Codex smoke uses the installed Forger CLI and connected profile with an empty temporary workspace and no MCP tools. With permission off it reports `WEB_SEARCH_DISABLED` and emits no search; with permission on it completes one hosted search and returns the official IANA Example Domains URL. It sends no WhatsApp messages and opts no real conversation into web access.
+- Runtime regression scenarios include both permission gates, Codex launch/resume/model fallback, Claude tool allowlisting, revocation during preparation/admission, cancellation retry after an unconfirmed process exit, agent deletion, and unrelated default-off conversations continuing to run.
+- Complete Electron suite: 2,262 tests pass, no skips, with 100% statements, branches, functions and lines. The final 173 focused runtime/admission/revocation tests also pass. TypeScript, repository ESLint and production renderer/Electron builds pass; coverage settings are unchanged.
+- Installed arm64 `0.5.19-pr163.4` passes native SQLite, effective web-permission and sandbox checks, WhatsApp import, all 460 production package dependencies and deep ad-hoc signature verification. The installed settings show the per-chat switch off and the existing general internet setting on. Bindings, aliases, participants, policy grants and shared-file selections match the pre-update backup; no existing conversation gains web access automatically.
+
+## Inline mention follow-up (2026-09-27)
+
+An explicit `@alias` invokes the agent at the beginning, middle or end of a supported message. Inline requests preserve the original text on both sides of the mention and retain the existing bounded context of the same chat. The first valid invocation selects one agent; a longer overlapping alias wins only at that same position. Prefix commands retain their previous ownership and correction rules.
+
+Specifications cover the owner's weather/clothing example, punctuation, case and Unicode, trailing and repeated mentions, overlapping aliases, emails/URLs, participant denial, inactive chats, forwarding, and deduplication. A transport-to-coordinator test proves that an outbound reply containing `@alias` cannot trigger a reply loop, including an early echo and a replay after restart; matching text from an actual participant remains a valid request. Service integration proves that the complete request reaches the agent with the originating chat's context.
+
+- Complete Electron suite: **2,312 tests pass**, zero skipped, with **100% statements, branches, functions and lines**. The first concurrent run hit an unrelated existing 25 ms MCP-test timeout; the final full run uses four test-file workers and passes unchanged thresholds.
+- The 50 focused renderer settings flows pass. TypeScript, repository ESLint and production renderer/Electron builds pass.
+
+- Installed arm64 `0.5.19-pr163.5` passes native SQLite, inline/prefix parser and command-boundary checks, reply formatting, web permission gates, WhatsApp import, all 460 production dependency checks and deep ad-hoc signature verification. The installed UI displays the updated invocation instructions. All five chat configuration tables match the pre-update backup and database integrity passes. No real WhatsApp message is sent by this follow-up.
+
+## Caption photo follow-up (2026-09-27)
+
+A photo whose caption invokes the agent supplies real visual input through a no-argument MCP tool. Trusted metadata identifies the current photo even when its caption only says “@kupita qué opinas?”. The tool resolves the durable request and exact stored message, checks the current agent/chat/account download grants and active turn, and rechecks authority across asynchronous work. Photos from an old message, quote or another chat cannot be substituted.
+
+Specifications cover authenticated chat aliases, queued captions, absent/corrupt media, oversized streams and dimensions, cache symlinks and races, media integrity, bounded renewal, revoked access and stale runs. Real Undici fetch tests exposed and fixed callback-receiver loss and an early-response termination race. The final implementation bounds both the fetch and each body read and owns cleanup. The runtime omits raw provider output from WhatsApp diagnostics and activity, including fragmented image blocks and failure payloads; ordinary personal-agent diagnostics retain their existing behavior.
+
+- A live Codex run with the connected account and a synthetic green-triangle image returns **GREEN TRIANGLE**, using exactly one MCP image call with native tools and public web search disabled. A second check uses the production prompt and generic caption, with the same result. No real WhatsApp photo or message is used.
+- Real Electron conversion checks verify PNG and JPEG decoding, 2048-pixel resizing, JPEG output fallback and rejection of invalid input.
+- Claude image tool boundaries and output privacy are covered by automated tests; no live Claude vision run is claimed.
+- Complete Electron suite: **2,370 tests pass**, zero skipped, with **100% statements, branches, functions and lines**. The final run uses two test-file workers; earlier concurrent runs hit unrelated existing timeout/temporary-file races. Coverage thresholds and exclusions are unchanged.
+- TypeScript, repository ESLint, production renderer/Electron builds and diff checks pass. No renderer behavior changes are included in this follow-up.
+- Installed arm64 **`0.5.19-pr163.6`** passes native SQLite, existing channel behavior, scoped MCP image packaging, WhatsApp import, all **461** production dependency checks and deep ad-hoc signature verification. Real Electron loads the packaged codec and passes PNG/JPEG conversion and resizing checks. The installed application reopens with Kupita and the existing WhatsApp grants available. All five chat configuration tables match the pre-update backup; database integrity passes. The previous app and consistent database backups are retained. The final installed ASAR SHA-256 is `f1168693f5c08f7793aee67d03dd2e13acebd46079d17d0f090e9d31121e9275`.
+
+## Release boundary
+
+Automated tests use synthetic transport/provider doubles and do not contact real recipients. Controlled self-chat tests confirm delivery, `@` invocation, reply formatting and connection recovery after the local update. Live group authorization and pause/resume still need their own controlled account checks. The local package is ad-hoc signed, not notarized or published; this change does not merge the PR or deploy to production. Codex and Claude support the isolated channel contract; Antigravity is rejected for this channel.

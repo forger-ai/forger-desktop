@@ -631,8 +631,9 @@ describe('RendererAppView orchestration', () => {
     await userEvent.click(screen.getByRole('link', { name: t.onboarding.steps.welcome.termsLink }));
     await userEvent.click(screen.getByRole('link', { name: t.onboarding.steps.welcome.privacyLink }));
     expect(api.openExternalUrl).toHaveBeenCalledWith('https://forger.cloud/es/terms');
-    await userEvent.click(screen.getByRole('switch'));
-    expect(state.tour.setWelcomeUsageAnalyticsEnabled).toHaveBeenCalledWith(true);
+    expect(screen.queryByRole('switch')).not.toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Medición opcional' })).toBeVisible();
+    expect(state.tour.setWelcomeUsageAnalyticsEnabled).not.toHaveBeenCalled();
 
     controller.activeLocale = 'en';
     view.rerender(<RendererAppView controller={controller} />);

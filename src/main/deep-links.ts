@@ -25,10 +25,12 @@
 
 import { app, BrowserWindow } from 'electron';
 import path from 'node:path';
+import { isCampaignCode, type CampaignCode } from '../shared/campaign-measurement';
 
 export const FORGER_PROTOCOL = 'forger';
 
 export type ForgerDeepLink =
+  | { kind: 'campaign'; code: CampaignCode }
   | {
       kind: 'chat';
       app: string | null;
@@ -70,6 +72,12 @@ export const parseForgerUrl = (rawUrl: string): ForgerDeepLink | null => {
   // `chat` into the host, with `pathname` being empty. For
   // `forger://chat/foo` it goes to host + pathname. We normalise.
   const path = (parsed.host || '').toLowerCase().trim();
+  if (parsed.hostname.toLowerCase() === 'campaign') {
+    const code = parsed.searchParams.get('code');
+    if (parsed.host !== 'campaign' || parsed.username || parsed.password || parsed.pathname || parsed.hash
+      || [...parsed.searchParams.keys()].length !== 1 || !isCampaignCode(code)) return null;
+    return { kind: 'campaign', code };
+  }
   if (path === 'chat') {
     return {
       kind: 'chat',

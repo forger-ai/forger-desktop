@@ -1,6 +1,6 @@
 {
   "name": "forger-desktop",
-  "version": "0.5.17",
+  "version": "0.5.19",
   "private": true,
   "license": "GPL-3.0-only",
   "description": "Desktop launcher for Forger",
@@ -80,6 +80,7 @@
     "serialport": "^13.0.0",
     "simple-icons": "^16.25.0",
     "tslib": "^2.8.1",
+    "undici": "6.25.0",
     "ws": "^8.18.3",
     "yauzl": "^3.3.0",
     "zod": "^4.3.6"
@@ -102,7 +103,7 @@
     "concurrently": "^9.2.1",
     "cross-env": "^10.1.0",
     "electron": "^38.3.0",
-    "electron-builder": "^26.8.1",
+    "electron-builder": "26.16.1",
     "eslint": "^9.39.4",
     "eslint-plugin-react-hooks": "^7.1.1",
     "globals": "^17.6.0",

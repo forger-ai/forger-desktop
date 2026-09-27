@@ -17,6 +17,9 @@ import type { DesktopUpdater } from '../desktop-updater';
 import type { DesktopErrorReporter } from '../error-reporting';
 import type { FileLibrary } from '../file-library';
 import type { ForgerBackendClient } from '../forger-backend-client';
+import type { CampaignMeasurement } from '../campaign-measurement';
+import { createCampaignMeasurementOwner } from '../campaign-measurement-owner';
+import { registerCampaignMeasurementIpcHandlers } from './campaign-measurement-handlers';
 import type { StoredForgerAccount } from '../forger-account-store';
 import type { MemoryStore } from '../memory-store';
 import type { AgentConversationManager } from '../personal-agents/agent-conversation-manager';
@@ -134,7 +137,6 @@ import type {
   RenameInstalledAppResult,
   SubmitAppRatingInput,
   SubmitProductFeedbackInput,
-  SubmitUsageEventInput,
   UpdateAgentDefaultsInput,
   UpdateAgentToolApprovalInput,
   UpdateAppDeveloperSettingsInput,
@@ -160,6 +162,7 @@ interface MainIpcState {
 }
 
 export interface MainProcessIpcDeps {
+  getCampaignMeasurement?: () => CampaignMeasurement;
   state: MainIpcState;
   APP_CLAUDE_MODEL_OPTIONS: unknown[];
   APP_CODEX_MODEL_OPTIONS: unknown[];
@@ -401,6 +404,10 @@ const updateInstalledManifestDisplayName = async (
 };
 
 export const registerMainIpcHandlers = (deps: MainProcessIpcDeps): void => {
+  registerCampaignMeasurementIpcHandlers({ ipcMain: deps.ipcMain, getMainWindow: deps.getMainWindow,
+    getMeasurement: deps.getCampaignMeasurement ?? createCampaignMeasurementOwner({ app: deps.app,
+      isDev: Boolean(process.env.VITE_DEV_SERVER_URL), isTest: process.env.NODE_ENV === 'test', e2eProfileRoot: process.env.FORGER_E2E_PROFILE_ROOT }),
+    hasExistingApps: () => !deps.registry?.apps || Object.keys(deps.registry.apps).length > 0 });
   const { state, APP_CLAUDE_MODEL_OPTIONS, APP_CODEX_MODEL_OPTIONS, BetterSqlite3, BrowserWindow, CODEX_USAGE_DASHBOARD_URL, IPC_CHANNELS, app, appAgentConversationManager, appendInstallLog, buildAppSecretsState, buildCodexPromptWithAppContext, buildForgerToolsContextForApp, buildForgerToolsContextForFreeChat, canUseCloudDataSync, chatOrchestrator, cloudDeviceManager, confirmClaudeAuthConnection, connectClaudeAuth, disconnectClaudeAuth, signOutClaudeAuth, connectAntigravityAuth, startAntigravityAuthSession, writeAntigravityAuthSession, cancelAntigravityAuthSession, disconnectAntigravityAuth, connectCodexAuth, createLocalAppFromSkeleton, createRemoteAppBackup, decryptCloudMessage, decryptCloudMessages, listLocalCloudMessages, dialog, disconnectCodexAuth, ensureCatalogStatuses, failureDiagnostic, forgerBackendClient, forwardCloudSocialEvent, fs, getAppDetails, getBackupsManager, getBackgroundTaskStore, getClaudeAuthStatus, getAntigravityAuthStatus, getCloudIdentityStore, getCodexAuthStatus, getCodexHome, getDesktopUpdater, getDeveloperPathState, getFileLibrary, getForgerHomeRoot, getForgerMetadataRoot, getInstallLogPath, getMemoryStore, getPersonalAgentStore, getPersonalAgentConversationManager, getPersonalAgentRoutineManager, getOfficialToolsService, getConnectionsService, getSidekickService, getSpeechToTextService, getLiveVoiceInputService, getWakeWordService, getTextToSpeechService, getPrivateAppsRoot, getPrivateDataRoot, getRuntimeStatus, getLocalNetworkShareStatus, getRemoteNetworkShareStatus, getRemoteActivitySnapshot, getLlmRunsSnapshot, getSecretsStore, installAppRuntime, prepareSocialAppReview, finishSocialAppInstall, deleteQuarantinedSocialApp, getSocialAppReviewPromptContext, installSocialAppRuntime, installWelcome, ipcMain: untrustedIpcMain, listAppPrompts, listCatalogFromBackend, listLlmProviderProfiles, getFriendChatWindows, getMainWindow, mainWindow, normalizeManifestAgentDefaults, openInstalledApp, startLocalNetworkShare, stopLocalNetworkShare, startRemoteNetworkShare, stopRemoteNetworkShare, openOrFocusFriendChatWindow, path, publicForgerAccount, registry, reinstallClaude, reinstallAntigravity, reinstallCodex, resolveAppIdForWebContents, resolveInstalledAgents, resolveInstalledAppSecrets, resolveInstalledManifest, resolveSelectedAppDisplayName, restoreAppPrompt, restoreAppUserVersionRuntime, restoreRemoteAppBackup, sanitizeRendererChatTrace, sendEncryptedCloudMessage, sendEncryptedCloudAppShareMessage, serializeErrorForInstallLog, setAppAutoSyncSetting, setActiveLlmProviderProfile, updateLlmProviderProfileDefaults, shell, signAppFolderGrant, stopInstalledApp, switchForgerAccountSession, toAppSummary, uninstallAppRuntime, upsertInstalledRecord, updateAgentDefaults, updateAgentToolApproval, updateAppDeveloperSettings, updateDeveloperMode, updateWorkflowsEarlyAccess, updateAppPrompt, updateAppRuntime, updateCodexDefaults, validateArchiveEntries, validateAppPrompt, zipDirectory } = deps;
   const ipcMain = createTrustedIpcMain({
     ipcMain: untrustedIpcMain,
@@ -1319,17 +1326,8 @@ export const registerMainIpcHandlers = (deps: MainProcessIpcDeps): void => {
       ? await forgerBackendClient.submitProductFeedback(input)
       : { success: false, userMessage: 'No pudimos enviar el feedback.', technicalCode: 'backend_client_missing' };
   });
-  ipcMain.handle(IPC_CHANNELS.submitUsageEvent, async (_event, input: SubmitUsageEventInput) => {
-    const eventInput: SubmitUsageEventInput = {
-      ...input,
-      desktopVersion: input.desktopVersion || app.getVersion(),
-      platform: input.platform || process.platform,
-      occurredAt: input.occurredAt || new Date().toISOString(),
-    };
-    return forgerBackendClient
-      ? await forgerBackendClient.submitUsageEvent(eventInput)
-      : { success: false, userMessage: 'No pudimos enviar la métrica de uso.', technicalCode: 'backend_client_missing' };
-  });
+  // Retained compatibility channel, intentionally inert. Old consent never authorizes a new recipient.
+  ipcMain.handle(IPC_CHANNELS.submitUsageEvent, async () => ({ success: false, technicalCode: 'legacy_measurement_disabled' }));
   ipcMain.handle(IPC_CHANNELS.prepareDesktopErrorReport, async (_event, input: DesktopErrorReportPreview) => {
     const roots = desktopErrorReportRoots(input.appId);
     const { report, attachments } = await prepareDesktopErrorReport({
