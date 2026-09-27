@@ -1,3 +1,5 @@
+import { downloadImageStream, type ImageDownloadInput } from './image-download';
+import { readCurrentMessageImages, type ImageCodec } from './current-images';
 import fs from 'node:fs/promises';
 import { createHash } from 'node:crypto';
 import path from 'node:path';
@@ -7,10 +9,12 @@ import type { OfficialToolRuntimeEvent, OfficialToolRuntimePhase } from '../../.
 import {
   chatFromMessage,
   decodeStableMessageRef,
+  encodeStableMessageRef,
   normalizeBaileysChat,
   normalizeBaileysContact,
   normalizeBaileysMessage,
   normalizeWhatsAppJid,
+  normalizeWhatsAppUserJid,
   phoneNumberFromJid,
 } from './normalizer';
 import { WhatsAppLocalStore } from './store';
@@ -19,10 +23,12 @@ import type {
   WhatsAppConnectionStatus,
   WhatsAppDownloadAttachmentInput,
   WhatsAppIndexedMessage,
+  WhatsAppIndexedChat,
   WhatsAppListChatsInput,
   WhatsAppPairingInput,
   WhatsAppReadMessagesInput,
   WhatsAppSendMessageInput,
+  WhatsAppStableMessageRef,
 } from './types';
 
 type BaileysModule = Record<string, unknown>;
@@ -40,7 +46,11 @@ type BaileysSocket = {
   ev?: {
     on: (event: string, handler: (payload: unknown) => void) => void;
   };
-  user?: { id?: string };
+  user?: { id?: string; lid?: string };
+  signalRepository?: { lidMapping?: {
+    getLIDForPN: (id: string) => Promise<string | null>;
+    getPNForLID: (id: string) => Promise<string | null>;
+  } };
   requestPairingCode?: (phoneNumber: string) => Promise<string>;
   sendMessage?: (jid: string, content: unknown, options?: unknown) => Promise<unknown>;
   groupMetadata?: (jid: string) => Promise<unknown>;
@@ -49,9 +59,24 @@ type BaileysSocket = {
   end?: (error?: Error) => void;
 };
 
+export interface WhatsAppConnectionManagerOptions {
+  imageCodec?: ImageCodec;
+  imageFetch?: ImageDownloadInput['fetch'];
+  /** Called after storing a live notification not sent through this manager; replays retry admission. */
+  onLiveMessage?: (message: WhatsAppIndexedMessage, metadata: { newlyStored: boolean }) => void | Promise<void>;
+}
+
+export interface WhatsAppIngestionOptions {
+  source: 'live-notify' | 'append' | 'history';
+  sessionGeneration?: number;
+}
+
 export class WhatsAppConnectionManager {
   private socket: BaileysSocket | null = null;
   private latestQr: string | null = null;
+  private qrExpiresAt = 0;
+  private loggedOut = false;
+  private readonly pendingCredentialSaves = new Set<Promise<void>>();
   private connected = false;
   private needsReconnect = false;
   private lastDisconnectReason: string | undefined;
@@ -59,11 +84,18 @@ export class WhatsAppConnectionManager {
   private starting: Promise<void> | null = null;
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private sessionGeneration = 0;
+  private readonly pendingSends = new Map<string, Set<Promise<void>>>();
+  private readonly options: WhatsAppConnectionManagerOptions;
+  private readonly loadBaileys: BaileysModuleLoader;
 
   constructor(
     private readonly store: WhatsAppLocalStore,
-    private readonly loadBaileys: BaileysModuleLoader = importBaileys,
-  ) {}
+    optionsOrLoadBaileys: WhatsAppConnectionManagerOptions | BaileysModuleLoader = {},
+    loadBaileys: BaileysModuleLoader = importBaileys,
+  ) {
+    this.options = typeof optionsOrLoadBaileys === 'function' ? {} : optionsOrLoadBaileys;
+    this.loadBaileys = typeof optionsOrLoadBaileys === 'function' ? optionsOrLoadBaileys : loadBaileys;
+  }
 
   async status(context?: InternalToolContext): Promise<WhatsAppConnectionStatus> {
     await this.store.load();
@@ -76,7 +108,7 @@ export class WhatsAppConnectionManager {
     return {
       connected: this.connected,
       configured,
-      qrAvailable: Boolean(this.latestQr),
+      qrAvailable: Boolean(this.latestQr) && this.qrExpiresAt > Date.now(),
       ...(this.socket?.user?.id ? { phoneNumber: phoneNumberFromJid(this.socket.user.id) } : {}),
       ...(this.lastDisconnectReason ? { lastDisconnectReason: this.lastDisconnectReason } : {}),
       ...(this.needsReconnect ? { needsReconnect: true } : {}),
@@ -85,9 +117,15 @@ export class WhatsAppConnectionManager {
   }
 
   async startPairing(context: InternalToolContext, input: WhatsAppPairingInput): Promise<Record<string, unknown>> {
-    if (!this.connected && (this.socket || this.needsReconnect || await this.hasAuthArtifacts())) {
-      await this.resetLocalSession(context);
+    if (this.loggedOut) {
+      // A confirmed logout invalidates credentials, never the observed chat index.
+      await this.stopListening();
+      await Promise.allSettled([...this.pendingCredentialSaves]);
+      await fs.rm(this.store.authDirectory(), { recursive: true, force: true });
+      this.authenticated = false;
+      this.loggedOut = false;
     }
+    if (this.latestQr && this.qrExpiresAt <= Date.now()) await this.stopListening();
     await this.ensureStarted(context);
     if (input.method === 'pairing_code') {
       const phoneNumber = normalizePhoneForPairing(input.phoneNumber);
@@ -117,15 +155,82 @@ export class WhatsAppConnectionManager {
         technicalCode: this.lastDisconnectReason || 'whatsapp_qr_unavailable',
       };
     }
-    return {
-      status: 'qr_ready',
-      qrDataUrl: await QRCode.toDataURL(qr),
-      expiresAt: new Date(Date.now() + 60_000).toISOString(),
-    };
+    return this.pairingStatus();
+  }
+
+  /** Setup-only snapshot. Never starts a socket or resets authentication/data. */
+  async pairingStatus(): Promise<Record<string, unknown>> {
+    if (this.connected) return { status: 'connected' };
+    const qr = this.latestQr;
+    const expiresAt = this.qrExpiresAt;
+    if (!qr || expiresAt <= Date.now()) {
+      return { status: this.socket && !qr ? 'connecting' : 'expired' };
+    }
+    const qrDataUrl = await QRCode.toDataURL(qr, { width: 360, margin: 4 });
+    // Encoding yields: do not publish a QR invalidated by a socket event meanwhile.
+    if (qr !== this.latestQr || expiresAt <= Date.now()) return this.pairingStatus();
+    return { status: 'qr_ready', qrDataUrl, expiresAt: new Date(expiresAt).toISOString() };
+  }
+
+  /** Equivalence is account-scoped and comes only from authenticated Baileys identities. */
+  async resolveIdentityIds(value: string): Promise<string[]> {
+    const id = normalizeWhatsAppUserJid(value);
+    const socket = this.socket;
+    const accountId = normalizeWhatsAppUserJid(socket?.user?.id ?? '');
+    if (!/^[0-9]+@(s\.whatsapp\.net|lid)$/.test(id) || !phoneNumberFromJid(accountId)) return [value];
+    const ownLid = normalizeWhatsAppUserJid(socket?.user?.lid ?? '');
+    if (/^[0-9]+@lid$/.test(ownLid) && (id === accountId || id === ownLid)) {
+      await this.store.rememberIdentityPair(accountId, accountId, ownLid);
+    } else {
+      const mapping = socket?.signalRepository?.lidMapping;
+      if (mapping) {
+        try {
+          const phoneId = id.endsWith('@lid') ? normalizeWhatsAppUserJid(await mapping.getPNForLID(id) ?? '') : id;
+          const lid = phoneId ? normalizeWhatsAppUserJid(await mapping.getLIDForPN(phoneId) ?? '') : '';
+          const reversePhone = lid ? normalizeWhatsAppUserJid(await mapping.getPNForLID(lid) ?? '') : '';
+          if (phoneNumberFromJid(phoneId) && /^[0-9]+@lid$/.test(lid)
+            && reversePhone === phoneId && (id === phoneId || id === lid)) {
+            if (socket !== this.socket) return [value];
+            await this.store.rememberIdentityPair(accountId, phoneId, lid);
+          } else if (lid) {
+            await this.store.invalidateIdentity(accountId, id);
+          }
+        } catch {
+          // Previously verified mappings survive temporary lookup failures.
+        }
+      }
+    }
+    if (socket !== this.socket) return [value];
+    return [...new Set([value, ...await this.store.identityIds(accountId, id)])];
+  }
+
+  private equivalentMessageRefs(ref: WhatsAppStableMessageRef, chats: string[], senderIds: string[]): string[] {
+    const participants = ref.participant ? senderIds : [undefined];
+    return chats.flatMap((remoteJid) => participants.map((participant) => encodeStableMessageRef({
+      ...ref, remoteJid, ...(participant ? { participant } : {}),
+    })));
   }
 
   async listChats(input: WhatsAppListChatsInput): Promise<Record<string, unknown>> {
-    return this.store.listChats(input);
+    const result = await this.store.listChats({
+      ...input, identityAccountId: normalizeWhatsAppUserJid(this.socket?.user?.id ?? ''),
+    });
+    return { ...result, chats: await Promise.all(result.chats.map((chat) => this.chatDisplayMetadata(chat))) };
+  }
+
+  private async chatDisplayMetadata(chat: WhatsAppIndexedChat): Promise<WhatsAppIndexedChat> {
+    const identityIds = await this.resolveIdentityIds(chat.chatId);
+    if (chat.chatType !== 'direct') return { ...chat, identityIds };
+    const phoneNumber = identityIds.map(phoneNumberFromJid).find(Boolean);
+    let contactName = chat.contactName;
+    if (!contactName) {
+      for (const id of identityIds) {
+        if (id === chat.chatId) continue;
+        contactName = (await this.store.getChat(id))?.contactName;
+        if (contactName) break;
+      }
+    }
+    return { ...chat, identityIds, ...(phoneNumber ? { phoneNumber } : {}), ...(contactName ? { contactName } : {}) };
   }
 
   async readMessages(context: InternalToolContext, input: WhatsAppReadMessagesInput): Promise<Record<string, unknown>> {
@@ -136,7 +241,7 @@ export class WhatsAppConnectionManager {
     if (await this.hasPairedAuthState()) {
       await this.ensureStarted(context);
     }
-    const messages = await this.store.readMessages({ ...input, chatId });
+    const messages = await this.store.readMessages({ ...input, chatId, identityIds: await this.resolveIdentityIds(chatId) });
     return {
       messages: messages.map((message) => this.serializeMessage(message)),
     };
@@ -146,47 +251,62 @@ export class WhatsAppConnectionManager {
     const chatId = normalizeWhatsAppJid(input.chatId);
     const text = typeof input.text === 'string' ? input.text.trim() : '';
     if (!chatId || !text || text.length > 4000) {
-      return { success: false, userMessage: 'Completa un chat observado y un mensaje de WhatsApp valido.', technicalCode: 'whatsapp_send_input_invalid' };
+      return { success: false, userMessage: 'Completa un chat observado y un mensaje de WhatsApp valido.', technicalCode: 'whatsapp_send_input_invalid', data: { deliveryState: 'not_sent', retryable: false } };
     }
     const knownChat = await this.store.getChat(chatId);
     if (!knownChat) {
-      return { success: false, userMessage: 'Primero lee o lista ese chat antes de enviar mensajes.', technicalCode: 'whatsapp_chat_not_observed' };
+      return { success: false, userMessage: 'Primero lee o lista ese chat antes de enviar mensajes.', technicalCode: 'whatsapp_chat_not_observed', data: { deliveryState: 'not_sent', retryable: false } };
     }
     if (!await this.store.canSendNow()) {
-      return { success: false, userMessage: 'Espera un momento antes de enviar otro mensaje de WhatsApp.', technicalCode: 'whatsapp_send_rate_limited' };
+      return { success: false, userMessage: 'Espera un momento antes de enviar otro mensaje de WhatsApp.', technicalCode: 'whatsapp_send_rate_limited', data: { deliveryState: 'not_sent', retryable: true } };
     }
-    await this.ensureStarted(context);
+    try {
+      await this.ensureStarted(context);
+    } catch {
+      return { success: false, userMessage: 'La conexión de WhatsApp no está lista para enviar.', technicalCode: 'whatsapp_send_unavailable', data: { deliveryState: 'not_sent', retryable: true } };
+    }
+    const socket = this.socket;
+    if (!socket?.sendMessage) {
+      return { success: false, userMessage: 'La conexión de WhatsApp no está lista para enviar.', technicalCode: 'whatsapp_send_unavailable', data: { deliveryState: 'not_sent', retryable: true } };
+    }
     const quoted = decodeStableMessageRef(input.replyToMessageRef);
-    const sent = await this.socket?.sendMessage?.(
-      chatId,
-      { text },
-      quoted ? { quoted: { key: quoted } } : undefined,
-    );
-    const normalized = normalizeBaileysMessage(sent);
-    if (normalized) {
-      await this.store.upsertMessages([normalized]);
+    const finishSend = this.trackPendingSend(chatId);
+    try {
+      const sent = await socket.sendMessage(
+        chatId,
+        { text },
+        quoted ? { quoted: { key: quoted } } : undefined,
+      );
+      const normalized = normalizeBaileysMessage(sent);
+      const ref = normalized ? encodeStableMessageRef(normalized.stableMessageRef) : undefined;
+      await this.store.rememberSend(ref);
+      if (normalized) {
+        await this.store.upsertMessages([normalized]);
+      }
+      return {
+        sent: Boolean(ref),
+        ...(ref ? { stableMessageRef: ref } : {}),
+        timestamp: Math.floor(Date.now() / 1000),
+      };
+    } finally {
+      finishSend();
     }
-    await this.store.rememberSend();
-    return {
-      sent: true,
-      ...(normalized ? { stableMessageRef: this.store.encodeRef(normalized.stableMessageRef) } : {}),
-      timestamp: Math.floor(Date.now() / 1000),
-    };
   }
 
   async getChatDetails(context: InternalToolContext, input: WhatsAppChatDetailsInput): Promise<Record<string, unknown>> {
     const chatId = normalizeWhatsAppJid(input.chatId);
-    const chat = chatId ? await this.store.getChat(chatId) : null;
-    if (!chatId || !chat) {
+    const storedChat = chatId ? await this.store.getChat(chatId) : null;
+    if (!chatId || !storedChat) {
       return { success: false, userMessage: 'Primero lee o lista ese chat antes de pedir detalles.', technicalCode: 'whatsapp_chat_not_observed' };
     }
     await this.ensureStarted(context);
+    const chat = await this.chatDisplayMetadata(storedChat);
     if (chat.chatType === 'group') {
       const metadata = await this.socket?.groupMetadata?.(chatId);
       return {
         chat,
         type: 'group',
-        metadata: normalizeGroupMetadata(metadata),
+        metadata: await normalizeGroupMetadata(metadata, async (id) => (await this.store.getChat(id))?.title, (id) => this.resolveIdentityIds(id)),
       };
     }
     if (chat.chatType === 'channel') {
@@ -203,6 +323,41 @@ export class WhatsAppConnectionManager {
       type: 'direct',
       phoneNumber: chat.phoneNumber ?? phoneNumberFromJid(chat.chatId),
     };
+  }
+
+  async hasCurrentImage(chatId: string, stableMessageRef: string): Promise<boolean> {
+    const identityIds = await this.resolveIdentityIds(chatId);
+    const message = await this.store.getMessageInChat(stableMessageRef, [chatId, ...identityIds]);
+    return Boolean(message?.attachments.some(attachment => attachment.kind === 'image'));
+  }
+
+  async readCurrentImages(context: InternalToolContext, chatId: string, stableMessageRef: string, authorize: () => Promise<boolean>) {
+    const identityIds = await this.resolveIdentityIds(chatId);
+    return readCurrentMessageImages(this.store, { chatId, identityIds, stableMessageRef }, {
+      codec: this.options.imageCodec,
+      authorize,
+      download: async attachment => {
+        if (!attachment.rawMessageJson) throw new Error('image_unavailable');
+        await this.ensureStarted(context);
+        const socket = this.socket;
+        const generation = this.sessionGeneration;
+        const current = async () => socket === this.socket && generation === this.sessionGeneration && await authorize();
+        const baileys = await this.loadBaileys();
+        if (!await current()) throw new Error('image_access_revoked');
+        return downloadImageStream({
+          message: JSON.parse(attachment.rawMessageJson), expected: attachment.stableMessageRef,
+          keys: baileys.getMediaKeys as ImageDownloadInput['keys'],
+          fetch: this.options.imageFetch,
+          authorize: current,
+          reupload: async message => {
+            if (!socket?.updateMediaMessage || !await current()) throw new Error('image_access_revoked');
+            const updated = await socket.updateMediaMessage(message);
+            if (!await current()) throw new Error('image_access_revoked');
+            return updated;
+          },
+        });
+      },
+    });
   }
 
   async downloadAttachment(context: InternalToolContext, input: WhatsAppDownloadAttachmentInput): Promise<Record<string, unknown>> {
@@ -274,6 +429,8 @@ export class WhatsAppConnectionManager {
     this.clearReconnectTimer();
     this.socket = null;
     this.connected = false;
+    this.latestQr = null;
+    this.qrExpiresAt = 0;
     this.starting = null;
   }
 
@@ -294,14 +451,19 @@ export class WhatsAppConnectionManager {
     }
   }
 
-  async ingestMessages(messages: unknown[], context?: InternalToolContext): Promise<void> {
+  async ingestMessages(
+    messages: unknown[],
+    context?: InternalToolContext,
+    options: WhatsAppIngestionOptions = { source: 'history' },
+  ): Promise<void> {
+    if (options.sessionGeneration !== undefined && options.sessionGeneration !== this.sessionGeneration) return;
     const normalized = messages
       .map((message) => normalizeBaileysMessage(message))
       .filter((message): message is WhatsAppIndexedMessage => Boolean(message));
     if (normalized.length === 0) {
       return;
     }
-    await this.store.upsertMessages(normalized);
+    const insertedRefs = new Set(await this.store.upsertMessages(normalized));
     for (const message of normalized) {
       await this.store.upsertChat(chatFromMessage(message));
     }
@@ -313,6 +475,70 @@ export class WhatsAppConnectionManager {
         },
       });
     }
+    if (options.source === 'live-notify' && this.options.onLiveMessage) {
+      const deliveredRefs = new Set<string>();
+      for (const message of normalized) {
+        if (options.sessionGeneration !== undefined && options.sessionGeneration !== this.sessionGeneration) return;
+        const ref = encodeStableMessageRef(message.stableMessageRef);
+        if (deliveredRefs.has(ref)) continue;
+        deliveredRefs.add(ref);
+        const chatIdentityIds = await this.resolveIdentityIds(message.chatId);
+        const senderIdentityIds = message.senderId ? await this.resolveIdentityIds(message.senderId) : undefined;
+        if (message.fromMe) await Promise.all(chatIdentityIds.map((id) => this.waitForPendingSends(id)));
+        if (options.sessionGeneration !== undefined && options.sessionGeneration !== this.sessionGeneration) return;
+        const equivalentStableMessageRefs = this.equivalentMessageRefs(message.stableMessageRef, chatIdentityIds, senderIdentityIds ?? []);
+        const outbound = await Promise.all(equivalentStableMessageRefs.map((candidate) => this.store.isKnownOutboundMessageRef(candidate)));
+        if (outbound.some(Boolean)) continue;
+        if (options.sessionGeneration !== undefined && options.sessionGeneration !== this.sessionGeneration) return;
+        await this.options.onLiveMessage({
+          ...this.toLiveMessage(message), chatIdentityIds, equivalentStableMessageRefs,
+          ...(senderIdentityIds ? { senderIdentityIds } : {}),
+        }, { newlyStored: insertedRefs.has(ref) });
+      }
+    }
+  }
+
+  async ingestUpsert(payload: unknown, context?: InternalToolContext, sessionGeneration?: number): Promise<void> {
+    const messages = isRecord(payload) && Array.isArray(payload.messages) ? payload.messages : [];
+    const source = isRecord(payload) && payload.type === 'notify' ? 'live-notify' : 'append';
+    await this.ingestMessages(messages, context, { source, sessionGeneration });
+  }
+
+  private trackPendingSend(chatId: string): () => void {
+    let resolvePending!: () => void;
+    const pending = new Promise<void>((resolve) => { resolvePending = resolve; });
+    const current = this.pendingSends.get(chatId) ?? new Set<Promise<void>>();
+    current.add(pending);
+    this.pendingSends.set(chatId, current);
+    return () => {
+      current.delete(pending);
+      if (current.size === 0) this.pendingSends.delete(chatId);
+      resolvePending();
+    };
+  }
+
+  private async waitForPendingSends(chatId: string): Promise<void> {
+    const pending = this.pendingSends.get(chatId);
+    if (pending?.size) await Promise.all([...pending]);
+  }
+
+  private toLiveMessage(message: WhatsAppIndexedMessage): WhatsAppIndexedMessage {
+    return {
+      ...message,
+      attachments: message.attachments.map((attachment) => ({
+        attachmentId: attachment.attachmentId,
+        stableMessageRef: attachment.stableMessageRef,
+        chatId: attachment.chatId,
+        kind: attachment.kind,
+        messageType: attachment.messageType,
+        ...(attachment.mimeType ? { mimeType: attachment.mimeType } : {}),
+        ...(attachment.caption ? { caption: attachment.caption } : {}),
+        ...(attachment.sizeBytes ? { sizeBytes: attachment.sizeBytes } : {}),
+        ...(attachment.sha256 ? { sha256: attachment.sha256 } : {}),
+        downloaded: attachment.downloaded,
+        downloadStatus: attachment.downloadStatus,
+      })),
+    };
   }
 
   async ingestChats(chats: unknown[], context?: InternalToolContext): Promise<void> {
@@ -370,6 +596,7 @@ export class WhatsAppConnectionManager {
       ...(browser ? { browser } : {}),
       logger: createBaileysLogger(context),
       printQRInTerminal: false,
+      qrTimeout: 60_000,
       syncFullHistory: false,
       markOnlineOnConnect: false,
     });
@@ -377,19 +604,21 @@ export class WhatsAppConnectionManager {
     this.needsReconnect = false;
     this.emitRuntimeEvent(context, 'connecting');
     socket.ev?.on('creds.update', (payload) => {
+      if (generation !== this.sessionGeneration) return;
       if (isPairedAuthState(payload) || isPairedAuthState(state)) {
         this.authenticated = true;
       }
-      void saveCreds().then(() => chmodAuthFiles(authDirectory)).catch((error) => {
+      const saving = saveCreds().then(() => chmodAuthFiles(authDirectory)).catch((error) => {
         void context.appendLog?.('official_tool:whatsapp_creds_save_failed', sanitizeErrorPayload(error));
       });
+      this.pendingCredentialSaves.add(saving);
+      void saving.finally(() => this.pendingCredentialSaves.delete(saving));
     });
     socket.ev?.on('connection.update', (payload) => {
       this.handleConnectionUpdate(payload, context, generation);
     });
     socket.ev?.on('messages.upsert', (payload) => {
-      const messages = isRecord(payload) && Array.isArray(payload.messages) ? payload.messages : [];
-      void this.ingestMessages(messages, context).catch((error) => {
+      void this.ingestUpsert(payload, context, generation).catch((error) => {
         void context.appendLog?.('official_tool:whatsapp_message_ingest_failed', sanitizeErrorPayload(error));
       });
     });
@@ -434,6 +663,7 @@ export class WhatsAppConnectionManager {
     }
     if (typeof payload.qr === 'string') {
       this.latestQr = payload.qr;
+      this.qrExpiresAt = Date.now() + 60_000;
       this.emitRuntimeEvent(context, 'qr_available');
     }
     if (payload.connection === 'open') {
@@ -446,6 +676,9 @@ export class WhatsAppConnectionManager {
       this.emitRuntimeEvent(context, 'connected');
     }
     if (payload.connection === 'close') {
+      this.loggedOut = disconnectStatusCode(payload) === 401;
+      this.latestQr = null;
+      this.qrExpiresAt = 0;
       const reconnecting = this.authenticated && shouldAutoReconnect(payload);
       this.connected = false;
       this.needsReconnect = this.authenticated;
@@ -466,7 +699,7 @@ export class WhatsAppConnectionManager {
     const contacts = isRecord(payload) && Array.isArray(payload.contacts) ? payload.contacts : [];
     const counts = { messages: messages.length, chats: chats.length, contacts: contacts.length };
     this.emitRuntimeEvent(context, 'history_sync', { counts });
-    await this.ingestMessages(messages, context);
+    await this.ingestMessages(messages, context, { source: 'history' });
     await this.ingestChats(chats, context);
     await this.ingestContacts(contacts, context);
     this.emitRuntimeEvent(context, 'sync_ready', { counts });
@@ -485,7 +718,7 @@ export class WhatsAppConnectionManager {
       ...(details.counts ? { counts: details.counts } : {}),
       status: {
         connected: this.connected,
-        qrAvailable: Boolean(this.latestQr),
+        qrAvailable: Boolean(this.latestQr) && this.qrExpiresAt > Date.now(),
         needsReconnect: this.needsReconnect,
         ...(this.lastDisconnectReason ? { lastDisconnectReason: this.lastDisconnectReason } : {}),
       },
@@ -513,14 +746,14 @@ export class WhatsAppConnectionManager {
   }
 
   private async waitForQr(): Promise<string | null> {
-    if (this.latestQr) {
+    if (this.latestQr && this.qrExpiresAt > Date.now()) {
       return this.latestQr;
     }
     for (let attempt = 0; attempt < 20; attempt += 1) {
       await new Promise((resolve) => {
         setTimeout(resolve, 250);
       });
-      if (this.latestQr || this.connected) {
+      if ((this.latestQr && this.qrExpiresAt > Date.now()) || this.connected) {
         return this.latestQr;
       }
     }
@@ -542,14 +775,6 @@ export class WhatsAppConnectionManager {
     try {
       const contents = await fs.readFile(path.join(this.store.authDirectory(), 'creds.json'), 'utf8');
       return isPairedAuthState(JSON.parse(contents));
-    } catch {
-      return false;
-    }
-  }
-
-  private async hasAuthArtifacts(): Promise<boolean> {
-    try {
-      return (await fs.readdir(this.store.authDirectory())).length > 0;
     } catch {
       return false;
     }
@@ -787,7 +1012,11 @@ const chmodAuthFiles = async (directory: string): Promise<void> => {
   }));
 };
 
-const normalizeGroupMetadata = (metadata: unknown): Record<string, unknown> | null => {
+const normalizeGroupMetadata = async (
+  metadata: unknown,
+  contactName: (id: string) => Promise<string | undefined>,
+  identityIds: (id: string) => Promise<string[]>,
+): Promise<Record<string, unknown> | null> => {
   if (!isRecord(metadata)) {
     return null;
   }
@@ -803,13 +1032,27 @@ const normalizeGroupMetadata = (metadata: unknown): Record<string, unknown> | nu
     ephemeralDuration: metadata.ephemeralDuration,
     size: metadata.size,
     participants: Array.isArray(metadata.participants)
-      ? metadata.participants.map((participant) => isRecord(participant) ? ({
-        id: participant.id,
-        admin: participant.admin,
-      }) : participant)
+      ? await Promise.all(metadata.participants.map(async (participant) => {
+        if (!isRecord(participant)) return participant;
+        const providedName = [participant.name, participant.notify]
+          .find((value) => typeof value === 'string' && value.trim());
+        const name = typeof providedName === 'string'
+          ? providedName.trim()
+          : typeof participant.id === 'string' ? await contactName(participant.id) : undefined;
+        const identities = typeof participant.id === 'string' ? await identityIds(participant.id) : [];
+        return {
+          id: participant.id,
+          ...(identities.length > 1 ? { identityIds: identities } : {}),
+          admin: participant.admin,
+          ...(name ? { name } : {}),
+        };
+      }))
       : [],
   };
 };
 
-export const createWhatsAppConnectionManager = (context: InternalToolContext): WhatsAppConnectionManager =>
-  new WhatsAppConnectionManager(new WhatsAppLocalStore(context.metadataRoot));
+export const createWhatsAppConnectionManager = (
+  context: InternalToolContext,
+  options: WhatsAppConnectionManagerOptions = {},
+): WhatsAppConnectionManager =>
+  new WhatsAppConnectionManager(new WhatsAppLocalStore(context.metadataRoot), options);

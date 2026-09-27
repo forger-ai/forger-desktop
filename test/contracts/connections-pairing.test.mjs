@@ -34,3 +34,10 @@ test('WhatsApp pairing presentation keeps waiting and error states user-facing',
     technicalCode: 'qr_failed',
   }), { kind: 'error', message: 'No pudimos generar el QR.' });
 });
+
+test('expired setup snapshots never expose an expired QR image', () => {
+  assert.deepEqual(getWhatsAppPairingPresentation({
+    success: true,
+    data: { status: 'expired', qrDataUrl: 'data:image/png;base64,stale' },
+  }), { kind: 'expired' });
+});

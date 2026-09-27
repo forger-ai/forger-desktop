@@ -1,3 +1,4 @@
+import type { WhatsAppCurrentMessageImagesResult } from './modules/whatsapp/types';
 import type {
   CallConnectionActionInput,
   CallConnectionActionResult,
@@ -66,6 +67,10 @@ export interface InternalConnectionModule {
   disconnect(context: ConnectionContext, input: DisconnectConnectionInput): Promise<ConnectionMutationResult>;
   status(context: ConnectionContext, input: ConnectionStatusInput): Promise<ConnectionStatusResult>;
   execute(context: ConnectionContext, input: CallConnectionActionInput): Promise<CallConnectionActionResult>;
+  readCurrentImages?(context: ConnectionContext, connectionId: string, chatId: string, stableMessageRef: string, authorize: () => Promise<boolean>): Promise<WhatsAppCurrentMessageImagesResult>;
+  hasCurrentImage?(context: ConnectionContext, connectionId: string, chatId: string, stableMessageRef: string): Promise<boolean>;
+  resolveIdentityIds?(context: ConnectionContext, connectionId: string, id: string): Promise<string[]>;
+  pairingStatus?(context: ConnectionContext, connectionId: string): Promise<CallConnectionActionResult>;
   start?(context: ConnectionContext): Promise<void>;
   stop?(context: ConnectionContext): Promise<void>;
 }

@@ -85,6 +85,9 @@ export class LlmProviderRunService {
 
   public async run(input: LlmProviderRunInput): Promise<LlmProviderRunOutput> {
     const provider = input.runtime.provider;
+    if (input.localToolPolicy === 'mcp-only' && provider === 'antigravity') {
+      throw new Error('whatsapp_channel_requires_codex_or_claude');
+    }
     const descriptor = getLlmProviderDescriptor(provider);
     if (input.checkReady !== false) {
       await this.assertProviderReady(provider, input.setupErrorMode);
@@ -124,11 +127,19 @@ export class LlmProviderRunService {
     try {
       return await descriptor.run({
         ...input,
+        ...(input.localToolPolicy ? {
+          threadId: null,
+          conversationId: null,
+          sharedRoots: [],
+          addDirs: [],
+          imagePaths: [],
+          configWorkspaceRoot: input.workingDir,
+        } : {}),
         cliPath,
         environment,
         model: input.runtime.model,
         effort: input.runtime.effort,
-        permissionMode: input.runtime.permissionMode ?? input.permissionMode,
+        permissionMode: input.localToolPolicy === 'mcp-only' ? 'safe' : input.runtime.permissionMode ?? input.permissionMode,
         codexHome: codexHome?.path,
         rootCodexHome: codexHome?.rootCodexHome ?? authContext?.rootCodexHome ?? this.options.codexHome,
       });

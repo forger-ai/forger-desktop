@@ -86,6 +86,7 @@ export type LlmProviderAuthProfileResolver = (
 ) => Promise<LlmProviderResolvedAuthProfile | null | undefined>;
 
 export interface LlmCliRunInput {
+  localToolPolicy?: 'mcp-only';
   runId?: string;
   cliPath: string;
   pathEntries: string[];

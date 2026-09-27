@@ -177,7 +177,9 @@ test('Given invalid, just-due, and future schedules, when initialization runs, t
 
   await manager.initialize();
   const invalidRun = await waitForRun(manager, 'invalid', (run) => run?.status === 'skipped');
-  const dueRun = await waitForRun(manager, 'due', (run) => run?.status === 'failed');
+  // The failed record is written before executeRun finishes scheduling the next
+  // occurrence. Wait for that timer too so dispose cannot race with its creation.
+  const dueRun = await waitForRun(manager, 'due', (run) => run?.status === 'failed' && manager.timers.has('due'));
   assert.equal(invalidRun.error, 'automation_invalid_schedule');
   assert.match(invalidRun.userMessage, /fecha programada invalida/);
   assert.equal(dueRun.error, 'codex_auth_missing');
