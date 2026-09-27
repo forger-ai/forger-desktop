@@ -144,6 +144,7 @@ describe('AgentWhatsAppPanel', () => {
     expect(removing).toBeDisabled();
     fireEvent.click(removing);
     await user.keyboard('{Escape}');
+    fireEvent.keyDown(dialog, { key: 'Escape', code: 'Escape' });
     expect(dialog).toBeVisible();
     expect(api.personalAgentWhatsAppBindingDelete).toHaveBeenCalledTimes(2);
     await act(async () => gate.resolve(true));
