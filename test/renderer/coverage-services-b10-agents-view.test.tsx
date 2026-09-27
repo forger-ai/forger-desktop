@@ -241,6 +241,10 @@ const createBridge = () => {
     personalAgentGrantOptionsList: vi.fn(async () => ({ apps: [], tools: [], connections: [], peerAgents: [] })),
     sidekicksGetState: vi.fn(async () => sidekickState()),
     personalAgentConversationsList: vi.fn(async () => [] as PersonalAgentConversation[]),
+    connectionsList: vi.fn(async () => ({ instances: [] })),
+    personalAgentWhatsAppPolicyOptionsGet: vi.fn(async () => ({ agent: agent(), memories: [] })),
+    personalAgentWhatsAppBindingsList: vi.fn(async () => []),
+    personalAgentWhatsAppUnsettledList: vi.fn(async () => []),
     personalAgentWorkspaceList: vi.fn(async () => [] as PersonalAgentWorkspaceEntry[]),
     personalAgentRoutinesList: vi.fn(async () => [] as PersonalAgentRoutine[]),
     onPersonalAgentConversationEvent: vi.fn((listener: (event: PersonalAgentConversationEvent) => void) => {
@@ -291,6 +295,33 @@ describe('AgentsView orchestration', () => {
 
   afterEach(() => {
     vi.restoreAllMocks();
+  });
+
+  it('opens the complete WhatsApp conversation from activity and keeps that history read-only', async () => {
+    bridge.personalAgentsList.mockResolvedValue([agent()]);
+    const whatsapp = conversation('whatsapp', { origin: 'whatsapp', readOnly: false });
+    bridge.personalAgentConversationsList.mockResolvedValue([whatsapp]);
+    bridge.personalAgentGetConversation.mockResolvedValue(whatsapp);
+    Object.assign(bridge, {
+      personalAgentWhatsAppBindingsList: vi.fn().mockResolvedValue([{ agentId: 'agent-1', connectionId: 'phone', chatId: 'team', alias: 'Ana', ownerId: 'owner', enabled: false, purpose: 'Help', scope: '', participantsAllowed: [], allowAgentCapabilities: false, revision: 1, configurationVersion: 1, conversationId: 'whatsapp', activeTurnId: null }]),
+      personalAgentWhatsAppLatestDeliveryGet: vi.fn().mockResolvedValue(null),
+      personalAgentWhatsAppActivityList: vi.fn().mockResolvedValue([{ requestId: 'request', requestText: 'Question', responseText: 'Full answer', status: 'completed', deliveryState: 'sent', createdAt: '2026-09-26T10:00:00Z', updatedAt: '2026-09-26T10:01:00Z', conversationId: 'whatsapp' }]),
+    });
+    const openConnections = vi.fn();
+    render(<AgentsView t={t} intelligenceProviderConfigured onOpenConnections={openConnections} />);
+    await openAgent(); await openTab(t.agents.settingsTab);
+    await userEvent.click(await screen.findByRole('button', { name: 'Open Connections' }));
+    expect(openConnections).toHaveBeenCalled();
+    await userEvent.click(await screen.findByRole('button', { name: 'View activity' }));
+    bridge.personalAgentGetConversation.mockResolvedValueOnce(null);
+    await userEvent.click(await screen.findByRole('button', { name: 'Open full conversation' }));
+    expect(screen.getByRole('dialog')).toBeVisible();
+    bridge.personalAgentGetConversation.mockRejectedValueOnce(new Error('offline'));
+    await userEvent.click(screen.getByRole('button', { name: 'Open full conversation' }));
+    await waitFor(() => expect(bridge.personalAgentGetConversation).toHaveBeenCalledTimes(2));
+    await userEvent.click(screen.getByRole('button', { name: 'Open full conversation' }));
+    expect(await screen.findByText('Conversation whatsapp')).toBeVisible();
+    expect(screen.queryByRole('button', { name: 'View activity' })).not.toBeInTheDocument();
   });
 
   it('shows empty and fatal-load states, tolerates optional bootstrap services, and disposes subscriptions', async () => {
@@ -464,7 +495,7 @@ describe('AgentsView orchestration', () => {
 
     bridge.personalAgentUpdatePermissions.mockRejectedValueOnce(new Error('access rejected'));
     await userEvent.click(save);
-    expect(await screen.findByRole('alert')).toHaveTextContent('access rejected');
+    expect(await screen.findByText('access rejected')).toBeVisible();
     await userEvent.click(screen.getByRole('button', { name: t.actions.back }));
 
     vi.mocked(window.confirm).mockReturnValueOnce(false).mockReturnValueOnce(true).mockReturnValueOnce(true);
@@ -474,10 +505,10 @@ describe('AgentsView orchestration', () => {
     expect(bridge.personalAgentsDelete).toHaveBeenCalledWith({ agentId: 'agent-2' });
     bridge.personalAgentsDelete.mockRejectedValueOnce('delete rejected');
     await userEvent.click(screen.getByRole('button', { name: 'Mock delete Agent agent-2' }));
-    expect(await screen.findByRole('alert')).toHaveTextContent(t.agents.deleteError);
+    expect(await screen.findByText(t.agents.deleteError)).toBeVisible();
     bridge.personalAgentsDelete.mockRejectedValueOnce(new Error('delete exploded'));
     await userEvent.click(screen.getByRole('button', { name: 'Mock delete Agent agent-2' }));
-    expect(await screen.findByRole('alert')).toHaveTextContent('delete exploded');
+    expect(await screen.findByText('delete exploded')).toBeVisible();
   });
 
   it('groups conversation history, reacts to live events, and reports generic run failures once', async () => {
@@ -486,6 +517,7 @@ describe('AgentsView orchestration', () => {
     const base = conversation('user', { messages: [message('base')] });
     const histories = [
       base,
+      conversation('whatsapp', { origin: 'whatsapp' }),
       conversation('routine', { origin: 'routine' }),
       conversation('agent', { origin: 'agent', readOnly: true }),
       conversation('sidekick-known', { origin: 'sidekick', readOnly: true, sidekickId: 'desk' }),
@@ -504,7 +536,7 @@ describe('AgentsView orchestration', () => {
     await userEvent.click(screen.getAllByRole('button', { name: t.agents.historyTab })[0]);
     const history = await screen.findByRole('dialog', { name: 'Mock history' });
     expect(within(history).getByText('Reserved mac space')).toBeVisible();
-    expect(within(history).getByTestId('history-group-count')).toHaveTextContent('5');
+    expect(within(history).getByTestId('history-group-count')).toHaveTextContent('6');
     await userEvent.click(within(history).getByRole('button', { name: /Mock toggle user-started/ }));
     await userEvent.click(within(history).getByRole('button', { name: /Mock more user-started/ }));
     act(() => bridge.windowListeners.at(-1)?.({ isMaximized: false, isFullScreen: true, usesCustomFrame: true }));

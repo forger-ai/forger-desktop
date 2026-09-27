@@ -83,6 +83,7 @@ export async function startRepositoryConnections(options: {
   state: Pick<MainLifecycleState, 'connectionsService'>;
   getConnectionsService: MainLifecycleDeps['getConnectionsService'];
   startRepositoryCollaboration?: () => Promise<void>;
+  initializeChannels?: () => Promise<void>;
   startupLogger: StartupLogger;
   appendInstallLog: MainLifecycleDeps['appendInstallLog'];
 }): Promise<void> {
@@ -102,6 +103,7 @@ export async function startRepositoryConnections(options: {
         code: 'unavailable',
       });
     });
+  await options.initializeChannels?.();
   await startupLogger.step('startup:connections:start', async () => {
     await state.connectionsService?.start?.();
   });

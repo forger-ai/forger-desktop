@@ -1,3 +1,4 @@
+import { dispatchLiveWhatsAppMessage } from './live-routing';
 import type {
   CallOfficialToolInput,
   CallOfficialToolResult,
@@ -7,6 +8,7 @@ import type {
 import { getSharedCopy } from '../../../../shared/i18n';
 import type { InternalToolContext, InternalToolModule } from '../../../tools/types';
 import { createWhatsAppConnectionManager, WhatsAppConnectionManager } from './manager';
+import type { WhatsAppIndexedMessage } from './types';
 import {
   WHATSAPP_AUTH_STATE_SECRET,
   WHATSAPP_TOOL_ID,
@@ -138,17 +140,67 @@ const definition: OfficialToolDefinition = {
 };
 
 const managers = new Map<string, WhatsAppConnectionManager>();
+const managerConnectionIds = new Map<string, Set<string>>();
+
+type LiveWhatsAppMessageHandler = (input: {
+  connectionId: string;
+  message: WhatsAppIndexedMessage;
+  newlyStored: boolean;
+}) => Promise<void> | void;
+
+let liveMessageHandler: LiveWhatsAppMessageHandler | null = null;
+
+export const setLiveWhatsAppMessageHandler = (handler: LiveWhatsAppMessageHandler | null): void => {
+  liveMessageHandler = handler;
+};
 
 const getManager = (context: InternalToolContext): WhatsAppConnectionManager => {
   const key = context.metadataRoot;
+  if (context.connectionId) {
+    const ids = managerConnectionIds.get(key) ?? new Set<string>();
+    ids.add(context.connectionId);
+    managerConnectionIds.set(key, ids);
+  }
   const existing = managers.get(key);
   if (existing) {
     return existing;
   }
-  const manager = createWhatsAppConnectionManager(context);
+  const manager = createWhatsAppConnectionManager(context, {
+    onLiveMessage: async (message, metadata) => {
+      // A shared Baileys socket cannot prove which of multiple configured
+      // connection records produced an event. Refuse ambiguous routing.
+      const ids = [...(managerConnectionIds.get(key) ?? [])];
+      const connectionId = ids.length === 1 ? ids[0] : undefined;
+      if (connectionId) {
+        try {
+          await dispatchLiveWhatsAppMessage({ connectionId, message, newlyStored: metadata.newlyStored,
+            onRepositoryMessage: context.onWhatsAppMessage, onAgentMessage: liveMessageHandler ?? undefined,
+          });
+        } catch {
+          await context.appendLog?.('whatsapp:live_routing_failed', { code: 'live_routing_failed' });
+        }
+      }
+    },
+  });
   managers.set(key, manager);
   return manager;
 };
+
+/** Internal visual input; never exposed as an arbitrary attachment action. */
+export const hasWhatsAppCurrentImage = (context: InternalToolContext, chatId: string, stableMessageRef: string) =>
+  getManager(context).hasCurrentImage(chatId, stableMessageRef);
+
+export const getWhatsAppCurrentImages = (context: InternalToolContext, chatId: string, stableMessageRef: string, authorize: () => Promise<boolean>) =>
+  getManager(context).readCurrentImages(context, chatId, stableMessageRef, authorize);
+
+/** Internal channel authorization lookup; not an agent connection action. */
+export const getWhatsAppIdentityIds = async (context: InternalToolContext, id: string): Promise<string[]> =>
+  getManager(context).resolveIdentityIds(id);
+
+/** Only the trusted Desktop setup IPC calls this; it is not a connection action. */
+export const getWhatsAppPairingStatus = async (context: InternalToolContext): Promise<CallOfficialToolResult> => ({
+  success: true, data: await getManager(context).pairingStatus(),
+});
 
 const configure = async (context: InternalToolContext): Promise<ToolMutationResult> => ({
   success: true,
@@ -236,6 +288,7 @@ export const whatsappToolModule: InternalToolModule = {
     const key = context.metadataRoot;
     await getManager(context).disconnect(context);
     managers.delete(key);
+    managerConnectionIds.delete(key);
   },
 };
 

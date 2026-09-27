@@ -37,6 +37,7 @@ import { MemoryStore } from '../memory-store';
 import { AgentConversationManager } from '../personal-agents/agent-conversation-manager';
 import { AgentRoutineManager } from '../personal-agents/agent-routine-manager';
 import { AgentStore } from '../personal-agents/agent-store';
+import { WhatsAppAgentChannelService } from '../personal-agents/whatsapp-channel-service';
 import { RemoteAgentSessionService } from '../personal-agents/remote-session-service';
 import { PromptOverridesStore, buildPromptBases, promptOverrideErrorResult } from '../prompt-overrides';
 import { OfficialToolsService, normalizeAppToolDeclarations } from '../official-tools-service';
@@ -57,6 +58,7 @@ import { CloudIdentityStore, type EncryptedCloudText } from '../cloud-identity-s
 import { BackupsManager } from '../backups-manager';
 import { createWindowStateEventRegistrar, createWindowStateReader, registerWindowIpcHandlers } from '../ipc/window';
 import { registerAgentIpcHandlers, type AgentIpcDeps } from '../ipc/agent-handlers';
+import { registerWhatsAppAgentChannelIpcHandlers } from '../ipc/whatsapp-agent-channel-handlers';
 import { registerMainIpcHandlers, type MainProcessIpcDeps } from '../ipc/main-handlers';
 import { createTrustedIpcMain } from '../ipc/trusted-ipc';
 import { createInstalledAppRuntimeController } from '../runtime/installed-app-runtime';
@@ -87,6 +89,7 @@ import { loadOptionalBetterSqlite } from '../runtime/optional-better-sqlite';
 import { createWindowBootstrapController } from './window-bootstrap';
 import { AGENT_TOOL_DEFINITIONS, AGENT_TOOL_IDS, createInitialAgentToolSettings } from './agent-tool-packages';
 import { registerMainLifecycle } from './main-lifecycle';
+import { createPersonalAgentMcpBindings } from './personal-agent-mcp-bindings';
 import type { AppManifest, AppManifestService, AppManifestStack, AppRegistry, InstalledAppRecord, RuntimeBinarySet, RunningAppProcess, StackSkillTemplate } from './main-process-types';
 import { FORGER_AGENT_CONTRACT_MARKER, FORGER_AGENT_CONTRACT_MARKER_PREFIX, FORGER_AGENT_CONTRACT_VERSION, buildGlobalForgerAgentsMarkdown } from '../prompt-builder/forger-base';
 import { buildFailureDiagnostic } from '../../shared/error-diagnostics';
@@ -245,6 +248,7 @@ let backupsManager: BackupsManager | null = null;
 let memoryStore: MemoryStore | null = null;
 let personalAgentStore: AgentStore | null = null;
 let personalAgentConversationManager: AgentConversationManager | null = null;
+let whatsappAgentChannelService: WhatsAppAgentChannelService | null = null;
 let personalAgentRoutineManager: AgentRoutineManager | null = null;
 let remoteAgentSessionService: RemoteAgentSessionService | null = null;
 let memoryMaintenanceManager: MemoryMaintenanceManager | null = null;
@@ -598,37 +602,26 @@ const getPersonalAgentConversationManager = (): AgentConversationManager => {
       getCodexAuthenticated: async () => (await getCodexAuthStatus()).authenticated,
       getClaudeAuthenticated: getClaudeConnectedForForger,
       getAntigravityAuthenticated: async () => (await getAntigravityAuthStatus()).authenticated,
-      createForgerMcpSession: (runId, agent, context) =>
-        forgerMcpServer?.createSession(runId, 'forger', {
-          caller: 'personal-agent',
-          personalAgentId: agent.id,
-          personalAgentConversationId: context.conversationId,
-          personalAgentPeerThreadId: context.peerThreadId,
-          personalAgentCallStackIds: context.callStackAgentIds,
-          personalAgentCanSpawnAgents: agent.canSpawnAgents,
-          sidekick: context.sidekick ? { sidekickId: context.sidekick.sidekickId } : undefined,
-          appIds: agent.appIds,
-          officialToolActionIds: agent.toolIds,
-          forgerToolActionIds: agent.toolIds,
-          connectionGrants: agent.connectionGrants,
-        }) ?? null,
-      releaseForgerMcpSession: (token) => forgerMcpServer?.releaseSession(token),
-      listenAppMcps: async (appIds, runId) => {
-        const installedAppIds = appIds.filter((appId) => Boolean(registry.apps[appId]));
-        return await (appMcpManager?.listenMcps(installedAppIds, runId) ?? Promise.resolve([]));
-      },
-      resolveAppTrustedRoots: async (appIds) =>
-        appIds
-          .map((appId) => registry.apps[appId]?.installDir)
-          .filter((installDir): installDir is string => Boolean(installDir)),
-      releaseAppMcps: (runId) => {
-        appMcpManager?.releaseMcps(runId);
-      },
+      ...createPersonalAgentMcpBindings({
+        getForgerMcpServer: () => forgerMcpServer,
+        getAppMcpManager: () => appMcpManager,
+        getRegistry: () => registry,
+        getFileLibrary,
+        getWhatsAppChannelAgent: input => getWhatsAppAgentChannelService().getCurrentPolicyAgent(input),
+      }),
       onConversationEvent: emitPersonalAgentConversationEvent,
     });
   }
   return personalAgentConversationManager;
 };
+const getWhatsAppAgentChannelService = (): WhatsAppAgentChannelService =>
+  whatsappAgentChannelService ??= new WhatsAppAgentChannelService({
+    metadataRoot: getForgerMetadataRoot(),
+    getConnectionsService,
+    getAgentStore: getPersonalAgentStore,
+    getConversationManager: getPersonalAgentConversationManager,
+    appendLog: appendInstallLog,
+  });
 const getSidekickVoiceRuntime = (): SidekickVoiceRuntime => {
   sidekickVoiceRuntime ??= new SidekickVoiceRuntime({
     getSidekickService,
@@ -1505,11 +1498,17 @@ const createWindowBootstrapDeps = () => ({
 });
 const getWindowBootstrapController = () => createWindowBootstrapController(createWindowBootstrapDeps());
 const createWindow = async (): Promise<void> => await getWindowBootstrapController().createWindow();
-const registerIpcHandlers = (): void => getWindowBootstrapController().registerIpcHandlers();
+const registerIpcHandlers = (): void => {
+  getWindowBootstrapController().registerIpcHandlers();
+  registerWhatsAppAgentChannelIpcHandlers({
+    IPC_CHANNELS,
+    ipcMain: createTrustedIpcMain({ ipcMain, getMainWindow }),
+    getWhatsAppAgentChannelService,
+  });
+};
 const dispatchDeepLink = (link: ForgerDeepLink): void => getWindowBootstrapController().dispatchDeepLink(link);
 const flushPendingDeepLink = (): void => getWindowBootstrapController().flushPendingDeepLink();
 const handleIncomingUrl = (rawUrl: string): void => getWindowBootstrapController().handleIncomingUrl(rawUrl);
-
 const mainLifecycleState = {
   get localCatalogJsonUrl() { return localCatalogJsonUrl; }, set localCatalogJsonUrl(value) { localCatalogJsonUrl = value; },
   get devCatalogService() { return devCatalogService; }, set devCatalogService(value) { devCatalogService = value; },
@@ -1546,6 +1545,7 @@ const mainLifecycleState = {
   get desktopRuntimeBridge() { return desktopRuntimeBridge; }, set desktopRuntimeBridge(value) { desktopRuntimeBridge = value; },
   get selfOAuthCallbackService() { return selfOAuthCallbackService; }, set selfOAuthCallbackService(value) { selfOAuthCallbackService = value; },
   get personalAgentRoutineManager() { return personalAgentRoutineManager; }, set personalAgentRoutineManager(value) { personalAgentRoutineManager = value; },
+  get whatsappAgentChannelService() { return whatsappAgentChannelService; }, set whatsappAgentChannelService(value) { whatsappAgentChannelService = value; },
   get localNetworkShareManager() { return localNetworkShareController.manager; }, set localNetworkShareManager(value) { localNetworkShareController.manager = value; },
   get remoteNetworkShareManager() { return remoteNetworkShareManager; },
   get remoteAgentSessionService() { return remoteAgentSessionService; }, set remoteAgentSessionService(value) { remoteAgentSessionService = value; },
@@ -1571,7 +1571,7 @@ registerMainLifecycle({
   getClaudeAuthStatus, getAntigravityAuthStatus, getCloudDeviceAccountStorageKey, getCloudDevicePath, getCloudIdentityPath, getCloudIdentityStore,
   getCodexAuthStatus, getCodexHome, getCodexRoot, getCodexToolEnvironment, getDesktopChatNetworkAccessDefault: () => settings.defaultChatNetworkAccess !== false, getProviderInactivityTimeoutMs: (provider: AgentProvider) => providerInactivityTimeoutMinutesToMs(settings.providerInactivityTimeoutMinutes?.[provider]), getManifestAppSecretsValidationError, getSecretsStore, getForgerAccountPath, getForgerHomeRoot, getForgerMetadataRoot,
   getProviderProfilesRoot, resolveLlmProviderAuthProfile, getSocialAppReviewPromptContext,
-  getFreePort, getLegacyForgerMetadataRoot, getMemoryStore, getPersonalAgentStore, getPersonalAgentConversationManager, getPersonalAgentRoutineManager, getOfficialToolsService, getConnectionsService, getSelfOAuthCallbackService, getSidekickService, getSpeechToTextService, getTextToSpeechService, getLiveVoiceInputService, getWakeWordService,
+  getFreePort, getLegacyForgerMetadataRoot, getMemoryStore, getPersonalAgentStore, getPersonalAgentConversationManager, getPersonalAgentRoutineManager, getWhatsAppAgentChannelService, getOfficialToolsService, getConnectionsService, getSelfOAuthCallbackService, getSidekickService, getSpeechToTextService, getTextToSpeechService, getLiveVoiceInputService, getWakeWordService,
   getAudioDevices: async () => await getAudioRuntimeBroker().listDevices(),
   playTextToSpeechAudio: async (input: { playbackId: string; audioDataBase64: string; mimeType: string; outputDeviceId?: string }) => await getAudioRuntimeBroker().playAudio(input),
   cancelTextToSpeechPlayback: async (playbackId: string) => await getAudioRuntimeBroker().cancelPlayback(playbackId),

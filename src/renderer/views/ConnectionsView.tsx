@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Alert,
   Autocomplete,
@@ -37,7 +37,6 @@ import type {
   AgentToolDefinition,
   AgentToolSettings,
   AppSummary,
-  CallConnectionActionResult,
   ConfigureConnectionInput,
   ConnectionActionDefinition,
   ConnectionInstance,
@@ -48,7 +47,8 @@ import type {
   Workflow,
 } from '@shared/types';
 import { BUILT_IN_CONNECTION_TYPES } from '@shared/connection-catalog';
-import { getWhatsAppPairingPresentation } from '@shared/connections-pairing';
+import { useWhatsAppPairing } from './connections/useWhatsAppPairing';
+import { WhatsAppPairingPanel } from './connections/WhatsAppPairingPanel';
 import type { AppDictionary } from '@renderer/i18n';
 import { GmailIcon, SlackIcon, TrelloIcon } from './tools/ToolIcons';
 import { BrandIcon } from './tools/BrandIcons';
@@ -154,8 +154,7 @@ export function ConnectionsView({
   const [label, setLabel] = useState('');
   const [secrets, setSecrets] = useState<Record<string, string>>({});
   const [gmailMode, setGmailMode] = useState<'forger' | 'self'>('forger');
-  const [pairingConnectionId, setPairingConnectionId] = useState<string | null>(null);
-  const [pairingResult, setPairingResult] = useState<CallConnectionActionResult | null>(null);
+  const setupGeneration = useRef(0);
 
   const refresh = useCallback(async () => {
     const [next, nextAgents, nextWorkflows, nextApps] = await Promise.all([
@@ -177,32 +176,25 @@ export function ConnectionsView({
     });
   }, [copy.loadError, refresh]);
 
-  useEffect(() => {
-    if (!setupOpen || !pairingConnectionId) return undefined;
-    const timer = window.setInterval(() => {
-      void (async () => {
-        const result = await window.forger.connectionsCall({
-          type: 'whatsapp',
-          actionId: 'whatsapp.connection.status',
-          connectionId: pairingConnectionId,
-        });
-        const status = result.data && typeof result.data === 'object'
-          ? (result.data as { status?: string }).status
-          : undefined;
-        if (result.success && status === 'connected') {
-          const next = await refresh();
-          const connected = next.instances.find((instance) => instance.id === pairingConnectionId);
-          onOpenConnection(connected?.id ?? pairingConnectionId);
-          setBanner({ severity: 'success', message: result.userMessage ?? copy.statusChecked });
-          setSetupOpen(false);
-          setSetupGuideOpen(false);
-          setPairingConnectionId(null);
-          setPairingResult(null);
-        }
-      })().catch(() => undefined);
-    }, 3000);
-    return () => window.clearInterval(timer);
-  }, [copy.statusChecked, onOpenConnection, pairingConnectionId, refresh, setupOpen]);
+  const pairing = useWhatsAppPairing({
+    failureMessage: copy.statusCheckFailed,
+    onConnected: async (id, isCurrent) => {
+      await refresh();
+      if (!isCurrent()) return;
+      onOpenConnection(id);
+      setBanner({ severity: 'success', message: copy.statusChecked });
+      setSetupOpen(false);
+      setSetupGuideOpen(false);
+    },
+  });
+  const pairingConnectionId = pairing.connectionId;
+  const closeSetup = () => {
+    setupGeneration.current++;
+    pairing.stop();
+    setSetupOpen(false);
+    setSetupGuideOpen(false);
+  };
+  useEffect(() => () => { setupGeneration.current++; }, []);
 
   const orderedTypes = useMemo(() => [...state.types].sort((a, b) => {
     const ai = SERVICE_ORDER.indexOf(a.type);
@@ -263,20 +255,16 @@ export function ConnectionsView({
     };
   }, [agents, apps, selectedDefinition, selectedInstance, workflows]);
   const usageCount = usage.agents.length + usage.workflows.length + usage.apps.length;
-  const pairingPresentation = useMemo(
-    () => getWhatsAppPairingPresentation(pairingResult),
-    [pairingResult],
-  );
 
   const openSetup = (type?: string, connectionId?: string) => {
+    setupGeneration.current++;
+    pairing.stop();
     const instance = connectionId ? state.instances.find((candidate) => candidate.id === connectionId) : undefined;
     setSetupType(type ?? orderedTypes[0]?.type ?? '');
     setSetupConnectionId(instance?.id ?? null);
     setLabel(instance?.label ?? '');
     setSecrets({});
     setGmailMode('forger');
-    setPairingConnectionId(null);
-    setPairingResult(null);
     setSetupGuideOpen(false);
     setSetupOpen(true);
   };
@@ -306,6 +294,7 @@ export function ConnectionsView({
   };
 
   const configure = async (definition: ConnectionTypeDefinition) => {
+    const attempt = setupGeneration.current;
     const inputSecrets = definition.type === 'gmail' && gmailMode === 'self'
       ? {
           [GMAIL_SELF_OAUTH_CLIENT_ID_SECRET]: secrets[GMAIL_SELF_OAUTH_CLIENT_ID_SECRET],
@@ -319,7 +308,7 @@ export function ConnectionsView({
       ...(Object.keys(inputSecrets).length > 0 ? { secrets: inputSecrets } : {}),
     };
     const result = await runMutation(`configure:${definition.type}`, () => window.forger.connectionsConfigure(input));
-    if (!result?.success || !result.instance) return;
+    if (attempt !== setupGeneration.current || !result?.success || !result.instance) return;
     if (definition.type !== 'whatsapp') {
       onOpenConnection(result.instance.id);
       setSetupOpen(false);
@@ -327,26 +316,7 @@ export function ConnectionsView({
       return;
     }
     setSetupConnectionId(result.instance.id);
-    setBusy('pair:whatsapp');
-    try {
-      const pairing = await window.forger.connectionsCall({
-        type: 'whatsapp',
-        actionId: 'whatsapp.start_pairing',
-        connectionId: result.instance.id,
-        input: { method: 'qr' },
-      });
-      setPairingResult(pairing);
-      setPairingConnectionId(pairing.success ? result.instance.id : null);
-    } catch {
-      setPairingResult({
-        success: false,
-        userMessage: copy.statusCheckFailed,
-        technicalCode: 'whatsapp_pairing_unhandled_error',
-      });
-      setPairingConnectionId(null);
-    } finally {
-      setBusy(null);
-    }
+    await pairing.start(result.instance.id);
   };
 
   const copyCallbackUrl = async (value: string) => {
@@ -391,7 +361,7 @@ export function ConnectionsView({
     }
   };
 
-  const canSubmitSetup = Boolean(setupDefinition) && busy === null && !pairingConnectionId
+  const canSubmitSetup = Boolean(setupDefinition) && busy === null && !pairing.busy && !pairingConnectionId
     && (setupDefinition?.type !== 'gmail' || gmailMode === 'forger'
       || (Boolean(secrets[GMAIL_SELF_OAUTH_CLIENT_ID_SECRET]?.trim())
         && Boolean(secrets[GMAIL_SELF_OAUTH_CLIENT_SECRET_SECRET]?.trim())))
@@ -634,10 +604,7 @@ export function ConnectionsView({
         </Paper>
       )}
 
-      <Dialog open={setupOpen} onClose={() => {
-        setSetupOpen(false);
-        setSetupGuideOpen(false);
-      }} maxWidth="sm" fullWidth>
+      <Dialog open={setupOpen} onClose={closeSetup} maxWidth="sm" fullWidth>
         <DialogTitle>{isReconnectSetup ? copy.reconnectTitle : copy.setupTitle}</DialogTitle>
         <DialogContent>
           <Stack spacing={1.5} sx={{ pt: 0.5 }}>
@@ -650,8 +617,8 @@ export function ConnectionsView({
                 setSetupType(definition?.type ?? '');
                 setSecrets({});
                 setLabel('');
-                setPairingResult(null);
-                setPairingConnectionId(null);
+                setupGeneration.current++;
+                pairing.stop();
                 setSetupGuideOpen(false);
               }}
               renderOption={({ key, ...props }, definition) => (
@@ -809,43 +776,18 @@ export function ConnectionsView({
               </Stack>
             ) : null}
 
-            {pairingPresentation.kind === 'error' ? (
-              <Alert severity="error">{pairingPresentation.message}</Alert>
-            ) : null}
-            {pairingPresentation.kind === 'qr' ? (
-              <Stack spacing={1} alignItems="flex-start">
-                <Typography variant="body2" color="text.secondary">{copy.pairingWaiting}</Typography>
-                <Box
-                  component="img"
-                  src={pairingPresentation.qrDataUrl}
-                  alt={copy.pairingResult}
-                  sx={{
-                    width: 220,
-                    height: 220,
-                    border: 1,
-                    borderColor: 'divider',
-                    borderRadius: 1,
-                    p: 1,
-                    bgcolor: 'background.paper',
-                  }}
-                />
-              </Stack>
-            ) : null}
-            {pairingPresentation.kind === 'pairing_code' ? (
-              <Alert severity="info">
-                {copy.pairingResult}: <strong>{pairingPresentation.pairingCode}</strong>
-              </Alert>
-            ) : null}
-            {pairingPresentation.kind === 'waiting' ? (
-              <Alert severity="info" variant="outlined">{copy.pairingWaiting}</Alert>
-            ) : null}
+            <WhatsAppPairingPanel
+              presentation={pairing.presentation}
+              waitingLabel={copy.pairingWaiting}
+              resultLabel={copy.pairingResult}
+              locale={t.locale}
+              busy={pairing.busy}
+              onRetry={() => void pairing.retry()}
+            />
           </Stack>
         </DialogContent>
         <DialogActions>
-          <Button onClick={() => {
-            setSetupOpen(false);
-            setSetupGuideOpen(false);
-          }}>{pairingConnectionId ? t.actions.close : t.actions.cancel}</Button>
+          <Button onClick={closeSetup}>{pairingConnectionId ? t.actions.close : t.actions.cancel}</Button>
           <Button
             variant="contained"
             disabled={!canSubmitSetup}

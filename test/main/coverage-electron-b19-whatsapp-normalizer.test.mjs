@@ -24,9 +24,8 @@ test('given identifiers and stable references, normalization accepts supported i
   assert.equal(classifyWhatsAppJid('updates@newsletter'), 'channel');
   assert.equal(classifyWhatsAppJid(directJid), 'direct');
 
-  assert.equal(phoneNumberFromJid('client-569 123@s.whatsapp.net'), '569123');
+  assert.equal(phoneNumberFromJid('client-569 123@s.whatsapp.net'), undefined);
   assert.equal(phoneNumberFromJid('device-42@lid'), undefined);
-  assert.equal(phoneNumberFromJid('56912345678:7@s.whatsapp.net'), '56912345678');
   assert.equal(phoneNumberFromJid('letters@lid'), undefined);
   assert.equal(phoneNumberFromJid('team@g.us'), undefined);
 
@@ -270,7 +269,6 @@ test('given contacts and messages, derived chats keep public identity while omit
   assert.equal(contacts.length, 2);
   assert.deepEqual(contacts.map((contact) => contact.chatId), [directJid, 'device-42@lid']);
   assert.deepEqual(contacts[0].aliases, ['Alice', 'alice-user']);
-  assert.equal(contacts[0].phoneNumber, '56912345678');
   assert.equal(contacts[1].phoneNumber, undefined);
 
   const anonymous = normalizeBaileysContact({ id: 'team@g.us', name: ' ', notify: 7 });

@@ -14,6 +14,8 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import net from 'node:net';
 const require = createRequire(import.meta.url);
+const { dispatchLiveWhatsAppMessage } = require('../../dist-electron/main/connections/modules/whatsapp/live-routing.js');
+const liveOptions = (handler) => ({ onLiveMessage: (message, metadata) => dispatchLiveWhatsAppMessage({ connectionId: 'account', message, newlyStored: metadata.newlyStored, onRepositoryMessage: handler }).catch(() => undefined) });
 const {
   WhatsAppRepositoryTransport,
 } = require('../../dist-electron/main/repository-collaboration/whatsapp-transport.js');
@@ -181,11 +183,17 @@ test('only persisted live notifications enter collaboration; own human messages 
   const store = {
     authDirectory: () => root,
     load: async () => {},
-    upsertMessages: async (m) => saved.push(...m),
+    upsertMessages: async (m) => { saved.push(...m); return []; },
+    identityIds: async (_account, id) => [id],
+      rememberIdentityPair: async () => {},
+    isKnownOutboundMessageRef: async () => false,
     upsertChat: async () => {},
     storageStatus: async () => ({}),
   };
-  const manager = new WhatsAppConnectionManager(store, async () => ({
+  const manager = new WhatsAppConnectionManager(store, liveOptions(async (m) => {
+    assert.ok(saved.some((x) => x.stableMessageRef.id === m.messageId));
+    delivered.push(m);
+  }), async () => ({
     useMultiFileAuthState: async () => ({
       state: { creds: { registered: true, me: { id: '33:2@s.whatsapp.net' } } },
       saveCreds: async () => {},
@@ -359,10 +367,17 @@ test('fresh pairing learns verified LID identity and a failed callback does not 
     {
       authDirectory: () => root,
       load: async () => {},
-      upsertMessages: async () => {},
+      upsertMessages: async () => [],
+      identityIds: async (_account, id) => [id],
+      rememberIdentityPair: async () => {},
+      isKnownOutboundMessageRef: async () => false,
       upsertChat: async () => {},
       storageStatus: async () => ({}),
     },
+    liveOptions(async (message) => {
+      if (message.messageId === 'callback-failed') throw Error('synthetic failure');
+      delivered.push(message);
+    }),
     async () => ({
       useMultiFileAuthState: async () => ({
         state: { creds: { registered: false } },

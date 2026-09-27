@@ -242,7 +242,14 @@ test('Given duplicate and missing acknowledgements, wait replaces, times out, an
   await second;
 
   const timedOut = receipts.wait(runtime, 'never');
-  await assert.rejects(timedOut, /sidekick_speaker_ack_timeout/);
+  // The production ACK timer is unref'ed because an idle speaker must not
+  // keep Desktop alive. Keep this isolated test alive until it can fire.
+  const watchdog = setTimeout(() => receipts.reject(runtime, new Error('ack_timeout_watchdog')), 100);
+  try {
+    await assert.rejects(timedOut, /sidekick_speaker_ack_timeout/);
+  } finally {
+    clearTimeout(watchdog);
+  }
   assert.equal(runtime.pendingSpeakerAcks.size, 0);
 
   receipts.handleProgress(runtime, {

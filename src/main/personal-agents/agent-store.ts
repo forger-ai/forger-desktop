@@ -81,6 +81,7 @@ export class AgentStore {
   private loadPromise: Promise<void> | null = null;
   private readonly routineStore: AgentRoutineStore;
   private readonly groupStore: AgentGroupStore;
+  private readonly networkRevocationListeners = new Set<{ agentId: string; stop: () => Promise<void> }>();
 
   public constructor(private readonly options: AgentStoreOptions) {
     this.groupStore = new AgentGroupStore({
@@ -97,6 +98,13 @@ export class AgentStore {
       updateConversationTitle: (input) => this.updateConversationTitle(input),
       touchConversation: (agentId, conversationId, updatedAt) => this.touchConversation(agentId, conversationId, updatedAt),
     });
+  }
+
+  /** Native provider tools cannot be reauthorized by MCP; stop their active runs on revocation. */
+  public onNetworkAccessRevoked(agentId: string, stop: () => Promise<void>): () => void {
+    const listener = { agentId, stop };
+    this.networkRevocationListeners.add(listener);
+    return () => { this.networkRevocationListeners.delete(listener); };
   }
 
   public async listAgents(): Promise<PersonalAgent[]> {
@@ -244,6 +252,7 @@ export class AgentStore {
   public async deleteAgent(agentId: string): Promise<{ success: boolean }> {
     await this.load();
     const agent = await this.requireAgent(agentId);
+    await this.updateAgentPermissions({ agentId: agent.id, networkAccess: false });
     this.requireDb().prepare('DELETE FROM personal_agents WHERE id = ?').run(agent.id);
     await fs.rm(this.agentRoot(agent.id), { force: true, recursive: true });
     return { success: true };
@@ -267,6 +276,13 @@ export class AgentStore {
       SET permission_mode = ?, network_access = ?, can_spawn_agents = ?, group_id = ?, runtime_provider = ?, runtime_model = ?, runtime_effort = ?, updated_at = ?
       WHERE id = ?
     `).run(permissionMode, networkAccess ? 1 : 0, canSpawnAgents ? 1 : 0, groupId, runtime?.provider ?? null, runtime?.model ?? null, runtime?.effort ?? null, now, agent.id);
+    // The denial is durable before callbacks run or another task reads it. A
+    // repeated denial retries any cancellation that previously failed to finish.
+    if (input.networkAccess === false) {
+      await Promise.all([...this.networkRevocationListeners]
+        .filter(listener => listener.agentId === agent.id)
+        .map(listener => listener.stop()));
+    }
     await this.upsertLegacyPermission({
       agentId: agent.id,
       targetId: 'network_access',
@@ -581,7 +597,7 @@ export class AgentStore {
       sanitizeText(input.title, 160) || agent.name,
       'active',
       origin,
-      input.readOnly === true || origin === 'agent' || origin === 'sidekick' ? 1 : 0,
+      input.readOnly === true || origin === 'agent' || origin === 'sidekick' || origin === 'whatsapp' ? 1 : 0,
       initiatorAgentId,
       peerThreadId,
       routineId,
@@ -627,7 +643,7 @@ export class AgentStore {
     const now = new Date().toISOString();
     this.requireDb().prepare('UPDATE personal_agent_conversations SET provider = ?, provider_thread_id = ?, updated_at = ? WHERE id = ?').run(
       input.provider,
-      input.providerThreadId ?? conversation.providerThreadId ?? null,
+      input.providerThreadId === undefined ? conversation.providerThreadId ?? null : input.providerThreadId,
       now,
       input.conversationId,
     );
@@ -806,7 +822,7 @@ export class AgentStore {
     return deleted;
   }
 
-  public async createRun(input: { agentId: string; conversationId: string }): Promise<PersonalAgentRun> {
+  public async createRun(input: { agentId: string; conversationId: string; runId?: string }): Promise<PersonalAgentRun> {
     await this.load();
     const conversation = await this.requireConversation(input.conversationId);
     if (conversation.agentId !== input.agentId) {
@@ -818,7 +834,7 @@ export class AgentStore {
     }
     const now = new Date().toISOString();
     const run: PersonalAgentRun = {
-      id: randomUUID(),
+      id: input.runId ?? randomUUID(),
       agentId: input.agentId,
       conversationId: input.conversationId,
       status: 'queued',
@@ -1304,7 +1320,7 @@ export class AgentStore {
       title: row.title,
       status: normalizeConversationStatus(row.status),
       origin,
-      readOnly: row.read_only !== 0 || origin === 'agent' || origin === 'sidekick',
+      readOnly: row.read_only !== 0 || origin === 'agent' || origin === 'sidekick' || origin === 'whatsapp',
       ...(sanitizeGrantTarget(row.sidekick_id) ? { sidekickId: sanitizeGrantTarget(row.sidekick_id) as string } : {}),
       ...(initiatorAgentId ? { initiatorAgentId } : {}),
       ...(initiatorAgentName ? { initiatorAgentName } : {}),
@@ -1471,7 +1487,7 @@ export class AgentStore {
     const row = this.requireDb().prepare(`
       SELECT * FROM personal_agent_runs
       WHERE conversation_id = ?
-      ORDER BY created_at DESC
+      ORDER BY created_at DESC, rowid DESC
       LIMIT 1
     `).get(conversationId) as RunRow | undefined;
     return row ? this.runFromRow(row) : null;

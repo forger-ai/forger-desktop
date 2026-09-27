@@ -7,7 +7,6 @@ import type {
   WhatsAppStableMessageRef,
 } from './types';
 
-const DIRECT_SUFFIX = '@s.whatsapp.net';
 const GROUP_SUFFIX = '@g.us';
 const NEWSLETTER_SUFFIX = '@newsletter';
 
@@ -25,13 +24,15 @@ export const classifyWhatsAppJid = (jid: string): WhatsAppChatType => {
   return 'direct';
 };
 
+/** User identities omit only the authenticated transport's device suffix. */
+export const normalizeWhatsAppUserJid = (jid: string): string => {
+  const match = /^(\d+)(?::\d+)?@(s\.whatsapp\.net|lid)$/.exec(jid);
+  return match ? `${match[1]}@${match[2]}` : jid;
+};
+
 export const phoneNumberFromJid = (jid: string): string | undefined => {
-  if (!jid.endsWith(DIRECT_SUFFIX)) {
-    return undefined;
-  }
-  const [raw] = jid.split('@');
-  const digits = raw.split(':')[0].replace(/\D/g, '');
-  return digits || undefined;
+  const normalized = normalizeWhatsAppUserJid(jid);
+  return /^(\d+)@s\.whatsapp\.net$/.exec(normalized)?.[1];
 };
 
 export const encodeStableMessageRef = (ref: WhatsAppStableMessageRef): string =>
@@ -75,6 +76,10 @@ const extractMessageText = (message: Record<string, unknown> | undefined): strin
   const video = message.videoMessage as { caption?: unknown } | undefined;
   if (typeof video?.caption === 'string') {
     return video.caption;
+  }
+  const document = message.documentMessage as { caption?: unknown } | undefined;
+  if (typeof document?.caption === 'string') {
+    return document.caption;
   }
   return undefined;
 };
@@ -186,6 +191,16 @@ const toTimestamp = (value: unknown): number | undefined => {
   return undefined;
 };
 
+const messageContextInfo = (message: Record<string, unknown> | undefined): Record<string, unknown> | null => {
+  if (!message) return null;
+  const payload = message[getMessageType(message)];
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) return null;
+  const contextInfo = (payload as Record<string, unknown>).contextInfo;
+  return contextInfo && typeof contextInfo === 'object' && !Array.isArray(contextInfo)
+    ? contextInfo as Record<string, unknown>
+    : null;
+};
+
 export const normalizeBaileysMessage = (raw: unknown): WhatsAppIndexedMessage | null => {
   if (!raw || typeof raw !== 'object') {
     return null;
@@ -210,14 +225,22 @@ export const normalizeBaileysMessage = (raw: unknown): WhatsAppIndexedMessage | 
     fromMe,
     ...(participant ? { participant } : {}),
   };
+  const contextInfo = messageContextInfo(candidate.message);
+  const quoted = Boolean(contextInfo?.quotedMessage)
+    || typeof contextInfo?.stanzaId === 'string' && Boolean(contextInfo.stanzaId.trim());
+  const forwarded = contextInfo?.isForwarded === true
+    || (toNumber(contextInfo?.forwardingScore) ?? 0) > 0;
   const attachments = extractAttachments(candidate.message, stableMessageRef, remoteJid, raw);
   return {
     stableMessageRef,
     chatId: remoteJid,
     chatType,
-    ...(participant ? { senderId: participant } : {}),
+    ...(participant || (!fromMe && chatType === 'direct') ? { senderId: participant || remoteJid } : {}),
     ...(typeof candidate.pushName === 'string' && candidate.pushName.trim() ? { senderDisplayName: candidate.pushName.trim() } : {}),
     fromMe,
+    ...(quoted ? { quoted: true } : {}),
+    ...(typeof contextInfo?.stanzaId === 'string' && contextInfo.stanzaId.trim() ? { replyToMessageId: contextInfo.stanzaId } : {}),
+    ...(forwarded ? { forwarded: true } : {}),
     ...(toTimestamp(candidate.messageTimestamp) ? { timestamp: toTimestamp(candidate.messageTimestamp) } : {}),
     ...(extractMessageText(candidate.message) ? { text: extractMessageText(candidate.message) } : {}),
     messageType: getMessageType(candidate.message),
@@ -319,10 +342,12 @@ export const normalizeBaileysContact = (raw: unknown): WhatsAppIndexedChat[] => 
   ].filter(Boolean);
   const uniqueIds = [...new Set(ids)];
   const title = firstText(candidate.name, candidate.notify, candidate.verifiedName, candidate.username);
+  const contactName = firstText(candidate.name);
   const aliases = uniqueTexts([candidate.name, candidate.notify, candidate.verifiedName, candidate.username]);
   return uniqueIds.map((chatId) => ({
     chatId,
     chatType: classifyWhatsAppJid(chatId),
+    ...(classifyWhatsAppJid(chatId) === 'direct' && contactName ? { contactName } : {}),
     ...(title ? { title } : {}),
     ...(aliases ? { aliases } : {}),
     ...(phoneNumberFromJid(chatId) ? { phoneNumber: phoneNumberFromJid(chatId) } : {}),

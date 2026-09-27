@@ -47,7 +47,7 @@ export async function startRepositoryCollaborationRuntime(options: {
   // Recover durable work and register intake before any connection begins listening.
   try {
     options.connections.setWhatsAppMessageHandler((message) =>
-      service.handleMessage(message),
+      service.routeMessage(message),
     );
     service.start();
   } catch (error) {

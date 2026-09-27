@@ -15,9 +15,18 @@ export interface WhatsAppIndexedMessage {
   stableMessageRef: WhatsAppStableMessageRef;
   chatId: string;
   chatType: WhatsAppChatType;
+  /** Authenticated equivalent identities; transport IDs and references stay unchanged. */
+  chatIdentityIds?: string[];
+  equivalentStableMessageRefs?: string[];
+  senderIdentityIds?: string[];
   senderId?: string;
   senderDisplayName?: string;
   fromMe: boolean;
+  /** Whether the current message quotes another message. Quoted content is not an instruction. */
+  quoted?: boolean;
+  replyToMessageId?: string;
+  /** Whether WhatsApp marks this message as forwarded. */
+  forwarded?: boolean;
   timestamp?: number;
   text?: string;
   messageType: string;
@@ -51,9 +60,12 @@ export interface WhatsAppMessageAttachment {
 }
 
 export interface WhatsAppIndexedChat {
+  identityIds?: string[];
   chatId: string;
   chatType: WhatsAppChatType;
   title?: string;
+  /** Name saved in the address book; profile and message names are not saved names. */
+  contactName?: string;
   aliases?: string[];
   phoneNumber?: string;
   lastMessageRef?: WhatsAppStableMessageRef;
@@ -121,4 +133,11 @@ export interface WhatsAppLiveGroupMessage {
   chatId: string; messageId: string; senderId: string; senderName?: string;
   text: string; timestamp: number; live: boolean; identityVerified: boolean;
   automated?: boolean; fromMe?: boolean; replyToMessageId?: string;
+}
+
+export interface WhatsAppCurrentMessageImagesResult {
+  success: boolean;
+  images?: Array<{ data: string; mimeType: 'image/png' | 'image/jpeg' }>;
+  userMessage?: string;
+  technicalCode?: string;
 }

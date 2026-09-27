@@ -15,7 +15,67 @@ const {
 } = require('../../dist-electron/main/connections/modules/whatsapp/normalizer.js');
 const { WhatsAppLocalStore } = require('../../dist-electron/main/connections/modules/whatsapp/store.js');
 const { WhatsAppConnectionManager } = require('../../dist-electron/main/connections/modules/whatsapp/manager.js');
-const { whatsappToolModule, __resetWhatsAppToolForTests } = require('../../dist-electron/main/connections/modules/whatsapp/index.js');
+const { whatsappToolModule, setLiveWhatsAppMessageHandler, __resetWhatsAppToolForTests } = require('../../dist-electron/main/connections/modules/whatsapp/index.js');
+const whatsappManagerModule = require('../../dist-electron/main/connections/modules/whatsapp/manager.js');
+
+test('live notifications route only when one configured connection identifies the account', async (t) => {
+  const root = await mkdtemp(join(tmpdir(), 'forger-whatsapp-routing-'));
+  const originalFactory = whatsappManagerModule.createWhatsAppConnectionManager;
+  let onLiveMessage;
+  const deliveries = [];
+  whatsappManagerModule.createWhatsAppConnectionManager = (_context, options) => {
+    onLiveMessage = options.onLiveMessage;
+    return { status: async () => ({ configured: false }) };
+  };
+  t.after(async () => {
+    setLiveWhatsAppMessageHandler(null);
+    __resetWhatsAppToolForTests();
+    whatsappManagerModule.createWhatsAppConnectionManager = originalFactory;
+    await rm(root, { recursive: true, force: true });
+  });
+  const message = { stableMessageRef: { id: 'inbound' } };
+  const first = { ...createContext(root), connectionId: 'connection-one' };
+  await whatsappToolModule.start(first);
+
+  await onLiveMessage(message, { newlyStored: true });
+  setLiveWhatsAppMessageHandler(async (delivery) => deliveries.push(delivery));
+  await onLiveMessage(message, { newlyStored: true });
+  assert.deepEqual(deliveries, [{ connectionId: 'connection-one', message, newlyStored: true }]);
+
+  await whatsappToolModule.start({ ...first, connectionId: 'connection-two' });
+  await onLiveMessage(message, { newlyStored: false });
+  assert.equal(deliveries.length, 1);
+
+  await whatsappToolModule.start(createContext(join(root, 'unbound-account')));
+  await onLiveMessage(message, { newlyStored: true });
+  assert.equal(deliveries.length, 1);
+});
+
+test('document captions and message provenance are read from the original message only', () => {
+  const key = { remoteJid: '56912345678@s.whatsapp.net', id: 'DOC', fromMe: false };
+  const document = normalizeBaileysMessage({
+    key,
+    message: { documentMessage: { caption: 'Current caption', contextInfo: {
+      stanzaId: 'quoted-id', isForwarded: false, forwardingScore: 1,
+    } } },
+  });
+  assert.equal(document.text, 'Current caption');
+  assert.equal(document.quoted, true);
+  assert.equal(document.forwarded, true);
+
+  const unquoted = normalizeBaileysMessage({
+    key: { ...key, id: 'NO_QUOTE' },
+    message: { documentMessage: { contextInfo: { stanzaId: ' ', forwardingScore: 'not-a-number' } } },
+  });
+  assert.equal(unquoted.quoted, undefined);
+  assert.equal(unquoted.forwarded, undefined);
+  const noContext = normalizeBaileysMessage({
+    key: { ...key, id: 'NO_CONTEXT' },
+    message: { documentMessage: { caption: 'No quote' } },
+  });
+  assert.equal(noContext.quoted, undefined);
+  assert.equal(noContext.forwarded, undefined);
+});
 
 const createContext = (metadataRoot, events = []) => ({
   metadataRoot,
@@ -529,7 +589,7 @@ test('WhatsApp pairing failure before QR is recoverable instead of pending', asy
   assert.equal(typeof result.technicalCode, 'string');
 });
 
-test('WhatsApp QR pairing clears stale auth before starting a fresh QR session', async (t) => {
+test('WhatsApp QR pairing preserves stored auth unless logout was confirmed', async (t) => {
   const root = await mkdtemp(join(tmpdir(), 'forger-whatsapp-stale-auth-'));
   t.after(async () => {
     await rm(root, { recursive: true, force: true });
@@ -540,7 +600,7 @@ test('WhatsApp QR pairing clears stale auth before starting a fresh QR session',
   await writeFile(join(store.authDirectory(), 'creds.json'), JSON.stringify({ registered: true }), 'utf8');
   const manager = new WhatsAppConnectionManager(store);
   let ended = false;
-  let startedAfterClear = false;
+  let startedWithPreservedAuth = false;
   manager.socket = {
     end: () => {
       ended = true;
@@ -548,15 +608,39 @@ test('WhatsApp QR pairing clears stale auth before starting a fresh QR session',
   };
   manager.ensureStarted = async () => {
     const status = await manager.status();
-    startedAfterClear = status.configured === false;
-    manager.latestQr = 'fresh-qr';
+    startedWithPreservedAuth = status.configured === true;
+    manager.handleConnectionUpdate({ qr: 'fresh-qr' }, context);
   };
 
   const result = await manager.startPairing(context, { method: 'qr' });
 
-  assert.equal(ended, true);
-  assert.equal(startedAfterClear, true);
+  assert.equal(ended, false);
+  assert.equal(startedWithPreservedAuth, true);
   assert.equal(result.status, 'qr_ready');
   assert.equal(typeof result.qrDataUrl, 'string');
-  assert.equal((await manager.status()).configured, false);
+  assert.equal((await manager.status()).configured, true);
+});
+
+test('transport distinguishes proven pre-send failures from an uncertain socket attempt', async (t) => {
+  const root = await mkdtemp(join(tmpdir(), 'forger-whatsapp-delivery-'));
+  t.after(async () => rm(root, { recursive: true, force: true }));
+  const store = new WhatsAppLocalStore(root);
+  const manager = new WhatsAppConnectionManager(store);
+  const context = createContext(root);
+  const chatId = '56912345678@s.whatsapp.net';
+  let sends = 0;
+  await manager.ingestMessages([{ key: { remoteJid: chatId, id: 'observed', fromMe: false }, messageTimestamp: 1, message: { conversation: 'hello' } }]);
+  manager.ensureStarted = async () => { throw new Error('offline'); };
+  assert.deepEqual((await manager.sendMessage(context, { chatId, text: 'reply' })).data, { deliveryState: 'not_sent', retryable: true });
+  manager.ensureStarted = async () => undefined;
+  manager.socket = {};
+  assert.deepEqual((await manager.sendMessage(context, { chatId, text: 'reply' })).data, { deliveryState: 'not_sent', retryable: true });
+  assert.deepEqual((await manager.sendMessage(context, { chatId, text: '' })).data, { deliveryState: 'not_sent', retryable: false });
+  assert.deepEqual((await manager.sendMessage(context, { chatId: '56999999999@s.whatsapp.net', text: 'reply' })).data, { deliveryState: 'not_sent', retryable: false });
+  manager.socket = { sendMessage: async () => { sends++; throw new Error('response lost after possible send'); } };
+  await assert.rejects(manager.sendMessage(context, { chatId, text: 'reply' }), /response lost/);
+  assert.equal(sends, 1);
+  await store.rememberSend();
+  assert.deepEqual((await manager.sendMessage(context, { chatId, text: 'reply' })).data, { deliveryState: 'not_sent', retryable: true });
+  await store.close?.();
 });

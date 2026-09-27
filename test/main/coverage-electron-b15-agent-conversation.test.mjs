@@ -463,17 +463,17 @@ test('given a peer timeout, the running transcript is returned without blocking 
   }
 });
 
-test('given cancellation with an active child, SIGTERM is sent exactly once and activity reaches canceled', async () => {
+test('given cancellation with an active child, SIGKILL is sent exactly once and activity reaches canceled', async () => {
   const harness = await createHarness();
   try {
     const agent = await harness.store.createAgent({ name: 'Cancelable' });
     const conversation = await harness.store.createConversation({ agentId: agent.id });
     const run = await harness.store.createRun({ agentId: agent.id, conversationId: conversation.id });
-    let signal;
-    const child = { killed: false, kill: (nextSignal) => { signal = nextSignal; child.killed = true; } };
+    const signals = [];
+    const child = { killed: false, kill: (nextSignal) => { signals.push(nextSignal); child.killed = true; } };
     harness.manager.activeChildren.set(run.id, child);
     assert.equal(await harness.manager.cancelRun(run.id), true);
-    assert.equal(signal, 'SIGTERM');
+    assert.deepEqual(signals, ['SIGKILL']);
     assert.equal((await harness.store.getRun(run.id)).status, 'canceled');
   } finally {
     await harness.cleanup();
@@ -508,6 +508,9 @@ test('given private lifecycle edge cases, missing runs, conversations, activity,
     assert.equal((await harness.store.getRun(failedRun.id)).error, 'personal_agent_run_failed');
 
     const progressRun = await harness.store.createRun({ agentId: agent.id, conversationId: conversation.id });
+    await harness.manager.recordProgress(progressRun.id, 'Direct progress');
+    assert.equal(harness.manager.activities.has(progressRun.id), false);
+    await harness.store.updateRunStatus({ runId: progressRun.id, status: 'running' });
     await harness.manager.recordProgress(progressRun.id, 'Direct progress');
     assert.equal(harness.manager.activities.has(progressRun.id), true);
     assert.equal(harness.manager.withActivityRun({ ...progressRun, id: 'untracked' }).activity, undefined);

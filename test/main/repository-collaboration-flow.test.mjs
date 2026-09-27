@@ -130,10 +130,11 @@ test(
     t.mock.method(
       managerModule,
       'createWhatsAppConnectionManager',
-      (context) => {
+      (context, options) => {
         whatsappStore = new WhatsAppLocalStore(context.metadataRoot);
         whatsappManager = new managerModule.WhatsAppConnectionManager(
           whatsappStore,
+          options,
           loadBaileys,
         );
         return whatsappManager;
@@ -221,8 +222,9 @@ test(
         'intake receives only persisted messages',
       );
       received.push(message);
-      await service.handleMessage(message);
+      const claimed = await service.routeMessage(message);
       processed.push(message.messageId);
+      return claimed;
     });
     const groups = await service.listGroups(connectionId);
     assert.deepEqual(groups, [{ chatId, title: 'Forger team' }]);
@@ -447,15 +449,9 @@ test(
           message.options.quoted.key.remoteJid === chatId,
       ),
     );
-    await waitFor(
-      () =>
-        received.some(
-          (message) =>
-            message.messageId === delivered.at(-1).raw.key.id &&
-            message.automated,
-        ),
-      'last automated echo ignored',
-    );
+    await waitFor(async () => (await whatsappStore.readMessages({ chatId, limit: 500 }))
+      .some((message) => message.stableMessageRef.id === delivered.at(-1).raw.key.id), 'last automated echo persisted');
+    assert.ok(!received.some((message) => message.messageId === delivered.at(-1).raw.key.id), 'outbound echoes never enter either operator');
     assert.equal(collaborationStore.tasks().length, 3);
     assert.equal(executions.length, 3);
     assert.ok(

@@ -20,6 +20,8 @@ export interface InternalOAuthTokenResponse {
 
 export interface InternalToolContext {
   metadataRoot: string;
+  /** Present for a configured Connection instance, never for a general tool. */
+  connectionId?: string;
   secretsStore: SecretsStore;
   locale?: string;
   getFreePort: () => Promise<number>;
@@ -39,7 +41,7 @@ export interface InternalToolContext {
   selfOAuthCallbackService?: SelfOAuthCallbackServiceLike;
   appendLog?: (event: string, payload?: Record<string, unknown>) => Promise<void>;
   emitEvent?: (event: OfficialToolRuntimeEvent) => void;
-  onWhatsAppMessage?: (message: WhatsAppLiveGroupMessage) => Promise<void>;
+  onWhatsAppMessage?: (message: WhatsAppLiveGroupMessage) => Promise<boolean | void>;
 }
 
 export interface InternalToolModule {
