@@ -41,6 +41,8 @@ The next local build adds a deterministic agent reply header, optional `@` invoc
 - Packaged arm64 `0.5.19-pr163.2`: native SQLite, parser, reply formatter, access persistence, WhatsApp module import and 460 production package dependency checks pass. Ad-hoc signature verification passes.
 - Independent review identified a concurrent equivalent-chat activation race; the fix includes concurrent save and ON-command regression tests.
 
+After installing the update, the owner sent `@kupita responde: NUEVO FORMATO OK` in the designated self-chat. One request completed and its delivery was marked sent. The local transport record contains `🤖 Kupita: ` followed by a newline and `NUEVO FORMATO OK`; the owner confirmed that format on the phone. The connection remained available after the update/restart, with the self-chat still owner-only.
+
 ## Release boundary
 
-Automated tests use synthetic transport/provider doubles and do not contact real recipients. The controlled self-chat test confirms delivery with the owner's connected provider account. Live group authorization, pause/reconnection and the newly formatted reply still need their own controlled account checks. The local package is ad-hoc signed, not notarized or published; this change does not merge the PR or deploy to production. Codex and Claude support the isolated channel contract; Antigravity is rejected for this channel.
+Automated tests use synthetic transport/provider doubles and do not contact real recipients. Controlled self-chat tests confirm delivery, `@` invocation, reply formatting and connection recovery after the local update. Live group authorization and pause/resume still need their own controlled account checks. The local package is ad-hoc signed, not notarized or published; this change does not merge the PR or deploy to production. Codex and Claude support the isolated channel contract; Antigravity is rejected for this channel.
