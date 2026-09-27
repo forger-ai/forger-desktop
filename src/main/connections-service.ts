@@ -153,6 +153,8 @@ export class ConnectionsService {
   private readonly modulesByType: Map<string, InternalConnectionModule>;
   private registry: ConnectionsRegistryFile = emptyRegistry();
   private loaded = false;
+  private started = false;
+  private messageHandler: ConnectionContext['onWhatsAppMessage'];
 
   constructor(private readonly options: ConnectionsServiceOptions) {
     const modules = options.modules ?? BUILT_IN_CONNECTION_MODULES;
@@ -165,6 +167,25 @@ export class ConnectionsService {
     }
     this.registry = await this.readRegistry();
     this.loaded = true;
+  }
+
+  setWhatsAppMessageHandler(handler: ConnectionContext['onWhatsAppMessage']): void { this.messageHandler = handler; }
+
+  async start(): Promise<void> {
+    await this.load();
+    if(this.started) return;
+    this.started = true;
+    for(const module of this.modulesByType.values()) {
+      if(!(await this.listInstances(module.definition.type)).length) continue;
+      try { await module.start?.(this.getContext()); }
+      catch { await this.options.appendLog?.('connections:start_failed', { type: module.definition.type }); }
+    }
+  }
+
+  async stop(): Promise<void> {
+    this.messageHandler = undefined;
+    this.started = false;
+    await Promise.allSettled([...this.modulesByType.values()].map(module => module.stop?.(this.getContext())));
   }
 
   async startType(type: string): Promise<void> {
@@ -299,7 +320,7 @@ export class ConnectionsService {
     return module.pairingStatus(this.getContext(), instance.id);
   }
 
-  async call(input: ServiceCallConnectionActionInput): Promise<CallConnectionActionResult> {
+  async call(input: ServiceCallConnectionActionInput, hostOptions?: { authorizeWhatsAppSend?: () => Promise<boolean> }): Promise<CallConnectionActionResult> {
     await this.load();
     const type = cleanString(input.type);
     const actionId = cleanString(input.actionId);
@@ -328,7 +349,11 @@ export class ConnectionsService {
       return { success: false, userMessage: 'Connection is not configured.', technicalCode: 'connection_not_configured' };
     }
 
-    const result = await module.execute(this.getContext(), {
+    const context = this.getContext();
+    if (type === 'whatsapp' && actionId === 'whatsapp.send_message' && hostOptions?.authorizeWhatsAppSend) {
+      context.authorizeWhatsAppSend = hostOptions.authorizeWhatsAppSend;
+    }
+    const result = await module.execute(context, {
       type,
       actionId,
       ...(input.input ? { input: input.input } : {}),
@@ -676,6 +701,7 @@ export class ConnectionsService {
       ...(this.options.selfOAuthCallbackService ? { selfOAuthCallbackService: this.options.selfOAuthCallbackService } : {}),
       appendLog: this.options.appendLog,
       emitEvent: this.options.emitEvent,
+      onWhatsAppMessage: (message) => this.messageHandler?.(message) ?? Promise.resolve(),
       createInstance: (input) => this.createInstance(input),
       updateInstance: (connectionId, input) => this.updateInstance(connectionId, input),
       deleteInstance: (connectionId, options) => this.deleteInstance(connectionId, options),

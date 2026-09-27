@@ -522,3 +522,59 @@ test('given duplicate session grants, merging handles unscoped, left-scoped, and
     { type: 'right', actions: ['read', 'write'], multiple: false, connectionIds: ['b'] },
   ]);
 });
+
+test('host send authorization is scoped to a single WhatsApp send and cannot leak into other calls', async () => {
+  const captured = [];
+  const authorizeWhatsAppSend = async () => true;
+  const whatsapp = makeModule({
+    definition: { ...definition, type: 'whatsapp', statusActionId: 'whatsapp.status', actions: ['whatsapp.send_message', 'whatsapp.status'].map(id => ({ id, name: id, risk: 'low' })) },
+    execute: async (context, input) => { captured.push([input.type, input.actionId, context.authorizeWhatsAppSend]); return { success: true }; },
+  });
+  const demo = makeModule({ execute: whatsapp.execute });
+  const harness = await createHarness({ modules: [whatsapp, demo] });
+  try {
+    const instance = await harness.service.createInstance({ type: 'whatsapp', label: 'Account', status: 'connected' });
+    const send = { type: 'whatsapp', actionId: 'whatsapp.send_message', connectionId: instance.id };
+    await harness.service.call(send, { authorizeWhatsAppSend });
+    await harness.service.call(send);
+    await harness.service.call(send, {});
+    await harness.service.call({ type: 'whatsapp', actionId: 'whatsapp.status' }, { authorizeWhatsAppSend });
+    await harness.service.call({ type: 'demo', actionId: 'demo.status' }, { authorizeWhatsAppSend });
+    assert.deepEqual(captured.map(entry => entry[2]), [authorizeWhatsAppSend, undefined, undefined, undefined, undefined]);
+  } finally { await harness.cleanup(); }
+});
+
+test('connection startup contains one account failure and continues with the next module without duplicate listeners', async () => {
+  const calls = [];
+  const broken = makeModule({ start: async () => { calls.push('broken'); throw Error('private error'); } });
+  const healthy = makeModule({ definition: { ...definition, type: 'healthy' }, start: async () => calls.push('healthy') });
+  const harness = await createHarness({ modules: [broken, healthy], appendLog: async (...args) => calls.push(args) });
+  try {
+    await harness.service.createInstance({ type: 'demo', status: 'connected' });
+    await harness.service.createInstance({ type: 'healthy', status: 'connected' });
+    await harness.service.start();
+    await harness.service.start();
+    assert.deepEqual(calls, ['broken', ['connections:start_failed', { type: 'demo' }], 'healthy']);
+    await harness.service.stop();
+  } finally { await harness.cleanup(); }
+  const quiet = await createHarness({ modules: [broken] });
+  try {
+    await quiet.service.createInstance({ type: 'demo', status: 'connected' });
+    await quiet.service.start();
+    await quiet.service.stop();
+  } finally { await quiet.cleanup(); }
+});
+
+test('stopping Connections removes live intake before any retained module callback can deliver', async () => {
+  let moduleContext;
+  const harness = await createHarness({ modules: [makeModule({ execute: async context => { moduleContext = context; return { success: true }; } })] });
+  try {
+    const received = [];
+    harness.service.setWhatsAppMessageHandler(async message => { received.push(message); return true; });
+    await harness.service.call({ type: 'demo', actionId: 'demo.status' });
+    assert.equal(await moduleContext.onWhatsAppMessage({ id: 'before-stop' }), true);
+    await harness.service.stop();
+    assert.equal(await moduleContext.onWhatsAppMessage({ id: 'after-stop' }), undefined);
+    assert.deepEqual(received, [{ id: 'before-stop' }]);
+  } finally { await harness.cleanup(); }
+});

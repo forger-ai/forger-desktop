@@ -176,3 +176,19 @@ Connections such as Gmail, WhatsApp, Slack, and Trello are managed from the Conn
 - Explain functional impact: what changes, where it appears, how to test it, and what remains pending.
 - If information is missing, ask about intent, scope, data, or expected behavior.
 - If there is a technical blocker, translate it into product language.
+
+## WhatsApp Repository Collaboration
+
+Desktop owns repository collaboration through configured WhatsApp groups. The owner explicitly selects existing normal local Git checkouts with an internal `.git` directory (external-metadata worktrees, symbolic roots, and broad home/filesystem roots are unsupported), gives each group-scoped project a readable alias, and grants exact participant identities access to selected projects. Groups remain paused until the owner adds a repository and grants access, then activates collaboration. Being a group member, sharing a display name, or using another identity namespace does not grant repository access.
+
+Only verified live messages newer than group activation can request work. Instructions address Forger explicitly and select a project by alias, select several aliases joined with `+`, or reference a task. Ordinary chat, imported history, and Forger's own generated replies do not execute. Verified messages sent by the connected account can request work. Project selection and authorization are deterministic; an agent cannot expand permissions from message content.
+
+Tasks retain the human author, source message, selected repositories, status, and Codex conversation. Short task references and replies append separate attributable turns, including while earlier work is running. Dependent turns wait for successful completion and share that conversation. If earlier work fails or is interrupted, dependent work requires local review. Explicit retry starts a new conversation. Collaboration does not import or control existing conversations in the Codex desktop application.
+
+Repository locks cover canonical paths and ancestor/descendant overlap across groups. Grants and current group membership are checked again at execution and delivery. Revocation or pause cancels queued work, requests cancellation of active work, and suppresses pending replies. Pausing and removing access work while WhatsApp is offline. Cancellation does not undo changes already made. Unlinking a repository never deletes its files.
+
+Outgoing task results are visible to everyone in the WhatsApp group. Desktop shares result text only when every current human recipient has access to every repository in the task. Otherwise the group receives a generic notice to review the update locally. The transport checks permission immediately before sending after any throttle delay. Durable delivery retries never rerun Codex. A process interruption after WhatsApp accepts a send but before the delivery receipt is saved can still duplicate a reply.
+
+Collaboration executes on macOS using the authenticated Codex runtime managed by Forger. It verifies the exact `CODEX_CLI_VERSION` and a strict explicit permission profile. Other runtimes fail closed. Command networking and web search are disabled; Codex still connects to its model provider. Git metadata is read-only, so collaboration does not create commits. Publication and deployment are outside the workflow.
+
+A repository grant includes files inside that repository, potentially including `.env` and other sensitive files stored there. The platform does not promise to identify or exclude every secret inside a granted repository. Executed commands cannot access other personal folders or the isolated Codex credential directory. Desktop remains running for execution. The local SQLite queue waits for WhatsApp membership verification when disconnected and marks interrupted running work for explicit review; it never automatically replays ambiguous execution.

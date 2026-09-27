@@ -1,0 +1,207 @@
+{
+  "schemaVersion": 1,
+  "kind": "bounded-runtime-calibration",
+  "observedAt": "2026-09-27T01:02:33.670Z",
+  "status": "completed",
+  "failure": null,
+  "phase": "warm",
+  "phaseDefinition": "cold means absent from /api/ps before the request; filesystem and OS caches are not flushed",
+  "configuration": {
+    "model": "qwen3:4b",
+    "modelDigest": "359d7dd4bcdab3d86b87d73ac27966f4dbb9f5efdfcc75d34a8764a09474fae7",
+    "budgetMs": 60000,
+    "contextWindowRequested": 2048,
+    "maximumGeneratedTokensRequested": 64,
+    "keepAlive": "2m",
+    "temperature": 0,
+    "seed": 42
+  },
+  "hardware": {
+    "platform": "darwin",
+    "architecture": "arm64",
+    "cpu": "Apple M1",
+    "totalMemoryBytes": 8589934592
+  },
+  "runtime": {
+    "name": "ollama",
+    "version": "0.34.4",
+    "reportedCapabilities": [
+      "completion",
+      "tools",
+      "thinking"
+    ],
+    "loadedBefore": true,
+    "loadedAfter": true,
+    "modelBefore": {
+      "digest": "359d7dd4bcdab3d86b87d73ac27966f4dbb9f5efdfcc75d34a8764a09474fae7",
+      "sizeBytesReported": 2865674321,
+      "sizeVramBytesReported": 2865674321,
+      "contextLengthReported": 2048
+    },
+    "modelAfter": {
+      "digest": "359d7dd4bcdab3d86b87d73ac27966f4dbb9f5efdfcc75d34a8764a09474fae7",
+      "sizeBytesReported": 2865674321,
+      "sizeVramBytesReported": 2865674321,
+      "contextLengthReported": 2048
+    }
+  },
+  "fixture": {
+    "classification": "synthetic",
+    "promptSha256": "676fb7a364b235ed76a576fd9f56877ca2fbb4fede78099e5a6dbd5c9b101aae",
+    "purpose": "latency and generation calibration; not app-development acceptance"
+  },
+  "metrics": {
+    "wallMs": 2978.553542,
+    "generationRequestWallMs": 2949.716917,
+    "timeToFirstStreamChunkMs": 69.361833,
+    "timeToFirstResponseMs": null,
+    "timeToFirstThinkingMs": 69.469417,
+    "thinkingBytesObserved": 307,
+    "promptTokensReported": 17,
+    "outputTokensReported": 64,
+    "runtimeLoadMs": 1.061833,
+    "runtimePromptEvaluationMs": 63.391,
+    "runtimeGenerationMs": 2878.87,
+    "runtimeTotalMs": 2946.488208,
+    "runtimeGenerationTokensPerSecond": 22.230944780417317,
+    "codexContextTokens": null
+  },
+  "metricDefinitions": {
+    "tokenCounts": "Reported by Ollama final prompt_eval_count and eval_count for the selected model tokenizer; no Codex context count is inferred.",
+    "generationRate": "eval_count / (eval_duration nanoseconds / 1000000000)",
+    "timeToFirstResponse": "Client monotonic milliseconds from starting /api/generate until the first non-empty response field; a chunk may contain multiple tokens.",
+    "timeToFirstThinking": "Separate first non-empty thinking field latency; thinking content is not retained."
+  },
+  "cancellation": {
+    "requested": false,
+    "clientRequestDestroyed": false,
+    "observedAfterMs": null,
+    "runtimeComputeStopped": null,
+    "runtimeComputeStoppedReason": "Closing the client HTTP connection does not prove that a runtime/GPU has stopped computing."
+  },
+  "resources": {
+    "sampleIntervalMs": 1000,
+    "sampleCount": 4,
+    "samples": [
+      {
+        "observedAt": "2026-09-27T01:02:33.680Z",
+        "systemTotalMemoryBytes": 8589934592,
+        "systemFreeMemoryBytes": 139575296,
+        "runtimeProcessCount": 2,
+        "runtimeTreeRssBytes": 2852749312,
+        "vm": {
+          "pageSizeBytes": 16384,
+          "freeBytes": 82214912,
+          "inactiveBytes": 958054400,
+          "speculativeBytes": 54722560,
+          "wiredBytes": 4556210176,
+          "compressorBytes": 1321287680,
+          "pageouts": 1907525,
+          "swapins": 8155856,
+          "swapouts": 9965809
+        },
+        "swap": {
+          "totalBytes": 9663676416,
+          "usedBytes": 8250458112,
+          "freeBytes": 1413218304
+        },
+        "unavailable": []
+      },
+      {
+        "observedAt": "2026-09-27T01:02:34.698Z",
+        "systemTotalMemoryBytes": 8589934592,
+        "systemFreeMemoryBytes": 124403712,
+        "runtimeProcessCount": 2,
+        "runtimeTreeRssBytes": 2864873472,
+        "vm": {
+          "pageSizeBytes": 16384,
+          "freeBytes": 58163200,
+          "inactiveBytes": 906117120,
+          "speculativeBytes": 66224128,
+          "wiredBytes": 4654399488,
+          "compressorBytes": 1333149696,
+          "pageouts": 1907525,
+          "swapins": 8156264,
+          "swapouts": 9965809
+        },
+        "swap": {
+          "totalBytes": 9663676416,
+          "usedBytes": 8250458112,
+          "freeBytes": 1413218304
+        },
+        "unavailable": []
+      },
+      {
+        "observedAt": "2026-09-27T01:02:35.723Z",
+        "systemTotalMemoryBytes": 8589934592,
+        "systemFreeMemoryBytes": 171065344,
+        "runtimeProcessCount": 2,
+        "runtimeTreeRssBytes": 2853830656,
+        "vm": {
+          "pageSizeBytes": 16384,
+          "freeBytes": 110821376,
+          "inactiveBytes": 868909056,
+          "speculativeBytes": 57081856,
+          "wiredBytes": 4653940736,
+          "compressorBytes": 1374584832,
+          "pageouts": 1907534,
+          "swapins": 8156288,
+          "swapouts": 9965809
+        },
+        "swap": {
+          "totalBytes": 9663676416,
+          "usedBytes": 8250458112,
+          "freeBytes": 1413218304
+        },
+        "unavailable": []
+      },
+      {
+        "observedAt": "2026-09-27T01:02:36.649Z",
+        "systemTotalMemoryBytes": 8589934592,
+        "systemFreeMemoryBytes": 115867648,
+        "runtimeProcessCount": 2,
+        "runtimeTreeRssBytes": 2859073536,
+        "vm": {
+          "pageSizeBytes": 16384,
+          "freeBytes": 58867712,
+          "inactiveBytes": 901562368,
+          "speculativeBytes": 58834944,
+          "wiredBytes": 4653350912,
+          "compressorBytes": 1358364672,
+          "pageouts": 1907534,
+          "swapins": 8156352,
+          "swapouts": 9965809
+        },
+        "swap": {
+          "totalBytes": 9663676416,
+          "usedBytes": 8250458112,
+          "freeBytes": 1413218304
+        },
+        "unavailable": []
+      }
+    ],
+    "peakSampledRuntimeTreeRssBytes": 2864873472,
+    "minimumSampledSystemFreeBytes": 115867648,
+    "peakSampledSwapUsedBytes": 8250458112,
+    "peakUnifiedMemoryBytes": null,
+    "limitations": [
+      "RSS is sampled per-process resident memory and may double-count shared pages; it is not a unified-memory high-water mark.",
+      "Free memory is not available-for-model memory. GPU allocations, caches and memory pressure require additional instrumentation.",
+      "vm_stat and swap describe system-wide activity, not causal attribution to the model.",
+      "Sampling itself has overhead; transient peaks between samples may be missed."
+    ]
+  },
+  "limitations": [
+    "This is direct runtime calibration, not the Forger agent tool loop or a development-task benchmark.",
+    "Runtime-reported token counts use the selected model tokenizer for this synthetic prompt only.",
+    "No model download, forced unload, cloud inference, proxy or redirected request is performed.",
+    "Cold here is unloaded runtime state; operating-system caches may be warm.",
+    "No OS network isolation or private-runtime authentication is established.",
+    "The requested mutable model tag is checked against its digest before generation; this is not an immutable per-token digest guarantee."
+  ],
+  "output": {
+    "responseText": "",
+    "syntheticExactMatch": false,
+    "doneReasonReported": "length"
+  }
+}

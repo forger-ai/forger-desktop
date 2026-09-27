@@ -1,3 +1,4 @@
+import { dispatchLiveWhatsAppMessage } from './live-routing';
 import type {
   CallOfficialToolInput,
   CallOfficialToolResult,
@@ -166,13 +167,18 @@ const getManager = (context: InternalToolContext): WhatsAppConnectionManager => 
   }
   const manager = createWhatsAppConnectionManager(context, {
     onLiveMessage: async (message, metadata) => {
-      if (!liveMessageHandler) return;
       // A shared Baileys socket cannot prove which of multiple configured
       // connection records produced an event. Refuse ambiguous routing.
       const ids = [...(managerConnectionIds.get(key) ?? [])];
       const connectionId = ids.length === 1 ? ids[0] : undefined;
       if (connectionId) {
-        await liveMessageHandler({ connectionId, message, newlyStored: metadata.newlyStored });
+        try {
+          await dispatchLiveWhatsAppMessage({ connectionId, message, newlyStored: metadata.newlyStored,
+            onRepositoryMessage: context.onWhatsAppMessage, onAgentMessage: liveMessageHandler ?? undefined,
+          });
+        } catch {
+          await context.appendLog?.('whatsapp:live_routing_failed', { code: 'live_routing_failed' });
+        }
       }
     },
   });
@@ -354,6 +360,7 @@ const parseSendMessageInput = (input: unknown): WhatsAppSendMessageInput | null 
     chatId,
     text,
     ...(typeof input.replyToMessageRef === 'string' ? { replyToMessageRef: input.replyToMessageRef.trim() } : {}),
+    ...(typeof input.replyToMessageId === 'string' ? { replyToMessageId: input.replyToMessageId.trim() } : {}),
   };
 };
 

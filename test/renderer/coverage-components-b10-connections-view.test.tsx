@@ -302,6 +302,23 @@ beforeEach(() => {
   });
 });
 
+it('shows repository collaboration for the selected WhatsApp account when it has no observed groups', async () => {
+  const account = instance('whatsapp-projects', 'whatsapp', { label: 'Project account' });
+  const initialState = state({ types: [whatsapp], instances: [account] });
+  const bridge = {
+    ...makeBridge(initialState),
+    repositoryCollaborationSnapshot: vi.fn().mockResolvedValue({ groups: [], repositories: [], participants: [], grants: [], tasks: [] }),
+    repositoryCollaborationListGroups: vi.fn().mockResolvedValue([]),
+  };
+  renderConnections({ bridge, initialState, view: 'detail', selectedConnectionId: account.id });
+  expect(await screen.findByText(t.repositoryCollaboration.title)).toBeInTheDocument();
+  await waitFor(() => {
+    expect(bridge.repositoryCollaborationSnapshot).toHaveBeenCalledWith(account.id);
+    expect(bridge.repositoryCollaborationListGroups).toHaveBeenCalledWith(account.id);
+  });
+  expect(await screen.findByText(t.repositoryCollaboration.noGroups)).toBeInTheDocument();
+});
+
 describe('ConnectionsView list and loading behavior', () => {
   it('loads dependencies independently, sorts providers and identities, filters, and exposes both navigation paths', async () => {
     const user = userEvent.setup();

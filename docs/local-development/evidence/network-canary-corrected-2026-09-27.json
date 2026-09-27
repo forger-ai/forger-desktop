@@ -1,0 +1,569 @@
+{
+  "schemaVersion": 1,
+  "kind": "synthetic-subprocess-network-canary",
+  "observedAt": "2026-09-27T00:12:36.238Z",
+  "platform": "darwin",
+  "externalTrafficAttempted": false,
+  "dnsLookupAttempted": false,
+  "codexProcessTested": false,
+  "ollamaProcessTested": false,
+  "sandboxExecutable": "/usr/bin/sandbox-exec",
+  "profileSha256": "84d6abf1bb8b5e402d26ba0787ea033653df7d0d2a82a21bd52c14af646bdb6c",
+  "profileText": "(version 1)\n(allow default)\n(deny network*)\n(allow network-outbound (remote ip \"localhost:56075\"))\n",
+  "cases": [
+    {
+      "transport": "tcp4",
+      "depth": 0,
+      "mode": "baseline",
+      "routeExplicitlyAllowed": false,
+      "receiverObservedNonce": true,
+      "baselineVerified": true,
+      "outcome": "reachable",
+      "attempt": {
+        "connected": true,
+        "acknowledged": true,
+        "errorCode": null,
+        "wallMs": 2.588291999999999
+      }
+    },
+    {
+      "transport": "tcp4",
+      "depth": 0,
+      "mode": "restricted",
+      "routeExplicitlyAllowed": false,
+      "receiverObservedNonce": false,
+      "baselineVerified": true,
+      "outcome": "denied",
+      "attempt": {
+        "connected": false,
+        "acknowledged": false,
+        "errorCode": "EPERM",
+        "wallMs": 1.9585830000000009
+      }
+    },
+    {
+      "transport": "tcp4",
+      "depth": 1,
+      "mode": "baseline",
+      "routeExplicitlyAllowed": false,
+      "receiverObservedNonce": true,
+      "baselineVerified": true,
+      "outcome": "reachable",
+      "attempt": {
+        "connected": true,
+        "acknowledged": true,
+        "errorCode": null,
+        "wallMs": 2.112290999999999
+      }
+    },
+    {
+      "transport": "tcp4",
+      "depth": 1,
+      "mode": "restricted",
+      "routeExplicitlyAllowed": false,
+      "receiverObservedNonce": false,
+      "baselineVerified": true,
+      "outcome": "denied",
+      "attempt": {
+        "connected": false,
+        "acknowledged": false,
+        "errorCode": "EPERM",
+        "wallMs": 1.713667000000001
+      }
+    },
+    {
+      "transport": "tcp4",
+      "depth": 2,
+      "mode": "baseline",
+      "routeExplicitlyAllowed": false,
+      "receiverObservedNonce": true,
+      "baselineVerified": true,
+      "outcome": "reachable",
+      "attempt": {
+        "connected": true,
+        "acknowledged": true,
+        "errorCode": null,
+        "wallMs": 2.948666000000003
+      }
+    },
+    {
+      "transport": "tcp4",
+      "depth": 2,
+      "mode": "restricted",
+      "routeExplicitlyAllowed": false,
+      "receiverObservedNonce": false,
+      "baselineVerified": true,
+      "outcome": "denied",
+      "attempt": {
+        "connected": false,
+        "acknowledged": false,
+        "errorCode": "EPERM",
+        "wallMs": 1.7100420000000014
+      }
+    },
+    {
+      "transport": "tcp6",
+      "depth": 0,
+      "mode": "baseline",
+      "routeExplicitlyAllowed": false,
+      "receiverObservedNonce": true,
+      "baselineVerified": true,
+      "outcome": "reachable",
+      "attempt": {
+        "connected": true,
+        "acknowledged": true,
+        "errorCode": null,
+        "wallMs": 4.528334000000001
+      }
+    },
+    {
+      "transport": "tcp6",
+      "depth": 0,
+      "mode": "restricted",
+      "routeExplicitlyAllowed": false,
+      "receiverObservedNonce": false,
+      "baselineVerified": true,
+      "outcome": "denied",
+      "attempt": {
+        "connected": false,
+        "acknowledged": false,
+        "errorCode": "EPERM",
+        "wallMs": 3.792042000000002
+      }
+    },
+    {
+      "transport": "tcp6",
+      "depth": 1,
+      "mode": "baseline",
+      "routeExplicitlyAllowed": false,
+      "receiverObservedNonce": true,
+      "baselineVerified": true,
+      "outcome": "reachable",
+      "attempt": {
+        "connected": true,
+        "acknowledged": true,
+        "errorCode": null,
+        "wallMs": 4.060082999999999
+      }
+    },
+    {
+      "transport": "tcp6",
+      "depth": 1,
+      "mode": "restricted",
+      "routeExplicitlyAllowed": false,
+      "receiverObservedNonce": false,
+      "baselineVerified": true,
+      "outcome": "denied",
+      "attempt": {
+        "connected": false,
+        "acknowledged": false,
+        "errorCode": "EPERM",
+        "wallMs": 4.273166
+      }
+    },
+    {
+      "transport": "tcp6",
+      "depth": 2,
+      "mode": "baseline",
+      "routeExplicitlyAllowed": false,
+      "receiverObservedNonce": true,
+      "baselineVerified": true,
+      "outcome": "reachable",
+      "attempt": {
+        "connected": true,
+        "acknowledged": true,
+        "errorCode": null,
+        "wallMs": 4.448499999999999
+      }
+    },
+    {
+      "transport": "tcp6",
+      "depth": 2,
+      "mode": "restricted",
+      "routeExplicitlyAllowed": false,
+      "receiverObservedNonce": false,
+      "baselineVerified": true,
+      "outcome": "denied",
+      "attempt": {
+        "connected": false,
+        "acknowledged": false,
+        "errorCode": "EPERM",
+        "wallMs": 3.609499999999997
+      }
+    },
+    {
+      "transport": "udp4",
+      "depth": 0,
+      "mode": "baseline",
+      "routeExplicitlyAllowed": false,
+      "receiverObservedNonce": true,
+      "baselineVerified": true,
+      "outcome": "reachable",
+      "attempt": {
+        "connected": true,
+        "acknowledged": true,
+        "errorCode": null,
+        "wallMs": 2.508625000000002
+      }
+    },
+    {
+      "transport": "udp4",
+      "depth": 0,
+      "mode": "restricted",
+      "routeExplicitlyAllowed": false,
+      "receiverObservedNonce": false,
+      "baselineVerified": true,
+      "outcome": "denied",
+      "attempt": {
+        "connected": false,
+        "acknowledged": false,
+        "errorCode": "EPERM",
+        "wallMs": 1.7837090000000018
+      }
+    },
+    {
+      "transport": "udp4",
+      "depth": 1,
+      "mode": "baseline",
+      "routeExplicitlyAllowed": false,
+      "receiverObservedNonce": true,
+      "baselineVerified": true,
+      "outcome": "reachable",
+      "attempt": {
+        "connected": true,
+        "acknowledged": true,
+        "errorCode": null,
+        "wallMs": 2.333375
+      }
+    },
+    {
+      "transport": "udp4",
+      "depth": 1,
+      "mode": "restricted",
+      "routeExplicitlyAllowed": false,
+      "receiverObservedNonce": false,
+      "baselineVerified": true,
+      "outcome": "denied",
+      "attempt": {
+        "connected": false,
+        "acknowledged": false,
+        "errorCode": "EPERM",
+        "wallMs": 1.6870000000000012
+      }
+    },
+    {
+      "transport": "udp4",
+      "depth": 2,
+      "mode": "baseline",
+      "routeExplicitlyAllowed": false,
+      "receiverObservedNonce": true,
+      "baselineVerified": true,
+      "outcome": "reachable",
+      "attempt": {
+        "connected": true,
+        "acknowledged": true,
+        "errorCode": null,
+        "wallMs": 2.734833000000002
+      }
+    },
+    {
+      "transport": "udp4",
+      "depth": 2,
+      "mode": "restricted",
+      "routeExplicitlyAllowed": false,
+      "receiverObservedNonce": false,
+      "baselineVerified": true,
+      "outcome": "denied",
+      "attempt": {
+        "connected": false,
+        "acknowledged": false,
+        "errorCode": "EPERM",
+        "wallMs": 2.1716669999999993
+      }
+    },
+    {
+      "transport": "udp6",
+      "depth": 0,
+      "mode": "baseline",
+      "routeExplicitlyAllowed": false,
+      "receiverObservedNonce": true,
+      "baselineVerified": true,
+      "outcome": "reachable",
+      "attempt": {
+        "connected": true,
+        "acknowledged": true,
+        "errorCode": null,
+        "wallMs": 6.622707999999999
+      }
+    },
+    {
+      "transport": "udp6",
+      "depth": 0,
+      "mode": "restricted",
+      "routeExplicitlyAllowed": false,
+      "receiverObservedNonce": false,
+      "baselineVerified": true,
+      "outcome": "denied",
+      "attempt": {
+        "connected": false,
+        "acknowledged": false,
+        "errorCode": "EPERM",
+        "wallMs": 3.7325830000000018
+      }
+    },
+    {
+      "transport": "udp6",
+      "depth": 1,
+      "mode": "baseline",
+      "routeExplicitlyAllowed": false,
+      "receiverObservedNonce": true,
+      "baselineVerified": true,
+      "outcome": "reachable",
+      "attempt": {
+        "connected": true,
+        "acknowledged": true,
+        "errorCode": null,
+        "wallMs": 5.71575
+      }
+    },
+    {
+      "transport": "udp6",
+      "depth": 1,
+      "mode": "restricted",
+      "routeExplicitlyAllowed": false,
+      "receiverObservedNonce": false,
+      "baselineVerified": true,
+      "outcome": "denied",
+      "attempt": {
+        "connected": false,
+        "acknowledged": false,
+        "errorCode": "EPERM",
+        "wallMs": 4.014291
+      }
+    },
+    {
+      "transport": "udp6",
+      "depth": 2,
+      "mode": "baseline",
+      "routeExplicitlyAllowed": false,
+      "receiverObservedNonce": true,
+      "baselineVerified": true,
+      "outcome": "reachable",
+      "attempt": {
+        "connected": true,
+        "acknowledged": true,
+        "errorCode": null,
+        "wallMs": 5.983958999999999
+      }
+    },
+    {
+      "transport": "udp6",
+      "depth": 2,
+      "mode": "restricted",
+      "routeExplicitlyAllowed": false,
+      "receiverObservedNonce": false,
+      "baselineVerified": true,
+      "outcome": "denied",
+      "attempt": {
+        "connected": false,
+        "acknowledged": false,
+        "errorCode": "EPERM",
+        "wallMs": 3.896083000000001
+      }
+    },
+    {
+      "transport": "unix",
+      "depth": 0,
+      "mode": "baseline",
+      "routeExplicitlyAllowed": false,
+      "receiverObservedNonce": true,
+      "baselineVerified": true,
+      "outcome": "reachable",
+      "attempt": {
+        "connected": true,
+        "acknowledged": true,
+        "errorCode": null,
+        "wallMs": 1.7510000000000012
+      }
+    },
+    {
+      "transport": "unix",
+      "depth": 0,
+      "mode": "restricted",
+      "routeExplicitlyAllowed": false,
+      "receiverObservedNonce": false,
+      "baselineVerified": true,
+      "outcome": "denied",
+      "attempt": {
+        "connected": false,
+        "acknowledged": false,
+        "errorCode": "EPERM",
+        "wallMs": 1.49925
+      }
+    },
+    {
+      "transport": "unix",
+      "depth": 1,
+      "mode": "baseline",
+      "routeExplicitlyAllowed": false,
+      "receiverObservedNonce": true,
+      "baselineVerified": true,
+      "outcome": "reachable",
+      "attempt": {
+        "connected": true,
+        "acknowledged": true,
+        "errorCode": null,
+        "wallMs": 2.048833000000002
+      }
+    },
+    {
+      "transport": "unix",
+      "depth": 1,
+      "mode": "restricted",
+      "routeExplicitlyAllowed": false,
+      "receiverObservedNonce": false,
+      "baselineVerified": true,
+      "outcome": "denied",
+      "attempt": {
+        "connected": false,
+        "acknowledged": false,
+        "errorCode": "EPERM",
+        "wallMs": 2.3794579999999996
+      }
+    },
+    {
+      "transport": "unix",
+      "depth": 2,
+      "mode": "baseline",
+      "routeExplicitlyAllowed": false,
+      "receiverObservedNonce": true,
+      "baselineVerified": true,
+      "outcome": "reachable",
+      "attempt": {
+        "connected": true,
+        "acknowledged": true,
+        "errorCode": null,
+        "wallMs": 1.8439170000000011
+      }
+    },
+    {
+      "transport": "unix",
+      "depth": 2,
+      "mode": "restricted",
+      "routeExplicitlyAllowed": false,
+      "receiverObservedNonce": false,
+      "baselineVerified": true,
+      "outcome": "denied",
+      "attempt": {
+        "connected": false,
+        "acknowledged": false,
+        "errorCode": "EPERM",
+        "wallMs": 1.6722499999999982
+      }
+    },
+    {
+      "transport": "tcp4",
+      "depth": 0,
+      "mode": "baseline",
+      "routeExplicitlyAllowed": true,
+      "receiverObservedNonce": true,
+      "baselineVerified": true,
+      "outcome": "reachable",
+      "attempt": {
+        "connected": true,
+        "acknowledged": true,
+        "errorCode": null,
+        "wallMs": 2.265708
+      }
+    },
+    {
+      "transport": "tcp4",
+      "depth": 0,
+      "mode": "restricted",
+      "routeExplicitlyAllowed": true,
+      "receiverObservedNonce": true,
+      "baselineVerified": true,
+      "outcome": "reachable",
+      "attempt": {
+        "connected": true,
+        "acknowledged": true,
+        "errorCode": null,
+        "wallMs": 2.188333
+      }
+    },
+    {
+      "transport": "tcp4",
+      "depth": 1,
+      "mode": "baseline",
+      "routeExplicitlyAllowed": true,
+      "receiverObservedNonce": true,
+      "baselineVerified": true,
+      "outcome": "reachable",
+      "attempt": {
+        "connected": true,
+        "acknowledged": true,
+        "errorCode": null,
+        "wallMs": 2.970792000000003
+      }
+    },
+    {
+      "transport": "tcp4",
+      "depth": 1,
+      "mode": "restricted",
+      "routeExplicitlyAllowed": true,
+      "receiverObservedNonce": true,
+      "baselineVerified": true,
+      "outcome": "reachable",
+      "attempt": {
+        "connected": true,
+        "acknowledged": true,
+        "errorCode": null,
+        "wallMs": 2.3280840000000005
+      }
+    },
+    {
+      "transport": "tcp4",
+      "depth": 2,
+      "mode": "baseline",
+      "routeExplicitlyAllowed": true,
+      "receiverObservedNonce": true,
+      "baselineVerified": true,
+      "outcome": "reachable",
+      "attempt": {
+        "connected": true,
+        "acknowledged": true,
+        "errorCode": null,
+        "wallMs": 2.438334000000001
+      }
+    },
+    {
+      "transport": "tcp4",
+      "depth": 2,
+      "mode": "restricted",
+      "routeExplicitlyAllowed": true,
+      "receiverObservedNonce": true,
+      "baselineVerified": true,
+      "outcome": "reachable",
+      "attempt": {
+        "connected": true,
+        "acknowledged": true,
+        "errorCode": null,
+        "wallMs": 2.1198750000000004
+      }
+    }
+  ],
+  "limitations": [
+    "This measures controlled Node subprocesses and descendants only; it does not establish the network behavior of Codex, Ollama, Forger or arbitrary applications.",
+    "No external destination or DNS resolution is attempted. Loopback/Unix nonce receipt is the observable canary.",
+    "Already-open network file descriptors, privileged services and IPC-mediated access are outside this probe.",
+    "The profile denies network operations while allowing other operations by default; it is not a filesystem or general process sandbox.",
+    "Runtime/GPU isolation and resistance to a compromised operating system are not claimed."
+  ],
+  "summary": {
+    "reachable": 21,
+    "denied": 15,
+    "leaked": 0,
+    "blocked": 0,
+    "inconclusive": 0
+  }
+}

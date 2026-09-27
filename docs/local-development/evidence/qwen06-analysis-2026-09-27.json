@@ -1,0 +1,449 @@
+{
+  "schemaVersion": 1,
+  "observedAt": "2026-09-27T12:41:10.889Z",
+  "evidenceClass": "derived_real_model_results_and_post_hoc_semantic_review",
+  "model": "qwen3:0.6b",
+  "totalAttempts": 12,
+  "distinctTasks": 1,
+  "experiments": 2,
+  "interventionDuringAttempts": false,
+  "comparisonScope": "Controlled within each experiment; cross-version observations are descriptive only.",
+  "groups": [
+    {
+      "experiment": "v1",
+      "arm": "direct",
+      "evidence": "evidence/m1-qwen06-direct-2026-09-27.json",
+      "sha256": "7e44ad6fbf53abf40e37a793b58aa2fa3dac2420e95cd589ce423522e83daf5e",
+      "configuration": {
+        "endpoint": "http://127.0.0.1:11445",
+        "model": "qwen3:0.6b",
+        "modelDigest": "sha256:7df6b6e09427a769808717c0a93cadc4ae99ed4eb8bf5ca557c90846becea435",
+        "contextWindow": 16384,
+        "agentProfile": "compact-v1",
+        "contextStrategy": "direct-v1",
+        "cliPath": "/Users/kupa/Library/Application Support/forger-desktop/codex-cli/node_modules/@openai/codex-darwin-arm64/vendor/aarch64-apple-darwin/bin/codex",
+        "evaluatorImage": "sha256:de5bb77888ef8a6826ffa49ab9132d287c4e9e26a187c5a143213eeaa2e28406"
+      },
+      "source": {
+        "version": "0.5.17",
+        "revision": "7fa965edc9408211d8f4336bb0ed0a4f30a88102",
+        "dirty": true,
+        "sourceSha256": "e605d367bb4552cb2ab32f38db7da67e85865638efad27e22c9ca129ed625616",
+        "compiledProviderSha256": "09487350e1006c14e62530e2bba4adf6ba3aa347a092dc02637db4596c9b0c0b",
+        "harnessSha256": "5b8e7d52b5799a8679fd64deb8e6c870aa354c3f9ea0a99d5612a1dc18f21f21"
+      },
+      "summary": {
+        "selected": 3,
+        "attempted": 3,
+        "blocked": 0,
+        "failed": 3,
+        "passed": 0,
+        "autonomousPassed": 0,
+        "assistedPassed": 0,
+        "successRate": 0,
+        "autonomousSuccessRate": 0,
+        "denominator": "Every task attempt, including failures, timeouts and resource errors. Preflight blockers are reported separately.",
+        "solvedTimeMs": {
+          "n": 0,
+          "mean": null,
+          "min": null,
+          "max": null,
+          "sampleStandardDeviation": null
+        },
+        "allAttemptTimeMs": {
+          "n": 3,
+          "mean": 37683.772958333335,
+          "min": 37007.301416,
+          "max": 38410.51216699999,
+          "sampleStandardDeviation": 702.9546440841248
+        },
+        "byTask": {
+          "bug-01": {
+            "trials": 3,
+            "attempted": 3,
+            "passed": 0,
+            "allAttemptTimeMs": {
+              "n": 3,
+              "mean": 37683.772958333335,
+              "min": 37007.301416,
+              "max": 38410.51216699999,
+              "sampleStandardDeviation": 702.9546440841248
+            }
+          }
+        }
+      },
+      "agentTimeMs": {
+        "n": 3,
+        "mean": 9904.66904166667,
+        "min": 9765.696915999986,
+        "max": 10101.769584000023,
+        "sampleStandardDeviation": 175.4149200105179
+      },
+      "preparationTimeMs": null,
+      "sampledRuntimeTreePeakRssBytes": {
+        "n": 3,
+        "mean": 2519465984,
+        "min": 2504425472,
+        "max": 2533965824,
+        "sampleStandardDeviation": 14777596.006443808
+      },
+      "sampledSystemPeakSwapUsedBytes": {
+        "n": 3,
+        "mean": 4088831235.4133334,
+        "min": 3812160962.56,
+        "max": 4263635845.12,
+        "sampleStandardDeviation": 242363059.04958797
+      },
+      "observedTools": 0,
+      "modifiedFiles": 0,
+      "timeouts": 0,
+      "semanticAudit": null
+    },
+    {
+      "experiment": "v1",
+      "arm": "staged",
+      "evidence": "evidence/m1-qwen06-staged-2026-09-27.json",
+      "sha256": "36cecb96bab05616918c035d8902693df2923455555d7e4a5ef0fbcb0e7edc90",
+      "configuration": {
+        "endpoint": "http://127.0.0.1:11445",
+        "model": "qwen3:0.6b",
+        "modelDigest": "sha256:7df6b6e09427a769808717c0a93cadc4ae99ed4eb8bf5ca557c90846becea435",
+        "contextWindow": 16384,
+        "agentProfile": "compact-v1",
+        "contextStrategy": "staged-v1",
+        "cliPath": "/Users/kupa/Library/Application Support/forger-desktop/codex-cli/node_modules/@openai/codex-darwin-arm64/vendor/aarch64-apple-darwin/bin/codex",
+        "evaluatorImage": "sha256:de5bb77888ef8a6826ffa49ab9132d287c4e9e26a187c5a143213eeaa2e28406"
+      },
+      "source": {
+        "version": "0.5.17",
+        "revision": "7fa965edc9408211d8f4336bb0ed0a4f30a88102",
+        "dirty": true,
+        "sourceSha256": "e605d367bb4552cb2ab32f38db7da67e85865638efad27e22c9ca129ed625616",
+        "compiledProviderSha256": "09487350e1006c14e62530e2bba4adf6ba3aa347a092dc02637db4596c9b0c0b",
+        "harnessSha256": "5b8e7d52b5799a8679fd64deb8e6c870aa354c3f9ea0a99d5612a1dc18f21f21"
+      },
+      "summary": {
+        "selected": 3,
+        "attempted": 3,
+        "blocked": 0,
+        "failed": 3,
+        "passed": 0,
+        "autonomousPassed": 0,
+        "assistedPassed": 0,
+        "successRate": 0,
+        "autonomousSuccessRate": 0,
+        "denominator": "Every task attempt, including failures, timeouts and resource errors. Preflight blockers are reported separately.",
+        "solvedTimeMs": {
+          "n": 0,
+          "mean": null,
+          "min": null,
+          "max": null,
+          "sampleStandardDeviation": null
+        },
+        "allAttemptTimeMs": {
+          "n": 3,
+          "mean": 47227.202041666664,
+          "min": 45814.33683300001,
+          "max": 48594.474624999995,
+          "sampleStandardDeviation": 1390.6295521238676
+        },
+        "byTask": {
+          "bug-01": {
+            "trials": 3,
+            "attempted": 3,
+            "passed": 0,
+            "allAttemptTimeMs": {
+              "n": 3,
+              "mean": 47227.202041666664,
+              "min": 45814.33683300001,
+              "max": 48594.474624999995,
+              "sampleStandardDeviation": 1390.6295521238676
+            }
+          }
+        }
+      },
+      "agentTimeMs": {
+        "n": 3,
+        "mean": 19539.56955533333,
+        "min": 18566.83004100001,
+        "max": 20676.48920799999,
+        "sampleStandardDeviation": 1064.3691975034465
+      },
+      "preparationTimeMs": {
+        "n": 3,
+        "mean": 4761.424930000008,
+        "min": 4721.8841660000035,
+        "max": 4809.129416000011,
+        "sampleStandardDeviation": 44.191833856051645
+      },
+      "sampledRuntimeTreePeakRssBytes": {
+        "n": 3,
+        "mean": 2725860693.3333335,
+        "min": 2704359424,
+        "max": 2740846592,
+        "sampleStandardDeviation": 19096227.333117433
+      },
+      "sampledSystemPeakSwapUsedBytes": {
+        "n": 3,
+        "mean": 4162867691.52,
+        "min": 4133287362.56,
+        "max": 4199746109.44,
+        "sampleStandardDeviation": 33825106.59356504
+      },
+      "observedTools": 0,
+      "modifiedFiles": 0,
+      "timeouts": 0,
+      "semanticAudit": {
+        "classification": "manual_post_hoc_not_predeclared_metric",
+        "repetitionsReviewed": [
+          1,
+          2,
+          3
+        ],
+        "intentIdenticalAcrossRepetitions": true,
+        "overallGoalCorrect": false,
+        "fullFunctionalRequirementsPreserved": false,
+        "goal": "Synthetic Forger benchmark",
+        "selectedPaths": [
+          "backend/scripts/verify.py",
+          "backend/src/app/__init__.py",
+          "backend/src/app/background_jobs.py"
+        ],
+        "targetFile": "backend/src/app/notes.py",
+        "targetFileInventoryPosition": 17,
+        "targetFileSelected": false,
+        "inventoryEntries": 60,
+        "inventoryTruncated": false,
+        "originalPromptPreserved": true,
+        "details": [
+          "Goal is evaluation boilerplate rather than the requested bug repair.",
+          "Administrative terms dominate; functional acceptance is not fully preserved."
+        ]
+      }
+    },
+    {
+      "experiment": "v2",
+      "arm": "direct",
+      "evidence": "evidence/m1-qwen06-v2-direct-2026-09-27.json",
+      "sha256": "48ed015563c05c1ae4cddce884e88bc30a1578b7a757ab5628c350e5c900f9d9",
+      "configuration": {
+        "endpoint": "http://127.0.0.1:11445",
+        "model": "qwen3:0.6b",
+        "modelDigest": "sha256:7df6b6e09427a769808717c0a93cadc4ae99ed4eb8bf5ca557c90846becea435",
+        "contextWindow": 16384,
+        "agentProfile": "compact-v1",
+        "contextStrategy": "direct-v1",
+        "cliPath": "/Users/kupa/Library/Application Support/forger-desktop/codex-cli/node_modules/@openai/codex-darwin-arm64/vendor/aarch64-apple-darwin/bin/codex",
+        "evaluatorImage": "sha256:de5bb77888ef8a6826ffa49ab9132d287c4e9e26a187c5a143213eeaa2e28406"
+      },
+      "source": {
+        "version": "0.5.17",
+        "revision": "7fa965edc9408211d8f4336bb0ed0a4f30a88102",
+        "dirty": true,
+        "sourceSha256": "4bfdf0014afbeb0706e023f7698d1588d292fbe070d6fd6f7ac4a505951e4521",
+        "compiledProviderSha256": "47f56ed66162ae7c9248d08234ec1f83acb0a27c7b54e947c833cdc94bf37e4e",
+        "harnessSha256": "2e23508defb37ca1b6ba951a4f18f25d47b6dd756830baa3cf333097f4749efb"
+      },
+      "summary": {
+        "selected": 3,
+        "attempted": 3,
+        "blocked": 0,
+        "failed": 3,
+        "passed": 0,
+        "autonomousPassed": 0,
+        "assistedPassed": 0,
+        "successRate": 0,
+        "autonomousSuccessRate": 0,
+        "denominator": "Every task attempt, including failures, timeouts and resource errors. Preflight blockers are reported separately.",
+        "solvedTimeMs": {
+          "n": 0,
+          "mean": null,
+          "min": null,
+          "max": null,
+          "sampleStandardDeviation": null
+        },
+        "allAttemptTimeMs": {
+          "n": 3,
+          "mean": 38401.78495866666,
+          "min": 37962.293166999996,
+          "max": 39221.2165,
+          "sampleStandardDeviation": 710.2729402318104
+        },
+        "byTask": {
+          "bug-01": {
+            "trials": 3,
+            "attempted": 3,
+            "passed": 0,
+            "allAttemptTimeMs": {
+              "n": 3,
+              "mean": 38401.78495866666,
+              "min": 37962.293166999996,
+              "max": 39221.2165,
+              "sampleStandardDeviation": 710.2729402318104
+            }
+          }
+        }
+      },
+      "agentTimeMs": {
+        "n": 3,
+        "mean": 11015.99405566666,
+        "min": 10252.909207999997,
+        "max": 12052.259250000001,
+        "sampleStandardDeviation": 930.2611298796963
+      },
+      "preparationTimeMs": null,
+      "sampledRuntimeTreePeakRssBytes": {
+        "n": 3,
+        "mean": 2520798549.3333335,
+        "min": 2517368832,
+        "max": 2525855744,
+        "sampleStandardDeviation": 4471401.422017636
+      },
+      "sampledSystemPeakSwapUsedBytes": {
+        "n": 3,
+        "mean": 3955120319.146667,
+        "min": 3842307522.56,
+        "max": 4061858365.44,
+        "sampleStandardDeviation": 109901410.79929043
+      },
+      "observedTools": 0,
+      "modifiedFiles": 0,
+      "timeouts": 0,
+      "semanticAudit": null
+    },
+    {
+      "experiment": "v2",
+      "arm": "staged",
+      "evidence": "evidence/m1-qwen06-v2-staged-2026-09-27.json",
+      "sha256": "fc312f55f3badcae33656e74593065cd1e5f2c4b47fa2bbcd99b7f72fdeb7966",
+      "configuration": {
+        "endpoint": "http://127.0.0.1:11445",
+        "model": "qwen3:0.6b",
+        "modelDigest": "sha256:7df6b6e09427a769808717c0a93cadc4ae99ed4eb8bf5ca557c90846becea435",
+        "contextWindow": 16384,
+        "agentProfile": "compact-v1",
+        "contextStrategy": "staged-request-v2",
+        "cliPath": "/Users/kupa/Library/Application Support/forger-desktop/codex-cli/node_modules/@openai/codex-darwin-arm64/vendor/aarch64-apple-darwin/bin/codex",
+        "evaluatorImage": "sha256:de5bb77888ef8a6826ffa49ab9132d287c4e9e26a187c5a143213eeaa2e28406"
+      },
+      "source": {
+        "version": "0.5.17",
+        "revision": "7fa965edc9408211d8f4336bb0ed0a4f30a88102",
+        "dirty": true,
+        "sourceSha256": "4bfdf0014afbeb0706e023f7698d1588d292fbe070d6fd6f7ac4a505951e4521",
+        "compiledProviderSha256": "47f56ed66162ae7c9248d08234ec1f83acb0a27c7b54e947c833cdc94bf37e4e",
+        "harnessSha256": "2e23508defb37ca1b6ba951a4f18f25d47b6dd756830baa3cf333097f4749efb"
+      },
+      "summary": {
+        "selected": 3,
+        "attempted": 3,
+        "blocked": 0,
+        "failed": 3,
+        "passed": 0,
+        "autonomousPassed": 0,
+        "assistedPassed": 0,
+        "successRate": 0,
+        "autonomousSuccessRate": 0,
+        "denominator": "Every task attempt, including failures, timeouts and resource errors. Preflight blockers are reported separately.",
+        "solvedTimeMs": {
+          "n": 0,
+          "mean": null,
+          "min": null,
+          "max": null,
+          "sampleStandardDeviation": null
+        },
+        "allAttemptTimeMs": {
+          "n": 3,
+          "mean": 48722.72074966666,
+          "min": 44200.177165999994,
+          "max": 55185.272625000005,
+          "sampleStandardDeviation": 5743.762241739924
+        },
+        "byTask": {
+          "bug-01": {
+            "trials": 3,
+            "attempted": 3,
+            "passed": 0,
+            "allAttemptTimeMs": {
+              "n": 3,
+              "mean": 48722.72074966666,
+              "min": 44200.177165999994,
+              "max": 55185.272625000005,
+              "sampleStandardDeviation": 5743.762241739924
+            }
+          }
+        }
+      },
+      "agentTimeMs": {
+        "n": 3,
+        "mean": 21639.24591666666,
+        "min": 17035.961874999994,
+        "max": 28228.295917000003,
+        "sampleStandardDeviation": 5854.445760178978
+      },
+      "preparationTimeMs": {
+        "n": 3,
+        "mean": 4415.919180333331,
+        "min": 4383.775374999997,
+        "max": 4447.5897079999995,
+        "sampleStandardDeviation": 31.909798931850244
+      },
+      "sampledRuntimeTreePeakRssBytes": {
+        "n": 3,
+        "mean": 2688379562.6666665,
+        "min": 2650374144,
+        "max": 2728935424,
+        "sampleStandardDeviation": 39342689.88206787
+      },
+      "sampledSystemPeakSwapUsedBytes": {
+        "n": 3,
+        "mean": 4048684755.6266665,
+        "min": 4017493114.88,
+        "max": 4087024189.44,
+        "sampleStandardDeviation": 35312332.005405486
+      },
+      "observedTools": 0,
+      "modifiedFiles": 0,
+      "timeouts": 0,
+      "semanticAudit": {
+        "classification": "manual_post_hoc_not_predeclared_metric",
+        "repetitionsReviewed": [
+          1,
+          2,
+          3
+        ],
+        "intentIdenticalAcrossRepetitions": true,
+        "overallGoalCorrect": true,
+        "fullFunctionalRequirementsPreserved": false,
+        "goal": "Reproduce and fix the note-title whitespace bug",
+        "selectedPaths": [
+          "backend/scripts/verify.py",
+          "backend/src/app/__init__.py",
+          "backend/src/app/background_jobs.py"
+        ],
+        "targetFile": "backend/src/app/notes.py",
+        "targetFileInventoryPosition": 17,
+        "targetFileSelected": false,
+        "inventoryEntries": 60,
+        "inventoryTruncated": false,
+        "originalPromptPreserved": true,
+        "details": [
+          "Goal correctly names the whitespace bug.",
+          "Interpretation omits explicit normalization example, HTTP 422, preserving records/tests/configuration and required regression tests.",
+          "Search term preserve title whitespace can point against trimming; complete original request remains available.",
+          "Selecting the first three paths is observed, but position bias is an untested causal hypothesis."
+        ]
+      }
+    }
+  ],
+  "limits": [
+    "The same development task is repeated, not twelve independent tasks or held-out validation.",
+    "Native preparation seed is fixed at 42; repeated identical interpretation is not evidence of general reliability.",
+    "All times are failed-attempt durations; no time to functional solution exists.",
+    "Agent timer includes monitor startup/finish; evaluation timer includes unload, VM startup and Docker evaluation; download is excluded.",
+    "RSS can double-count shared pages, is sampled and does not measure peak unified GPU memory; swap is system-wide.",
+    "No complete tokenizer/retained-context/first-token or internal-retry observation; CLI usage counters may aggregate multiple inference requests.",
+    "No in-loop application test feedback; no accepted patches or valid tool calls were produced.",
+    "Strict whole-CLI privacy and production capability remain unverified."
+  ]
+}

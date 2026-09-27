@@ -1,4 +1,6 @@
 import fs from 'node:fs/promises';
+import type { LocalInferenceConfig } from './local/types';
+import { assertLocalInput, runLocalInference } from './local/run';
 import path from 'node:path';
 
 import type { AgentProvider, AgentRuntime, ChatErrorCode } from '../../shared/types';
@@ -28,6 +30,7 @@ export type LlmProviderCodexHomePlan =
   | { type: 'persistent'; rootCodexHome: string; targetCodexHome: string; trustedRoots: string[]; networkAccess?: boolean };
 
 export interface LlmProviderRunServiceOptions {
+  enableExperimentalLocalInference?: boolean;
   codexHome?: string;
   providerProfilesRoot?: string;
   resolveAuthProfile?: LlmProviderAuthProfileResolver;
@@ -42,6 +45,10 @@ export interface LlmProviderRunServiceOptions {
 }
 
 export interface LlmProviderRunInput extends Omit<LlmCliRunInput, 'cliPath' | 'runCommandCapture'> {
+  localInference?: LocalInferenceConfig;
+  /** Explicit functional request, preserved literally inside prompt; local inference only. */
+  localContextRequest?: string;
+  signal?: AbortSignal;
   surface: LlmProviderSurface;
   mode: LlmProviderRunMode;
   runtime: AgentRuntime;
@@ -84,6 +91,15 @@ export class LlmProviderRunService {
   }
 
   public async run(input: LlmProviderRunInput): Promise<LlmProviderRunOutput> {
+    if (input.localContextRequest !== undefined && input.localInference === undefined) {
+      throw new Error('local_context_request_scope_unsupported');
+    }
+    if (input.localInference !== undefined) {
+      if (!this.options.enableExperimentalLocalInference) throw new Error('local_inference_disabled');
+      assertLocalInput(input);
+      const cliPath = input.cliPath ?? await this.getProviderCliPath('codex', input.setupErrorMode);
+      return await runLocalInference(input, cliPath);
+    }
     const provider = input.runtime.provider;
     if (input.localToolPolicy === 'mcp-only' && provider === 'antigravity') {
       throw new Error('whatsapp_channel_requires_codex_or_claude');

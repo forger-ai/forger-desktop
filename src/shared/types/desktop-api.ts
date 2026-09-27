@@ -28,6 +28,7 @@ import type { AgentProviderUsageResult } from './provider-usage';
 import type { LlmProviderProfileMutationResult, LlmProviderProfilesState, SetActiveLlmProviderProfileInput, SetActiveLlmProviderProfileResult, UpdateLlmProviderProfileDefaultsInput } from './provider-profiles';
 import type { AgentToolPackageDefinition, AgentToolSettings, UpdateAgentToolApprovalInput, OfficialToolsState, ToolMutationResult, ConfigureOfficialToolInput, CallOfficialToolInput, CallOfficialToolResult, AppToolsInstallGate, SetAppToolGrantInput, OfficialToolRuntimeEvent, GetAppToolsInstallGateOptions } from './tools';
 import type { CallConnectionActionInput, CallConnectionActionResult, ConfigureConnectionInput, ConnectionMutationResult, ConnectionsState, DisconnectConnectionInput, SetAppConnectionGrantInput } from './connections';
+import type { RepositoryCollaborationApi } from './repository-collaboration';
 import type { PickedChatFile, FilesStageForChatInput, FilesDiscardStagedForChatInput, FilesReleaseSelectionsInput, FilesActionResult, FilesListInput, ForgerFileRecord, ForgerFileCategory, FilesCreateCategoryInput, FilesRenameCategoryInput, FilesDeleteCategoryInput, FilesImportInput, FilesMoveInput, FilesRenameInput, FilesDeleteInput, DbListTablesResponse, DbQueryTableResponse } from './data';
 import type { Automation, AutomationRun, AutomationRunSummary, AutomationUpsertInput, WindowControlState } from './automations';
 import type {
@@ -288,6 +289,15 @@ export interface ForgerDesktopApi {
   connectionsPairingStatus: (connectionId: string) => Promise<CallConnectionActionResult>;
   connectionsCall: (input: CallConnectionActionInput) => Promise<CallConnectionActionResult>;
   connectionsSetDefault: (input: { type: string; connectionId: string }) => Promise<ConnectionMutationResult>;
+  repositoryCollaborationSnapshot: RepositoryCollaborationApi['snapshot'];
+  repositoryCollaborationListGroups: RepositoryCollaborationApi['listGroups'];
+  repositoryCollaborationListParticipants: (input: { connectionId: string; chatId: string }) => ReturnType<RepositoryCollaborationApi['listParticipants']>;
+  repositoryCollaborationConfigureGroup: RepositoryCollaborationApi['configureGroup'];
+  repositoryCollaborationAddRepository: RepositoryCollaborationApi['addRepository'];
+  repositoryCollaborationRemoveRepository: RepositoryCollaborationApi['removeRepository'];
+  repositoryCollaborationSetAccess: RepositoryCollaborationApi['setAccess'];
+  repositoryCollaborationCancelTask: RepositoryCollaborationApi['cancelTask'];
+  repositoryCollaborationRetryTask: RepositoryCollaborationApi['retryTask'];
   onOfficialToolEvent: (listener: (event: OfficialToolRuntimeEvent) => void) => () => void;
   getAppToolsInstallGate: (appId: string, locale?: string, options?: GetAppToolsInstallGateOptions) => Promise<AppToolsInstallGate | null>;
   setAppToolGrant: (input: SetAppToolGrantInput, locale?: string) => Promise<AppToolsInstallGate | null>;

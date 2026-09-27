@@ -318,6 +318,87 @@ const createLifecycleHarness = (overrides = {}) => {
   return { appListeners, calls, deps, ready, state };
 };
 
+test('repository collaboration recovers and registers intake before connections begin listening', async () => {
+  const { calls, deps, ready } = createLifecycleHarness();
+  const recovered = createDeferred();
+  const order = [];
+  const getConnections = deps.getConnectionsService;
+  deps.getConnectionsService = () => {
+    const connections = getConnections();
+    const start = connections.start.bind(connections);
+    connections.start = async () => {
+      order.push('connections:listen');
+      await start();
+    };
+    return connections;
+  };
+  deps.startRepositoryCollaboration = async () => {
+    order.push('collaboration:recover');
+    await recovered.promise;
+    order.push('collaboration:ready');
+  };
+
+  registerMainLifecycle(deps);
+  ready.resolve();
+  await waitForMainLifecycle(() => order.length === 1);
+  assert.deepEqual(order, ['collaboration:recover']);
+  assert.equal(calls.createdWindows, 0);
+
+  recovered.resolve();
+  await waitForMainLifecycle(() => calls.createdWindows === 1);
+  assert.deepEqual(order, ['collaboration:recover', 'collaboration:ready', 'connections:listen']);
+});
+
+test('an unavailable collaboration store does not prevent opening Desktop', async () => {
+  const { calls, deps, ready } = createLifecycleHarness({
+    startRepositoryCollaboration: async () => { throw new Error('collaboration_fixture_unavailable'); },
+  });
+  registerMainLifecycle(deps);
+  ready.resolve();
+  await waitForMainLifecycle(() => calls.createdWindows === 1);
+  assert.ok(calls.appendLogs.some((entry) => entry.event === 'repository_collaboration:start_failed'));
+});
+
+test('Desktop waits for collaboration cancellation before disposing connections and quitting', async () => {
+  const stopped = createDeferred();
+  const order = [];
+  const { appListeners, calls, deps, ready, state } = createLifecycleHarness({
+    stopRepositoryCollaboration: async () => {
+      order.push('collaboration:stopping');
+      await stopped.promise;
+      order.push('collaboration:stopped');
+    },
+  });
+  registerMainLifecycle(deps);
+  ready.resolve();
+  await waitForMainLifecycle(() => calls.createdWindows === 1);
+  state.connectionsService.stop = async () => { order.push('connections:stopped'); };
+  state.cloudDeviceManager.stop = () => { order.push('cloud:stopped'); };
+  appListeners.get('before-quit')({ preventDefault() {} });
+  await waitForMainLifecycle(() => order.length === 1);
+  assert.deepEqual(order, ['collaboration:stopping']);
+  assert.equal(calls.quitCalls, 0);
+
+  stopped.resolve();
+  await waitForMainLifecycle(() => calls.quitCalls === 1);
+  assert.deepEqual(order, ['collaboration:stopping', 'collaboration:stopped', 'connections:stopped', 'cloud:stopped']);
+});
+
+test('a collaboration shutdown failure still disposes other local services', async () => {
+  const order = [];
+  const { appListeners, calls, deps, ready, state } = createLifecycleHarness({
+    stopRepositoryCollaboration: async () => { throw new Error('collaboration_fixture_stop_failed'); },
+  });
+  registerMainLifecycle(deps);
+  ready.resolve();
+  await waitForMainLifecycle(() => calls.createdWindows === 1);
+  state.connectionsService.stop = async () => { order.push('connections:stopped'); };
+  state.cloudDeviceManager.stop = () => { order.push('cloud:stopped'); };
+  appListeners.get('before-quit')({ preventDefault() {} });
+  await waitForMainLifecycle(() => calls.quitCalls === 1);
+  assert.deepEqual(order, ['connections:stopped', 'cloud:stopped']);
+});
+
 test('main lifecycle initializes services, wires task status through provider-agnostic auth, and logs cleanup failures', async () => {
   const { calls, deps, ready, state } = createLifecycleHarness();
 

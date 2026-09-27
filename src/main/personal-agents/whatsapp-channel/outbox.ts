@@ -59,12 +59,22 @@ export class WhatsAppAgentOutbox {
       this.store.updateRequest(request.requestId, { deliveryState: 'unknown' });
       this.store.claimDelivery(request, request.requestId, request.revision);
       this.store.reserveSend(connectionId, Date.now() + 1500);
+      const configurationVersion = binding.configurationVersion;
+      const revision = request.revision;
       try {
         const outcome = await this.ports.sendReply({
           binding,
           turnId: request.requestId,
           revision: request.revision,
           text: request.responseText,
+          authorizeSend: async () => {
+            if (this.closed) return false;
+            const currentBinding = this.store.getBinding(request.connectionId, request.chatId, request.agentId);
+            const currentRequest = this.store.listActivity().find(item => item.requestId === request.requestId);
+            return !!currentBinding?.enabled && currentBinding.configurationVersion === configurationVersion
+              && currentRequest?.revision === revision && currentRequest.status === 'completed'
+              && currentRequest.deliveryState === 'unknown';
+          },
         });
         if (this.closed) return;
         const state = outcome.sent

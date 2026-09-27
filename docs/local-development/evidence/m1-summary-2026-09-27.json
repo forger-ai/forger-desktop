@@ -1,0 +1,374 @@
+{
+  "schemaVersion": 1,
+  "observedAt": "2026-09-27T01:46:53.004Z",
+  "scope": "actual_m1_synthetic_application_evaluation",
+  "uniqueTaskCount": 5,
+  "attemptRecordCount": 17,
+  "acceptedAttemptRecords": 0,
+  "configurationCount": 7,
+  "configurations": [
+    {
+      "evidence": "evidence/m1-qwen3-1.7b-compact-bug-repeat3-2026-09-27.json",
+      "sha256": "0f6943f26085d01e442a554e21ac0eff2de21e645e34cc0fa3f5b84e1553e754",
+      "model": "qwen3:1.7b",
+      "modelDigest": "sha256:8f68893c685c3ddff2aa3fffce2aa60a30bb2da65ca488b61fff134a4d1730e7",
+      "agentProfile": "compact-v1",
+      "contextWindowRequested": 16384,
+      "attempted": 3,
+      "passed": 0,
+      "autonomousPassed": 0,
+      "status": "not_recommended_for_evaluated_tasks",
+      "tasks": [
+        {
+          "taskId": "bug-01",
+          "trial": 1,
+          "status": "failed",
+          "failure": "acceptance_failed",
+          "agentElapsedMs": 27277.738167000003,
+          "toolCallsObserved": 4,
+          "finalFileInspection": {
+            "status": "historical_pre_evaluation_inspection"
+          },
+          "modifiedFilesObserved": [],
+          "peakSampledRuntimeTreeRssBytes": 3305324544
+        },
+        {
+          "taskId": "bug-01",
+          "trial": 2,
+          "status": "failed",
+          "failure": "acceptance_failed",
+          "agentElapsedMs": 32029.001583999998,
+          "toolCallsObserved": 2,
+          "finalFileInspection": {
+            "status": "historical_pre_evaluation_inspection"
+          },
+          "modifiedFilesObserved": [],
+          "peakSampledRuntimeTreeRssBytes": 3335962624
+        },
+        {
+          "taskId": "bug-01",
+          "trial": 3,
+          "status": "failed",
+          "failure": "acceptance_failed",
+          "agentElapsedMs": 256989.92841700002,
+          "toolCallsObserved": 13,
+          "finalFileInspection": {
+            "status": "historical_pre_evaluation_inspection"
+          },
+          "modifiedFilesObserved": [],
+          "peakSampledRuntimeTreeRssBytes": 3598401536
+        }
+      ],
+      "limits": [
+        "Observed on this loaded M1/8GiB, with OS caches and other foreground work uncontrolled.",
+        "No model-wide quality rate is inferred; profiles/context and repeated attempts remain separate."
+      ]
+    },
+    {
+      "evidence": "evidence/m1-qwen3-1.7b-context16384-2026-09-27.json",
+      "sha256": "218683ac029d4b3c5d851e787d87cd87a965e01a68e4bf0e3919b7c79d71b24f",
+      "model": "qwen3:1.7b",
+      "modelDigest": "sha256:8f68893c685c3ddff2aa3fffce2aa60a30bb2da65ca488b61fff134a4d1730e7",
+      "agentProfile": "baseline-v1",
+      "contextWindowRequested": 16384,
+      "attempted": 5,
+      "passed": 0,
+      "autonomousPassed": 0,
+      "status": "not_recommended_for_evaluated_tasks",
+      "tasks": [
+        {
+          "taskId": "template-01",
+          "trial": 1,
+          "status": "failed",
+          "failure": "acceptance_failed",
+          "agentElapsedMs": 120283.749625,
+          "toolCallsObserved": 0,
+          "finalFileInspection": {
+            "status": "historical_pre_evaluation_inspection"
+          },
+          "modifiedFilesObserved": [],
+          "peakSampledRuntimeTreeRssBytes": 3333734400
+        },
+        {
+          "taskId": "crud-01",
+          "trial": 1,
+          "status": "failed",
+          "failure": "acceptance_failed",
+          "agentElapsedMs": 130383.74050000001,
+          "toolCallsObserved": 0,
+          "finalFileInspection": {
+            "status": "historical_pre_evaluation_inspection"
+          },
+          "modifiedFilesObserved": [],
+          "peakSampledRuntimeTreeRssBytes": 3323363328
+        },
+        {
+          "taskId": "modify-01",
+          "trial": 1,
+          "status": "failed",
+          "failure": "acceptance_failed",
+          "agentElapsedMs": 98569.44112500001,
+          "toolCallsObserved": 0,
+          "finalFileInspection": {
+            "status": "historical_pre_evaluation_inspection"
+          },
+          "modifiedFilesObserved": [],
+          "peakSampledRuntimeTreeRssBytes": 3340288000
+        },
+        {
+          "taskId": "bug-01",
+          "trial": 1,
+          "status": "failed",
+          "failure": "acceptance_failed",
+          "agentElapsedMs": 63753.122875,
+          "toolCallsObserved": 0,
+          "finalFileInspection": {
+            "status": "historical_pre_evaluation_inspection"
+          },
+          "modifiedFilesObserved": [],
+          "peakSampledRuntimeTreeRssBytes": 3329556480
+        },
+        {
+          "taskId": "multi-01",
+          "trial": 1,
+          "status": "failed",
+          "failure": "acceptance_failed",
+          "agentElapsedMs": 96792.60920799995,
+          "toolCallsObserved": 0,
+          "finalFileInspection": {
+            "status": "historical_pre_evaluation_inspection"
+          },
+          "modifiedFilesObserved": [],
+          "peakSampledRuntimeTreeRssBytes": 3341058048
+        }
+      ],
+      "limits": [
+        "Observed on this loaded M1/8GiB, with OS caches and other foreground work uncontrolled.",
+        "No model-wide quality rate is inferred; profiles/context and repeated attempts remain separate."
+      ]
+    },
+    {
+      "evidence": "evidence/m1-qwen3-1.7b-no-thinking-bug-2026-09-27.json",
+      "sha256": "a2159ed7652231bc7ca21c450d4945c6aaf1973e1cb7fd55208615ceff73e3ab",
+      "model": "qwen3:1.7b",
+      "modelDigest": "sha256:8f68893c685c3ddff2aa3fffce2aa60a30bb2da65ca488b61fff134a4d1730e7",
+      "agentProfile": "single-agent-no-thinking-v1",
+      "contextWindowRequested": 16384,
+      "attempted": 1,
+      "passed": 0,
+      "autonomousPassed": 0,
+      "status": "not_recommended_for_evaluated_tasks",
+      "tasks": [
+        {
+          "taskId": "bug-01",
+          "trial": 1,
+          "status": "failed",
+          "failure": "acceptance_failed",
+          "agentElapsedMs": 60892.857083,
+          "toolCallsObserved": 0,
+          "finalFileInspection": {
+            "status": "historical_pre_evaluation_inspection"
+          },
+          "modifiedFilesObserved": [],
+          "peakSampledRuntimeTreeRssBytes": 3153641472
+        }
+      ],
+      "limits": [
+        "Observed on this loaded M1/8GiB, with OS caches and other foreground work uncontrolled.",
+        "No model-wide quality rate is inferred; profiles/context and repeated attempts remain separate."
+      ]
+    },
+    {
+      "evidence": "evidence/m1-qwen3-1.7b-single-agent-bug-2026-09-27.json",
+      "sha256": "ded7181d1eed4278ac559ac5fbbae0af1cfbcd8edfdd9a40a28003359f5d9c45",
+      "model": "qwen3:1.7b",
+      "modelDigest": "sha256:8f68893c685c3ddff2aa3fffce2aa60a30bb2da65ca488b61fff134a4d1730e7",
+      "agentProfile": "single-agent-v1",
+      "contextWindowRequested": 16384,
+      "attempted": 1,
+      "passed": 0,
+      "autonomousPassed": 0,
+      "status": "not_recommended_for_evaluated_tasks",
+      "tasks": [
+        {
+          "taskId": "bug-01",
+          "trial": 1,
+          "status": "failed",
+          "failure": "local_cli_failed",
+          "agentElapsedMs": 89533.571333,
+          "toolCallsObserved": 0,
+          "finalFileInspection": {
+            "status": "not_observed_on_historical_agent_failure"
+          },
+          "modifiedFilesObserved": null,
+          "peakSampledRuntimeTreeRssBytes": 3160408064
+        }
+      ],
+      "limits": [
+        "Observed on this loaded M1/8GiB, with OS caches and other foreground work uncontrolled.",
+        "No model-wide quality rate is inferred; profiles/context and repeated attempts remain separate."
+      ]
+    },
+    {
+      "evidence": "evidence/m1-qwen3-1.7b-template-trial1-2026-09-27.json",
+      "sha256": "527c0b2ae637ba06eddedea4156bdb62ba66d09b37b65fabe485f23738ad102a",
+      "model": "qwen3:1.7b",
+      "modelDigest": "sha256:8f68893c685c3ddff2aa3fffce2aa60a30bb2da65ca488b61fff134a4d1730e7",
+      "agentProfile": "baseline-v1",
+      "contextWindowRequested": 8192,
+      "attempted": 1,
+      "passed": 0,
+      "autonomousPassed": 0,
+      "status": "not_recommended_for_evaluated_tasks",
+      "tasks": [
+        {
+          "taskId": "template-01",
+          "trial": 1,
+          "status": "failed",
+          "failure": "acceptance_failed",
+          "agentElapsedMs": 62201.171834,
+          "toolCallsObserved": 0,
+          "finalFileInspection": {
+            "status": "historical_pre_evaluation_inspection"
+          },
+          "modifiedFilesObserved": [],
+          "peakSampledRuntimeTreeRssBytes": 2774368256
+        }
+      ],
+      "limits": [
+        "Observed on this loaded M1/8GiB, with OS caches and other foreground work uncontrolled.",
+        "No model-wide quality rate is inferred; profiles/context and repeated attempts remain separate."
+      ]
+    },
+    {
+      "evidence": "evidence/m1-qwen3-4b-compact-bug-2026-09-27.json",
+      "sha256": "5bfff504305bd09fa11c9376b25b431c840172eea20b8fe812c5d5821fc9a6c2",
+      "model": "qwen3:4b",
+      "modelDigest": "sha256:359d7dd4bcdab3d86b87d73ac27966f4dbb9f5efdfcc75d34a8764a09474fae7",
+      "agentProfile": "compact-v1",
+      "contextWindowRequested": 16384,
+      "attempted": 1,
+      "passed": 0,
+      "autonomousPassed": 0,
+      "status": "not_recommended_for_evaluated_tasks",
+      "tasks": [
+        {
+          "taskId": "bug-01",
+          "trial": 1,
+          "status": "failed",
+          "failure": "local_inactivity_timeout",
+          "agentElapsedMs": 121785.763541,
+          "toolCallsObserved": 0,
+          "finalFileInspection": {
+            "status": "completed",
+            "protectedFiles": {
+              "status": "completed"
+            },
+            "snapshot": {
+              "status": "completed"
+            }
+          },
+          "modifiedFilesObserved": [],
+          "peakSampledRuntimeTreeRssBytes": 4748181504
+        }
+      ],
+      "limits": [
+        "Observed on this loaded M1/8GiB, with OS caches and other foreground work uncontrolled.",
+        "No model-wide quality rate is inferred; profiles/context and repeated attempts remain separate."
+      ]
+    },
+    {
+      "evidence": "evidence/m1-qwen3-4b-context16384-2026-09-27.json",
+      "sha256": "96ab0c7d69b81670f6de4c05045c027af9d3548fc2b7aeb0c8e90657e68bf4e6",
+      "model": "qwen3:4b",
+      "modelDigest": "sha256:359d7dd4bcdab3d86b87d73ac27966f4dbb9f5efdfcc75d34a8764a09474fae7",
+      "agentProfile": "baseline-v1",
+      "contextWindowRequested": 16384,
+      "attempted": 5,
+      "passed": 0,
+      "autonomousPassed": 0,
+      "status": "not_recommended_for_evaluated_tasks",
+      "tasks": [
+        {
+          "taskId": "template-01",
+          "trial": 1,
+          "status": "failed",
+          "failure": "local_inactivity_timeout",
+          "agentElapsedMs": 125268.899208,
+          "toolCallsObserved": 0,
+          "finalFileInspection": {
+            "status": "not_observed_on_historical_agent_failure"
+          },
+          "modifiedFilesObserved": null,
+          "peakSampledRuntimeTreeRssBytes": 4670652416
+        },
+        {
+          "taskId": "crud-01",
+          "trial": 1,
+          "status": "failed",
+          "failure": "local_inactivity_timeout",
+          "agentElapsedMs": 122026.095458,
+          "toolCallsObserved": 0,
+          "finalFileInspection": {
+            "status": "not_observed_on_historical_agent_failure"
+          },
+          "modifiedFilesObserved": null,
+          "peakSampledRuntimeTreeRssBytes": 4549312512
+        },
+        {
+          "taskId": "modify-01",
+          "trial": 1,
+          "status": "failed",
+          "failure": "local_inactivity_timeout",
+          "agentElapsedMs": 122298.29129099997,
+          "toolCallsObserved": 0,
+          "finalFileInspection": {
+            "status": "not_observed_on_historical_agent_failure"
+          },
+          "modifiedFilesObserved": null,
+          "peakSampledRuntimeTreeRssBytes": 4523212800
+        },
+        {
+          "taskId": "bug-01",
+          "trial": 1,
+          "status": "failed",
+          "failure": "local_inactivity_timeout",
+          "agentElapsedMs": 122168.79016600008,
+          "toolCallsObserved": 0,
+          "finalFileInspection": {
+            "status": "not_observed_on_historical_agent_failure"
+          },
+          "modifiedFilesObserved": null,
+          "peakSampledRuntimeTreeRssBytes": 4557537280
+        },
+        {
+          "taskId": "multi-01",
+          "trial": 1,
+          "status": "failed",
+          "failure": "local_inactivity_timeout",
+          "agentElapsedMs": 122481.05995899998,
+          "toolCallsObserved": 0,
+          "finalFileInspection": {
+            "status": "not_observed_on_historical_agent_failure"
+          },
+          "modifiedFilesObserved": null,
+          "peakSampledRuntimeTreeRssBytes": 4542988288
+        }
+      ],
+      "limits": [
+        "Observed on this loaded M1/8GiB, with OS caches and other foreground work uncontrolled.",
+        "No model-wide quality rate is inferred; profiles/context and repeated attempts remain separate."
+      ]
+    }
+  ],
+  "productDecision": "no_validated_configuration_no_public_local_mode",
+  "formalCloudComparison": "not_executed",
+  "baselinePairedComparison": "rejected_harness_fingerprint_mismatch",
+  "currentSoftwareEvidence": "evidence/software-verification-final-2026-09-27.json",
+  "cleanupEvidence": "evidence/cleanup-2026-09-27.json",
+  "limits": [
+    "Attempt records include repeats and different configurations; the count is not a suite of that many distinct tasks.",
+    "The final 4B compact attempt overlaps brief host-side evidence fingerprinting; timing is not a clean-machine controlled estimate.",
+    "No inference task succeeded; this does not isolate intrinsic model quality from the constrained agent environment."
+  ]
+}

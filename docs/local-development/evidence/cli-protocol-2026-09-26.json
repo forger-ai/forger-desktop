@@ -1,0 +1,139 @@
+{
+  "schemaVersion": 1,
+  "evidenceClass": "real_cli_synthetic_runtime",
+  "observedAt": "2026-09-26T21:35:24.861Z",
+  "cliVersion": "codex-cli 0.144.1",
+  "realModelInference": false,
+  "performanceMeasured": false,
+  "processEgressVerified": false,
+  "syntheticToolLoop": {
+    "schemaVersion": 1,
+    "evidenceClass": "real_cli_synthetic_runtime",
+    "observedAt": "2026-09-26T21:35:24.861Z",
+    "cliVersion": "codex-cli 0.144.1",
+    "passed": true,
+    "toolName": "exec_command",
+    "responseTurns": 2,
+    "requests": [
+      "/api/tags",
+      "/api/show",
+      "/api/version",
+      "/v1/responses",
+      "/v1/responses"
+    ],
+    "syntheticRuntimeVersion": "0.34.4",
+    "fileEditVerified": true,
+    "realModelInference": false,
+    "performanceMeasured": false,
+    "processEgressVerified": false
+  },
+  "redirectChecks": [
+    {
+      "schemaVersion": 1,
+      "evidenceClass": "real_cli_synthetic_runtime",
+      "observedAt": "2026-09-26T21:35:24.809Z",
+      "cliVersion": "codex-cli 0.144.1",
+      "passed": true,
+      "scenario": "reject_inference_redirect",
+      "requests": [
+        "/api/tags",
+        "/api/show",
+        "/api/version",
+        "/v1/responses"
+      ],
+      "redirectStatus": 301,
+      "redirectedRequests": 0,
+      "canaryMethods": [],
+      "canaryBodyBytes": 0,
+      "realModelInference": false,
+      "processEgressVerified": false
+    },
+    {
+      "schemaVersion": 1,
+      "evidenceClass": "real_cli_synthetic_runtime",
+      "observedAt": "2026-09-26T21:35:24.809Z",
+      "cliVersion": "codex-cli 0.144.1",
+      "passed": true,
+      "scenario": "reject_inference_redirect",
+      "requests": [
+        "/api/tags",
+        "/api/show",
+        "/api/version",
+        "/v1/responses"
+      ],
+      "redirectStatus": 302,
+      "redirectedRequests": 0,
+      "canaryMethods": [],
+      "canaryBodyBytes": 0,
+      "realModelInference": false,
+      "processEgressVerified": false
+    },
+    {
+      "schemaVersion": 1,
+      "evidenceClass": "real_cli_synthetic_runtime",
+      "observedAt": "2026-09-26T21:35:24.815Z",
+      "cliVersion": "codex-cli 0.144.1",
+      "passed": true,
+      "scenario": "reject_inference_redirect",
+      "requests": [
+        "/api/tags",
+        "/api/show",
+        "/api/version",
+        "/v1/responses"
+      ],
+      "redirectStatus": 303,
+      "redirectedRequests": 0,
+      "canaryMethods": [],
+      "canaryBodyBytes": 0,
+      "realModelInference": false,
+      "processEgressVerified": false
+    },
+    {
+      "schemaVersion": 1,
+      "evidenceClass": "real_cli_synthetic_runtime",
+      "observedAt": "2026-09-26T21:35:24.817Z",
+      "cliVersion": "codex-cli 0.144.1",
+      "passed": true,
+      "scenario": "reject_inference_redirect",
+      "requests": [
+        "/api/tags",
+        "/api/show",
+        "/api/version",
+        "/v1/responses"
+      ],
+      "redirectStatus": 307,
+      "redirectedRequests": 0,
+      "canaryMethods": [],
+      "canaryBodyBytes": 0,
+      "realModelInference": false,
+      "processEgressVerified": false
+    },
+    {
+      "schemaVersion": 1,
+      "evidenceClass": "real_cli_synthetic_runtime",
+      "observedAt": "2026-09-26T21:35:24.809Z",
+      "cliVersion": "codex-cli 0.144.1",
+      "passed": true,
+      "scenario": "reject_inference_redirect",
+      "requests": [
+        "/api/tags",
+        "/api/show",
+        "/api/version",
+        "/v1/responses"
+      ],
+      "redirectStatus": 308,
+      "redirectedRequests": 0,
+      "canaryMethods": [],
+      "canaryBodyBytes": 0,
+      "realModelInference": false,
+      "processEgressVerified": false
+    }
+  ],
+  "previousFinding": {
+    "scenario": "direct_codex_to_runtime_307_redirect",
+    "result": "failed_before_gateway",
+    "observedRedirectedRequests": 1,
+    "remediation": "Authenticated per-run fixed-target HTTP gateway rejects non-200 upstream responses and never forwards Location.",
+    "interpretation": "The tests prove the exercised CLI protocol/tool path and redirect boundary with synthetic servers. They do not prove model quality, runtime behavior, absence of other process traffic, or full offline operation."
+  }
+}

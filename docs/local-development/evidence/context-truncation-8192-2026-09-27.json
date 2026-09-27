@@ -1,0 +1,21 @@
+{
+  "schemaVersion": 1,
+  "observedAt": "2026-09-27T00:42:21.927103+00:00",
+  "evidenceClass": "real_runtime_log_observation",
+  "relatedRun": "m1-qwen3-1.7b-template-trial1-2026-09-27.json",
+  "runtime": "ollama",
+  "version": "0.34.4",
+  "model": "qwen3:1.7b",
+  "agentRequestedContext": 8192,
+  "runtimeReportedContext": 8192,
+  "observedWarning": "truncating input prompt limit=4098 prompt=8327 keep=4 new=4098",
+  "modelTokenizerInputTokensBefore": 8327,
+  "modelTokenizerInputTokensAfter": 4098,
+  "claim": "At least one request was truncated; generation speed does not establish intact task context.",
+  "acceptanceResult": "failed",
+  "toolsObserved": 0,
+  "filesModified": 0,
+  "policy": "Keep this failure. Do not promote or automatically recommend this configuration.",
+  "primarySource": "https://github.com/ollama/ollama/blob/v0.34.4/llm/llama_server.go",
+  "sourceConsultedAt": "2026-09-27"
+}

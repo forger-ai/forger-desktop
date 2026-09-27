@@ -7,8 +7,9 @@ import { createRequire } from 'node:module';
 const require = createRequire(import.meta.url);
 const { AgentStore } = require('../../dist-electron/main/personal-agents/agent-store.js');
 const { AgentConversationManager } = require('../../dist-electron/main/personal-agents/agent-conversation-manager.js');
-const until = async (check) => {
-  for (let i = 0; i < 500; i++) { if (await check()) return; await new Promise(r => setTimeout(r, 10)); }
+const until = async (check, timeoutMs = 5000) => {
+  const deadline = performance.now() + timeoutMs;
+  while (performance.now() < deadline) { if (await check()) return; await new Promise(r => setTimeout(r, 10)); }
   assert.fail('timed out');
 };
 const policy = { appIds: [], toolIds: [], connectionGrants: [], peerAgentIds: [], sharedMemoryIds: [], networkAccess: true };
@@ -16,7 +17,12 @@ const channel = { kind: 'whatsapp', connectionId: 'account', chatId: 'chat', bin
 
 for (const action of ['disable', 'delete']) test(`global internet ${action} terminates a real active provider child before confirming save`, async (t) => {
   const root = await mkdtemp(path.join(tmpdir(), 'wa-web-child-'));
-  t.after(() => rm(root, { recursive: true, force: true }));
+  let manager;
+  let admitted;
+  t.after(async () => {
+    try { if (admitted) await manager.cancelRun(admitted.activeRun.id); }
+    finally { await rm(root, { recursive: true, force: true }); }
+  });
   const metadataRoot = path.join(root, 'meta');
   const codexHome = path.join(root, 'codex-home');
   await mkdir(codexHome);
@@ -25,11 +31,11 @@ for (const action of ['disable', 'delete']) test(`global internet ${action} term
   await writeFile(cli, `#!/usr/bin/env node\nrequire('fs').writeFileSync(${JSON.stringify(receipt)}, JSON.stringify(process.argv));\nsetInterval(()=>{}, 1000);\n`, { mode: 0o755 });
   const store = new AgentStore({ metadataRoot, forgerHomeRoot: root });
   const agent = await store.createAgent({ name: 'Test', networkAccess: true, runtime: { provider: 'codex', model: 'test', effort: 'low' } });
-  const manager = new AgentConversationManager({ store, metadataRoot, codexHome, getCodexCliPath: async () => cli, getCodexAuthenticated: async () => true, getAgentRuntime: async () => agent.runtime });
-  t.after(() => { for (const child of manager.activeChildren.values()) child.kill(); });
+  manager = new AgentConversationManager({ store, metadataRoot, codexHome, getCodexCliPath: async () => cli, getCodexAuthenticated: async () => true, getAgentRuntime: async () => agent.runtime });
   const conversation = await manager.createWhatsAppConversation({ agentId: agent.id });
-  const admitted = await manager.sendWhatsAppMessage({ conversationId: conversation.id, content: 'Search public facts', channel });
-  await until(async () => { try { return (await readFile(receipt, 'utf8')).length > 0; } catch { return false; } });
+  admitted = await manager.sendWhatsAppMessage({ conversationId: conversation.id, content: 'Search public facts', channel });
+  // Provider startup can share a saturated CI host; revocation is still asserted synchronously after save.
+  await until(async () => { try { return (await readFile(receipt, 'utf8')).length > 0; } catch { return false; } }, 20000);
   assert.ok(JSON.parse(await readFile(receipt, 'utf8')).includes('web_search="live"'));
   const child = manager.activeChildren.get(admitted.activeRun.id);
   assert.ok(child);

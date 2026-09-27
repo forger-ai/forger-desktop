@@ -1,0 +1,45 @@
+{
+  "schemaVersion": 1,
+  "observedAt": "2026-09-27T00:11:18.560563+00:00",
+  "evidenceClass": "artifact_integrity",
+  "model": "qwen3:1.7b",
+  "manifestSha256": "8f68893c685c3ddff2aa3fffce2aa60a30bb2da65ca488b61fff134a4d1730e7",
+  "artifacts": [
+    {
+      "digest": "sha256:517ccaff02fe9f99718ab2f478e611aa2813c36263eeed86c2427bc122d14ad8",
+      "sizeBytes": 487,
+      "verified": true
+    },
+    {
+      "digest": "sha256:3d0b790534fe4b79525fc3692950408dca41171676ed7e21db57af5c65ef6ab6",
+      "sizeBytes": 1359279776,
+      "verified": true
+    },
+    {
+      "digest": "sha256:ae370d884f108d16e7cc8fd5259ebc5773a0afa6e078b11f4ed7e39a27e0dfc4",
+      "sizeBytes": 1723,
+      "verified": true
+    },
+    {
+      "digest": "sha256:d18a5cc71b84bc4af394a31116bd3932b42241de70c77d2b76d69a314ec8aa12",
+      "sizeBytes": 11338,
+      "verified": true
+    },
+    {
+      "digest": "sha256:cff3f395ef3756ab63e58b0ad1b32bb6f802905cae1472e6a12034e4246fbbdb",
+      "sizeBytes": 120,
+      "verified": true
+    }
+  ],
+  "runtime": {
+    "version": "0.34.4",
+    "archiveBytes": 160042307,
+    "archiveSha256": "e9c8fddaab5f48f47f2c4ae3d23d0732f5182417125353faeed2188e34a22799",
+    "codesignVerified": true,
+    "teamIdentifier": "3MU9H2V9Y9"
+  },
+  "limitations": [
+    "Digest verification establishes the downloaded artifact matches the pinned registry/release artifact, not model utility.",
+    "Runtime and weights are private experimental assets, not redistributed by Forger."
+  ]
+}

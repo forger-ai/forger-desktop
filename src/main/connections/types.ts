@@ -1,3 +1,4 @@
+import type { WhatsAppLiveGroupMessage } from './modules/whatsapp/types';
 import type { WhatsAppCurrentMessageImagesResult } from './modules/whatsapp/types';
 import type {
   CallConnectionActionInput,
@@ -31,6 +32,8 @@ export interface CreateConnectionInstanceInput {
 }
 
 export interface ConnectionContext {
+  /** Host-only final delivery authority; never populated from serialized action input. */
+  authorizeWhatsAppSend?: () => Promise<boolean>;
   metadataRoot: string;
   secretsStore: ConnectionSecretsStore;
   locale?: string;
@@ -51,6 +54,7 @@ export interface ConnectionContext {
   selfOAuthCallbackService?: SelfOAuthCallbackServiceLike;
   appendLog?: (event: string, payload?: Record<string, unknown>) => Promise<void>;
   emitEvent?: (event: OfficialToolRuntimeEvent) => void;
+  onWhatsAppMessage?: (message: WhatsAppLiveGroupMessage & { connectionId: string }) => Promise<boolean | void>;
   createInstance(input: CreateConnectionInstanceInput): Promise<ConnectionInstance>;
   updateInstance(connectionId: string, input: Partial<Pick<ConnectionInstance, 'label' | 'accountIdentity' | 'status' | 'lastCheckedAt'>>): Promise<ConnectionInstance | null>;
   deleteInstance(connectionId: string, options?: { keepSecrets?: boolean }): Promise<void>;

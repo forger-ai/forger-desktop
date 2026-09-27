@@ -1,3 +1,4 @@
+import { startRepositoryConnections } from '../repository-collaboration/composition';
 import type { App, BrowserWindow, IpcMain, Shell } from 'electron';
 import type fs from 'node:fs/promises';
 import type { Server } from 'node:http';
@@ -7,8 +8,7 @@ import { reportSanitizerRoots } from '../conversation-diagnostics';
 import type { StoredForgerAccount } from '../forger-account-store';
 import { createAppMcpSecretsFingerprint, type AppMcpManager as AppMcpManagerService } from '../app-mcp-manager';
 import { AppFolderGrantStore } from '../app-folder-grants';
-import type {
-  AgentProvider, AgentRuntime, AgentRuntimeRequest,
+import type { AgentProvider, AgentRuntime, AgentRuntimeRequest,
   AgentToolDefinition, AppSecretDeclaration, AppSummary,
   AntigravityAuthStatus, AudioRuntimeDevices, AutomationFrequency,
   BasicActionResult, CallConnectionActionInput, CallOfficialToolInput,
@@ -163,6 +163,8 @@ export interface MainLifecycleDeps {
     delete: AsyncFn;
   };
 		  getOfficialToolsService: () => NonNullable<MainLifecycleState['officialToolsService']>;
+  startRepositoryCollaboration?: () => Promise<void>;
+  stopRepositoryCollaboration?: () => Promise<void>;
   getConnectionsService: () => NonNullable<MainLifecycleState['connectionsService']>;
   getWhatsAppAgentChannelService?: () => WhatsAppAgentChannelService;
   getSelfOAuthCallbackService: () => NonNullable<MainLifecycleState['selfOAuthCallbackService']>;
@@ -333,6 +335,8 @@ export const registerMainLifecycle = (deps: MainLifecycleDeps) => {
     getPersonalAgentRoutineManager,
     getOfficialToolsService,
     getConnectionsService,
+    startRepositoryCollaboration,
+    stopRepositoryCollaboration,
     getWhatsAppAgentChannelService,
     getSelfOAuthCallbackService,
     getSidekickService,
@@ -479,14 +483,10 @@ export const registerMainLifecycle = (deps: MainLifecycleDeps) => {
   }).catch((error: unknown) => {
     void appendInstallLog('self_oauth_callback:start_failed', serializeErrorForInstallLog(error));
   });
-  await startupLogger.step('startup:connections:create', () => {
-    state.connectionsService = getConnectionsService();
+  await startRepositoryConnections({ state, getConnectionsService, startRepositoryCollaboration, startupLogger, appendInstallLog,
+    initializeChannels: () => initializeWhatsAppAgentChannel(state, getWhatsAppAgentChannelService, startupLogger,
+      (error) => void appendInstallLog('whatsapp_agent_channel:initialize_failed', serializeErrorForInstallLog(error))),
   });
-  await startupLogger.step('startup:connections:load', async () => {
-    await state.connectionsService?.load();
-  });
-  await initializeWhatsAppAgentChannel(state, getWhatsAppAgentChannelService, startupLogger,
-    (error) => void appendInstallLog('whatsapp_agent_channel:initialize_failed', serializeErrorForInstallLog(error)));
   await startupLogger.step('startup:sidekick:start_if_paired', async () => {
     await startSidekickIfPaired?.();
   }).catch((error: unknown) => {
@@ -1596,5 +1596,5 @@ export const registerMainLifecycle = (deps: MainLifecycleDeps) => {
     console.error('Forger Desktop startup failed', error);
   }
 });
-registerGracefulShutdownHandlers({ app, state, runningApps, stopInstalledApp, terminateProcess, closeServer });
+registerGracefulShutdownHandlers({ app, state, runningApps, stopInstalledApp, terminateProcess, closeServer, stopRepositoryCollaboration });
 };

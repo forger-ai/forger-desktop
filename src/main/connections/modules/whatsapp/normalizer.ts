@@ -239,6 +239,7 @@ export const normalizeBaileysMessage = (raw: unknown): WhatsAppIndexedMessage | 
     ...(typeof candidate.pushName === 'string' && candidate.pushName.trim() ? { senderDisplayName: candidate.pushName.trim() } : {}),
     fromMe,
     ...(quoted ? { quoted: true } : {}),
+    ...(typeof contextInfo?.stanzaId === 'string' && contextInfo.stanzaId.trim() ? { replyToMessageId: contextInfo.stanzaId } : {}),
     ...(forwarded ? { forwarded: true } : {}),
     ...(toTimestamp(candidate.messageTimestamp) ? { timestamp: toTimestamp(candidate.messageTimestamp) } : {}),
     ...(extractMessageText(candidate.message) ? { text: extractMessageText(candidate.message) } : {}),

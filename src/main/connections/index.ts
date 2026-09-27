@@ -178,6 +178,7 @@ const createConnectionToolContext = (
   metadataRoot: path.join(context.metadataRoot, 'connections', toolId, connectionId),
   connectionId,
   locale: context.locale,
+  authorizeWhatsAppSend: context.authorizeWhatsAppSend,
   secretsStore: {
     setToolSecret: async (_toolId: string, secretName: string, value: string) =>
       context.secretsStore.setConnectionSecret(connectionId, secretName, value),
@@ -197,6 +198,7 @@ const createConnectionToolContext = (
   ...(context.selfOAuthCallbackService ? { selfOAuthCallbackService: context.selfOAuthCallbackService } : {}),
   appendLog: context.appendLog,
   emitEvent: context.emitEvent,
+  onWhatsAppMessage: (message) => context.onWhatsAppMessage?.({ ...message, connectionId }) ?? Promise.resolve(),
 });
 
 const createToolBackedConnectionModule = (

@@ -7,6 +7,7 @@ import { setLiveWhatsAppMessageHandler } from '../connections/modules/whatsapp';
 
 interface GracefulShutdownOptions {
   app: App;
+  stopRepositoryCollaboration?: () => Promise<void>;
   state: MainLifecycleState;
   runningApps: Map<string, RunningAppProcess>;
   stopInstalledApp: (appId: string) => Promise<unknown>;
@@ -21,10 +22,13 @@ export const registerGracefulShutdownHandlers = ({
   stopInstalledApp,
   terminateProcess,
   closeServer,
+  stopRepositoryCollaboration,
 }: GracefulShutdownOptions): void => {
   let gracefulShutdownStarted = false;
   const performGracefulShutdown = async (): Promise<void> => {
     setLiveWhatsAppMessageHandler(null);
+    await Promise.resolve().then(() => stopRepositoryCollaboration?.()).catch(() => undefined);
+    await Promise.resolve().then(() => state.connectionsService?.stop?.()).catch(() => undefined);
     await state.connectionsService?.stopType?.('whatsapp');
     state.whatsappAgentChannelService?.close();
     state.memoryMaintenanceManager?.dispose();

@@ -1,0 +1,19 @@
+{
+  "schemaVersion": 1,
+  "observedAt": "2026-09-27T12:39:47.425Z",
+  "runtime": {
+    "pid": 24723,
+    "verifiedCommandBeforeStop": "/Users/kupa/Library/Application Support/ForgerLocalEvaluation/runtime/0.34.4/ollama serve",
+    "signal": "SIGTERM",
+    "absentAfterStop": true,
+    "endpoint": "127.0.0.1:11445",
+    "portClosed": true
+  },
+  "vm": {
+    "name": "forger-local-eval",
+    "status": "Stopped"
+  },
+  "downloadedAssetsRetained": true,
+  "otherServicesModified": false,
+  "passed": true
+}

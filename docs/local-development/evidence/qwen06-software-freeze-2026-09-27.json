@@ -1,0 +1,53 @@
+{
+  "schemaVersion": 1,
+  "observedAt": "2026-09-27T12:21:18.693Z",
+  "evidenceClass": "software_checks_not_model_evaluation",
+  "forger": {
+    "version": "0.5.17",
+    "revision": "7fa965edc9408211d8f4336bb0ed0a4f30a88102",
+    "dirty": true,
+    "sourceSha256": "e605d367bb4552cb2ab32f38db7da67e85865638efad27e22c9ca129ed625616",
+    "compiledProviderSha256": "09487350e1006c14e62530e2bba4adf6ba3aa347a092dc02637db4596c9b0c0b",
+    "harnessSha256": "5b8e7d52b5799a8679fd64deb8e6c870aa354c3f9ea0a99d5612a1dc18f21f21"
+  },
+  "tests": {
+    "command": "node --test test/main/local-inference*.test.mjs test/main/local-development*.test.mjs test/main/llm-provider-run-service.test.mjs test/main/chat-orchestrator.test.mjs test/contracts/llm-provider-boundaries.test.mjs",
+    "passed": 251,
+    "failed": 0,
+    "skipped": 0,
+    "logSha256": "8d5f061e8e387c624133fe179d62f2aa23d3d4fbe67f9c5cfe361bcfe852891e"
+  },
+  "build": {
+    "command": "npm run build:electron",
+    "status": "passed",
+    "performedBy": "context_preprocessor_worker_after_FIFO_fix"
+  },
+  "typecheck": {
+    "command": "npm run typecheck",
+    "status": "passed",
+    "logSha256": "d14d280d3d83b8cc8550b35b443aab1fc55e4598c3ef0dbea1847812124abbca"
+  },
+  "lint": {
+    "command": "npm run lint",
+    "status": "passed",
+    "logSha256": "98cf67e3f5188a31a9df5f1db5927339818b183fc1cda43d56fd7479f8f38acc"
+  },
+  "protocol": {
+    "file": "QWEN06-CONTEXT-EXPERIMENT.md",
+    "sha256": "45a204642a445c478fc289b947112c2bd8291747afaefb3c47a46fa9bf3bbada",
+    "strategies": [
+      "direct-v1",
+      "staged-v1"
+    ],
+    "distinctTasks": 1,
+    "attemptsPerStrategy": 3,
+    "task": "bug-01",
+    "originalRequestPreserved": true,
+    "codeFrozenBeforeMeasuredAttempts": true
+  },
+  "knownLimitations": [
+    "Synthetic model/protocol tests do not establish real-model app utility.",
+    "No in-loop application test feedback; this constraint is identical in both strategies.",
+    "Strict whole-CLI filesystem/network privacy remains unverified."
+  ]
+}

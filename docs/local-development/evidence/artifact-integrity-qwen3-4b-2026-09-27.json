@@ -1,0 +1,37 @@
+{
+  "schemaVersion": 1,
+  "observedAt": "2026-09-27T00:46:00.662738+00:00",
+  "evidenceClass": "artifact_integrity",
+  "model": "qwen3:4b",
+  "manifestSha256": "359d7dd4bcdab3d86b87d73ac27966f4dbb9f5efdfcc75d34a8764a09474fae7",
+  "artifacts": [
+    {
+      "digest": "sha256:e18a783aae5525fd2852fc94c985541a77e791e034abc2d3056474d59de336fc",
+      "sizeBytes": 487,
+      "verified": true
+    },
+    {
+      "digest": "sha256:3e4cb14174460404e7a233e531675303b2fbf7749c02f91864fe311ab6344e4f",
+      "sizeBytes": 2497280480,
+      "verified": true
+    },
+    {
+      "digest": "sha256:2d54db2b9bb29ce7db54fea63a891f5859603813c555b1f88b5e0994652897f9",
+      "sizeBytes": 1506,
+      "verified": true
+    },
+    {
+      "digest": "sha256:d18a5cc71b84bc4af394a31116bd3932b42241de70c77d2b76d69a314ec8aa12",
+      "sizeBytes": 11338,
+      "verified": true
+    },
+    {
+      "digest": "sha256:cff3f395ef3756ab63e58b0ad1b32bb6f802905cae1472e6a12034e4246fbbdb",
+      "sizeBytes": 120,
+      "verified": true
+    }
+  ],
+  "limitations": [
+    "Artifact integrity is not a model competence or safety evaluation."
+  ]
+}

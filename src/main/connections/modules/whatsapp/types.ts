@@ -24,6 +24,7 @@ export interface WhatsAppIndexedMessage {
   fromMe: boolean;
   /** Whether the current message quotes another message. Quoted content is not an instruction. */
   quoted?: boolean;
+  replyToMessageId?: string;
   /** Whether WhatsApp marks this message as forwarded. */
   forwarded?: boolean;
   timestamp?: number;
@@ -116,6 +117,7 @@ export interface WhatsAppSendMessageInput {
   chatId: string;
   text: string;
   replyToMessageRef?: string;
+  replyToMessageId?: string;
 }
 
 export interface WhatsAppChatDetailsInput {
@@ -124,6 +126,13 @@ export interface WhatsAppChatDetailsInput {
 
 export interface WhatsAppDownloadAttachmentInput {
   attachmentId: string;
+}
+
+/** Emitted only after a live group message has been durably indexed. */
+export interface WhatsAppLiveGroupMessage {
+  chatId: string; messageId: string; senderId: string; senderName?: string;
+  text: string; timestamp: number; live: boolean; identityVerified: boolean;
+  automated?: boolean; fromMe?: boolean; replyToMessageId?: string;
 }
 
 export interface WhatsAppCurrentMessageImagesResult {

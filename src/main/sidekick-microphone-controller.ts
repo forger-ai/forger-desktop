@@ -315,13 +315,24 @@ export class SidekickMicrophoneController {
       await this.abortActive(runtime, 'La prueba de micrófono superó el tamaño máximo.', 'sidekick_microphone_recording_too_large');
       return;
     }
-    await this.options.onMicrophonePcm?.({
-      sidekickId: active.sidekickId,
-      recordingId: active.recordingId,
-      chunkSequence: sequence,
-      pcm: new Uint8Array(chunk),
-    });
-    if (active.persist) await fs.appendFile(active.tempPcmPath, chunk);
+    try {
+      await this.options.onMicrophonePcm?.({
+        sidekickId: active.sidekickId,
+        recordingId: active.recordingId,
+        chunkSequence: sequence,
+        pcm: new Uint8Array(chunk),
+      });
+      if (runtime.microphoneRecording !== active) return;
+      if (active.persist) await fs.appendFile(active.tempPcmPath, chunk);
+    } catch (error) {
+      if (runtime.microphoneRecording === active) throw error;
+    } finally {
+      // Disconnect can remove the staged file while an append is still in flight.
+      if (active.persist && runtime.microphoneRecording !== active) {
+        await fs.rm(active.tempPcmPath, { force: true }).catch(() => undefined);
+      }
+    }
+    if (runtime.microphoneRecording !== active) return;
     active.bytes += chunk.byteLength;
     active.chunks += 1;
     active.nextChunkSequence += 1;

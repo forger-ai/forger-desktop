@@ -1,0 +1,588 @@
+{
+  "schemaVersion": 1,
+  "catalogVersion": "2026-09-27.5",
+  "observedAt": "2026-09-27",
+  "purpose": "experimental_evaluation",
+  "recommendationsEnabled": false,
+  "defaultRecommendation": null,
+  "performanceEvidence": [
+    "evidence/m1-summary-2026-09-27.json"
+  ],
+  "proposedRuntime": {
+    "id": "ollama",
+    "version": "0.34.4",
+    "status": "real_agent_attempts_measured_no_validated_configuration",
+    "protocol": "responses_stateless",
+    "protocolMinimumVersion": "0.13.3",
+    "codexVersion": "0.144.1",
+    "license": "MIT",
+    "licenseUrl": "https://github.com/ollama/ollama/blob/v0.34.4/LICENSE",
+    "releaseUrl": "https://github.com/ollama/ollama/releases/tag/v0.34.4",
+    "sourceUrl": "https://api.github.com/repos/ollama/ollama/releases/tags/v0.34.4",
+    "macosArchive": {
+      "url": "https://github.com/ollama/ollama/releases/download/v0.34.4/ollama-darwin.tgz",
+      "sizeBytes": 160042307,
+      "sha256": "e9c8fddaab5f48f47f2c4ae3d23d0732f5182417125353faeed2188e34a22799",
+      "verification": "download_sha256_and_macos_codesign_verified",
+      "downloaded": true,
+      "signatureVerified": true,
+      "verificationEvidence": "evidence/artifact-integrity-2026-09-27.json"
+    },
+    "macosRequirement": {
+      "minimumVersion": "14.0",
+      "appleSiliconAcceleration": "metal_runtime_execution_observed_on_m1_8gb",
+      "sourceUrl": "https://docs.ollama.com/macos"
+    }
+  },
+  "models": [
+    {
+      "id": "qwen3-1.7b-q4_k_m",
+      "name": "Qwen3 1.7B (Ollama Q4_K_M)",
+      "status": "experimental",
+      "runtime": "ollama",
+      "runtimeModel": "qwen3:1.7b",
+      "runtimeMinimumVersionDeclared": null,
+      "runtimeCompatibility": "real_agent_execution_measured_no_successful_tasks",
+      "selectionRationale": "Small related-family candidate with advertised tools. On the observed M1/8GB, the initial five-family configuration produced no tool calls or accepted application changes; no recommendation follows.",
+      "source": {
+        "publisher": "Qwen",
+        "repository": "https://huggingface.co/Qwen/Qwen3-1.7B",
+        "sourceRevision": null,
+        "sourceRevisionStatus": "exact_upstream_revision_used_by_ollama_not_attested",
+        "upstreamRevisionObserved": "70d244cc86ccca08cf5af4e1e306ecf908b1ad5e",
+        "upstreamMetadataUrl": "https://huggingface.co/api/models/Qwen/Qwen3-1.7B/revision/main",
+        "distributor": "Ollama library",
+        "packageUrl": "https://ollama.com/library/qwen3:1.7b"
+      },
+      "license": {
+        "spdx": "Apache-2.0",
+        "url": "https://huggingface.co/Qwen/Qwen3-1.7B/blob/70d244cc86ccca08cf5af4e1e306ecf908b1ad5e/LICENSE",
+        "modelClassification": "open_weights",
+        "openSourceAiAssessment": "not_established",
+        "redistributionState": "not_packaged",
+        "requiredRedistributionReview": "Preserve license, attribution and applicable NOTICE material; mark modifications; review the exact distributed artifact."
+      },
+      "artifact": {
+        "format": "GGUF",
+        "quantization": "Q4_K_M",
+        "manifestUrl": "https://registry.ollama.ai/v2/library/qwen3/manifests/1.7b",
+        "manifestDigest": "sha256:8f68893c685c3ddff2aa3fffce2aa60a30bb2da65ca488b61fff134a4d1730e7",
+        "manifestSizeBytes": 859,
+        "manifestVerification": "sha256_computed_from_fetched_manifest",
+        "configDigest": "sha256:517ccaff02fe9f99718ab2f478e611aa2813c36263eeed86c2427bc122d14ad8",
+        "configUrl": "https://registry.ollama.ai/v2/library/qwen3/blobs/sha256:517ccaff02fe9f99718ab2f478e611aa2813c36263eeed86c2427bc122d14ad8",
+        "weightDigest": "sha256:3d0b790534fe4b79525fc3692950408dca41171676ed7e21db57af5c65ef6ab6",
+        "weightSizeBytes": 1359279776,
+        "downloadBytesExcludingManifestAndTransport": 1359293444,
+        "weightVerification": "downloaded_size_and_sha256_verified",
+        "metadataNotes": [
+          "The registry config labels model_type as 2.0B; the package name remains qwen3:1.7b. No memory estimate is inferred from the name."
+        ],
+        "verificationEvidence": "evidence/artifact-integrity-2026-09-27.json",
+        "reproducibleVerificationEvidence": "evidence/verified-artifacts-qwen3-1.7b-2026-09-27.json"
+      },
+      "capabilities": {
+        "advertised": [
+          "tools",
+          "thinking"
+        ],
+        "advertisedSource": "https://ollama.com/library/qwen3:1.7b",
+        "validatedInForger": [],
+        "structuredOutputsStatus": "not_tested",
+        "toolArgumentsStatus": "not_tested",
+        "cancellationStatus": "not_tested"
+      },
+      "evaluation": {
+        "modality": "text_only",
+        "measuredConfigurations": [
+          {
+            "evidence": "evidence/m1-qwen3-1.7b-compact-bug-repeat3-2026-09-27.json",
+            "sha256": "0f6943f26085d01e442a554e21ac0eff2de21e645e34cc0fa3f5b84e1553e754",
+            "model": "qwen3:1.7b",
+            "modelDigest": "sha256:8f68893c685c3ddff2aa3fffce2aa60a30bb2da65ca488b61fff134a4d1730e7",
+            "agentProfile": "compact-v1",
+            "contextWindowRequested": 16384,
+            "attempted": 3,
+            "passed": 0,
+            "autonomousPassed": 0,
+            "status": "not_recommended_for_evaluated_tasks",
+            "limits": [
+              "Observed on this loaded M1/8GiB, with OS caches and other foreground work uncontrolled.",
+              "No model-wide quality rate is inferred; profiles/context and repeated attempts remain separate."
+            ],
+            "taskIds": [
+              "bug-01"
+            ],
+            "toolCallsObserved": 19
+          },
+          {
+            "evidence": "evidence/m1-qwen3-1.7b-context16384-2026-09-27.json",
+            "sha256": "218683ac029d4b3c5d851e787d87cd87a965e01a68e4bf0e3919b7c79d71b24f",
+            "model": "qwen3:1.7b",
+            "modelDigest": "sha256:8f68893c685c3ddff2aa3fffce2aa60a30bb2da65ca488b61fff134a4d1730e7",
+            "agentProfile": "baseline-v1",
+            "contextWindowRequested": 16384,
+            "attempted": 5,
+            "passed": 0,
+            "autonomousPassed": 0,
+            "status": "not_recommended_for_evaluated_tasks",
+            "limits": [
+              "Observed on this loaded M1/8GiB, with OS caches and other foreground work uncontrolled.",
+              "No model-wide quality rate is inferred; profiles/context and repeated attempts remain separate."
+            ],
+            "taskIds": [
+              "template-01",
+              "crud-01",
+              "modify-01",
+              "bug-01",
+              "multi-01"
+            ],
+            "toolCallsObserved": 0
+          },
+          {
+            "evidence": "evidence/m1-qwen3-1.7b-no-thinking-bug-2026-09-27.json",
+            "sha256": "a2159ed7652231bc7ca21c450d4945c6aaf1973e1cb7fd55208615ceff73e3ab",
+            "model": "qwen3:1.7b",
+            "modelDigest": "sha256:8f68893c685c3ddff2aa3fffce2aa60a30bb2da65ca488b61fff134a4d1730e7",
+            "agentProfile": "single-agent-no-thinking-v1",
+            "contextWindowRequested": 16384,
+            "attempted": 1,
+            "passed": 0,
+            "autonomousPassed": 0,
+            "status": "not_recommended_for_evaluated_tasks",
+            "limits": [
+              "Observed on this loaded M1/8GiB, with OS caches and other foreground work uncontrolled.",
+              "No model-wide quality rate is inferred; profiles/context and repeated attempts remain separate."
+            ],
+            "taskIds": [
+              "bug-01"
+            ],
+            "toolCallsObserved": 0
+          },
+          {
+            "evidence": "evidence/m1-qwen3-1.7b-single-agent-bug-2026-09-27.json",
+            "sha256": "ded7181d1eed4278ac559ac5fbbae0af1cfbcd8edfdd9a40a28003359f5d9c45",
+            "model": "qwen3:1.7b",
+            "modelDigest": "sha256:8f68893c685c3ddff2aa3fffce2aa60a30bb2da65ca488b61fff134a4d1730e7",
+            "agentProfile": "single-agent-v1",
+            "contextWindowRequested": 16384,
+            "attempted": 1,
+            "passed": 0,
+            "autonomousPassed": 0,
+            "status": "not_recommended_for_evaluated_tasks",
+            "limits": [
+              "Observed on this loaded M1/8GiB, with OS caches and other foreground work uncontrolled.",
+              "No model-wide quality rate is inferred; profiles/context and repeated attempts remain separate."
+            ],
+            "taskIds": [
+              "bug-01"
+            ],
+            "toolCallsObserved": 0
+          },
+          {
+            "evidence": "evidence/m1-qwen3-1.7b-template-trial1-2026-09-27.json",
+            "sha256": "527c0b2ae637ba06eddedea4156bdb62ba66d09b37b65fabe485f23738ad102a",
+            "model": "qwen3:1.7b",
+            "modelDigest": "sha256:8f68893c685c3ddff2aa3fffce2aa60a30bb2da65ca488b61fff134a4d1730e7",
+            "agentProfile": "baseline-v1",
+            "contextWindowRequested": 8192,
+            "attempted": 1,
+            "passed": 0,
+            "autonomousPassed": 0,
+            "status": "not_recommended_for_evaluated_tasks",
+            "limits": [
+              "Observed on this loaded M1/8GiB, with OS caches and other foreground work uncontrolled.",
+              "No model-wide quality rate is inferred; profiles/context and repeated attempts remain separate."
+            ],
+            "taskIds": [
+              "template-01"
+            ],
+            "toolCallsObserved": 0
+          }
+        ],
+        "realModelRuns": 11,
+        "taskSuccessRate": null,
+        "peakMemoryBytes": null,
+        "tokensPerSecond": null,
+        "recommendedHardware": [],
+        "pending": [
+          "useful_forger_fixture_acceptance",
+          "isolated_agent_validation_feedback",
+          "restricted_external_file_reads",
+          "exact_retained_context",
+          "peak_unified_memory",
+          "process_egress_verification",
+          "validated_cloud_comparison"
+        ],
+        "nativeCalibrationEvidence": [
+          "evidence/calibration-qwen3-1.7b-cold-2026-09-27.json",
+          "evidence/calibration-qwen3-1.7b-warm-2026-09-27.json"
+        ],
+        "nativeCalibrationSummary": {
+          "sampleSize": 2,
+          "contextWindow": 2048,
+          "generationTokenLimit": 64,
+          "requestedAnswerProduced": 0,
+          "interpretation": "Both streams finish at the generation cap after thinking output only. These are not app-development tasks."
+        },
+        "taskSuccessRateReason": "See each measured configuration; different profiles, context and repeated tasks are not pooled into a model-quality rate.",
+        "scopeDecision": "No accepted app-development task; do not recommend this evaluated scope."
+      }
+    },
+    {
+      "id": "qwen3-4b-q4_k_m",
+      "name": "Qwen3 4B (Ollama Q4_K_M)",
+      "status": "experimental",
+      "runtime": "ollama",
+      "runtimeModel": "qwen3:4b",
+      "runtimeMinimumVersionDeclared": null,
+      "runtimeCompatibility": "real_agent_attempts_measured_all_inactivity_timeouts",
+      "selectionRationale": "Related-family comparison against the smaller artifact; higher download size is not evidence of better task success.",
+      "source": {
+        "publisher": "Qwen",
+        "repository": "https://huggingface.co/Qwen/Qwen3-4B",
+        "sourceRevision": null,
+        "sourceRevisionStatus": "exact_upstream_revision_used_by_ollama_not_attested",
+        "upstreamRevisionObserved": "1cfa9a7208912126459214e8b04321603b3df60c",
+        "upstreamMetadataUrl": "https://huggingface.co/api/models/Qwen/Qwen3-4B/revision/main",
+        "distributor": "Ollama library",
+        "packageUrl": "https://ollama.com/library/qwen3:4b"
+      },
+      "license": {
+        "spdx": "Apache-2.0",
+        "url": "https://huggingface.co/Qwen/Qwen3-4B/blob/1cfa9a7208912126459214e8b04321603b3df60c/LICENSE",
+        "modelClassification": "open_weights",
+        "openSourceAiAssessment": "not_established",
+        "redistributionState": "not_packaged",
+        "requiredRedistributionReview": "Preserve license, attribution and applicable NOTICE material; mark modifications; review the exact distributed artifact."
+      },
+      "artifact": {
+        "format": "GGUF",
+        "quantization": "Q4_K_M",
+        "manifestUrl": "https://registry.ollama.ai/v2/library/qwen3/manifests/4b",
+        "manifestDigest": "sha256:359d7dd4bcdab3d86b87d73ac27966f4dbb9f5efdfcc75d34a8764a09474fae7",
+        "manifestSizeBytes": 859,
+        "manifestVerification": "sha256_computed_from_fetched_manifest",
+        "configDigest": "sha256:e18a783aae5525fd2852fc94c985541a77e791e034abc2d3056474d59de336fc",
+        "configUrl": "https://registry.ollama.ai/v2/library/qwen3/blobs/sha256:e18a783aae5525fd2852fc94c985541a77e791e034abc2d3056474d59de336fc",
+        "weightDigest": "sha256:3e4cb14174460404e7a233e531675303b2fbf7749c02f91864fe311ab6344e4f",
+        "weightSizeBytes": 2497280480,
+        "downloadBytesExcludingManifestAndTransport": 2497293931,
+        "weightVerification": "downloaded_size_and_sha256_verified",
+        "metadataNotes": [],
+        "verificationEvidence": "evidence/artifact-integrity-qwen3-4b-2026-09-27.json",
+        "reproducibleVerificationEvidence": "evidence/verified-artifacts-qwen3-4b-2026-09-27.json"
+      },
+      "capabilities": {
+        "advertised": [
+          "tools",
+          "thinking"
+        ],
+        "advertisedSource": "https://ollama.com/library/qwen3:4b",
+        "validatedInForger": [],
+        "structuredOutputsStatus": "not_tested",
+        "toolArgumentsStatus": "not_tested",
+        "cancellationStatus": "not_tested"
+      },
+      "evaluation": {
+        "modality": "text_only",
+        "measuredConfigurations": [
+          {
+            "evidence": "evidence/m1-qwen3-4b-compact-bug-2026-09-27.json",
+            "sha256": "5bfff504305bd09fa11c9376b25b431c840172eea20b8fe812c5d5821fc9a6c2",
+            "model": "qwen3:4b",
+            "modelDigest": "sha256:359d7dd4bcdab3d86b87d73ac27966f4dbb9f5efdfcc75d34a8764a09474fae7",
+            "agentProfile": "compact-v1",
+            "contextWindowRequested": 16384,
+            "attempted": 1,
+            "passed": 0,
+            "autonomousPassed": 0,
+            "status": "not_recommended_for_evaluated_tasks",
+            "limits": [
+              "Observed on this loaded M1/8GiB, with OS caches and other foreground work uncontrolled.",
+              "No model-wide quality rate is inferred; profiles/context and repeated attempts remain separate."
+            ],
+            "taskIds": [
+              "bug-01"
+            ],
+            "toolCallsObserved": 0
+          },
+          {
+            "evidence": "evidence/m1-qwen3-4b-context16384-2026-09-27.json",
+            "sha256": "96ab0c7d69b81670f6de4c05045c027af9d3548fc2b7aeb0c8e90657e68bf4e6",
+            "model": "qwen3:4b",
+            "modelDigest": "sha256:359d7dd4bcdab3d86b87d73ac27966f4dbb9f5efdfcc75d34a8764a09474fae7",
+            "agentProfile": "baseline-v1",
+            "contextWindowRequested": 16384,
+            "attempted": 5,
+            "passed": 0,
+            "autonomousPassed": 0,
+            "status": "not_recommended_for_evaluated_tasks",
+            "limits": [
+              "Observed on this loaded M1/8GiB, with OS caches and other foreground work uncontrolled.",
+              "No model-wide quality rate is inferred; profiles/context and repeated attempts remain separate."
+            ],
+            "taskIds": [
+              "template-01",
+              "crud-01",
+              "modify-01",
+              "bug-01",
+              "multi-01"
+            ],
+            "toolCallsObserved": 0
+          }
+        ],
+        "realModelRuns": 6,
+        "taskSuccessRate": null,
+        "peakMemoryBytes": null,
+        "tokensPerSecond": null,
+        "recommendedHardware": [],
+        "pending": [
+          "useful_forger_fixture_acceptance",
+          "isolated_agent_validation_feedback",
+          "restricted_external_file_reads",
+          "exact_retained_context",
+          "peak_unified_memory",
+          "process_egress_verification",
+          "validated_cloud_comparison"
+        ],
+        "nativeCalibrationEvidence": [
+          "evidence/calibration-qwen3-4b-cold-2026-09-27.json",
+          "evidence/calibration-qwen3-4b-warm-2026-09-27.json"
+        ],
+        "nativeCalibrationSummary": {
+          "sampleSize": 2,
+          "contextWindow": 2048,
+          "generationTokenLimit": 64,
+          "requestedAnswerProduced": 0,
+          "interpretation": "Both streams finish at the generation cap after thinking output only. These are not app-development tasks."
+        },
+        "taskSuccessRateReason": "See each measured configuration; different profiles, context and repeated tasks are not pooled into a model-quality rate.",
+        "scopeDecision": "No accepted app-development task; do not recommend this evaluated scope."
+      }
+    },
+    {
+      "id": "qwen3.5-2b-q8_0",
+      "name": "Qwen3.5 2B (Ollama Q8_0)",
+      "status": "experimental",
+      "runtime": "ollama",
+      "runtimeModel": "qwen3.5:2b",
+      "runtimeMinimumVersionDeclared": "0.17.1",
+      "runtimeCompatibility": "documented_package_not_tested",
+      "selectionRationale": "Another architecture and tool parser at a similar download scale; compare experimentally rather than infer quality from coding claims.",
+      "source": {
+        "publisher": "Qwen",
+        "repository": "https://huggingface.co/Qwen/Qwen3.5-2B",
+        "sourceRevision": null,
+        "sourceRevisionStatus": "exact_upstream_revision_used_by_ollama_not_attested",
+        "upstreamRevisionObserved": "15852e8c16360a2fea060d615a32b45270f8a8fc",
+        "upstreamMetadataUrl": "https://huggingface.co/api/models/Qwen/Qwen3.5-2B/revision/main",
+        "distributor": "Ollama library",
+        "packageUrl": "https://ollama.com/library/qwen3.5:2b"
+      },
+      "license": {
+        "spdx": "Apache-2.0",
+        "url": "https://huggingface.co/Qwen/Qwen3.5-2B/blob/15852e8c16360a2fea060d615a32b45270f8a8fc/LICENSE",
+        "modelClassification": "open_weights",
+        "openSourceAiAssessment": "not_established",
+        "redistributionState": "not_packaged",
+        "requiredRedistributionReview": "Preserve license, attribution and applicable NOTICE material; mark modifications; review the exact distributed artifact."
+      },
+      "artifact": {
+        "format": "GGUF",
+        "quantization": "Q8_0",
+        "manifestUrl": "https://registry.ollama.ai/v2/library/qwen3.5/manifests/2b",
+        "manifestDigest": "sha256:324d162be6ca5629ae4517c8710434d0bd2d665bc94dbad46e9af8fbf8a2f0df",
+        "manifestSizeBytes": 709,
+        "manifestVerification": "sha256_computed_from_fetched_manifest",
+        "configDigest": "sha256:ee043a99abe5e8317272712ed08ee2993af1f7930d69aefa3eba562cdc2822bd",
+        "configUrl": "https://registry.ollama.ai/v2/library/qwen3.5/blobs/sha256:ee043a99abe5e8317272712ed08ee2993af1f7930d69aefa3eba562cdc2822bd",
+        "weightDigest": "sha256:b709d81508a078a686961de6ca07a953b895d9b286c46e17f00fb267f4f2d297",
+        "weightSizeBytes": 2741180928,
+        "downloadBytesExcludingManifestAndTransport": 2741192820,
+        "weightVerification": "registry_declaration_only_not_downloaded",
+        "metadataNotes": [
+          "Registry config declares renderer and parser qwen3.5 and requires 0.17.1. Vision is advertised but excluded from the initial text-only experiment."
+        ]
+      },
+      "capabilities": {
+        "advertised": [
+          "tools",
+          "thinking",
+          "vision"
+        ],
+        "advertisedSource": "https://ollama.com/library/qwen3.5:2b",
+        "validatedInForger": [],
+        "structuredOutputsStatus": "not_tested",
+        "toolArgumentsStatus": "not_tested",
+        "cancellationStatus": "not_tested"
+      },
+      "evaluation": {
+        "modality": "text_only",
+        "measuredConfigurations": [],
+        "realModelRuns": 0,
+        "taskSuccessRate": null,
+        "peakMemoryBytes": null,
+        "tokensPerSecond": null,
+        "recommendedHardware": [],
+        "pending": [
+          "capability_probe",
+          "forger_fixture_acceptance",
+          "m1_8gb_memory_and_latency",
+          "process_egress_verification"
+        ]
+      }
+    },
+    {
+      "id": "qwen3-0.6b-q4_k_m",
+      "name": "Qwen3 0.6B (Ollama Q4_K_M)",
+      "status": "experimental",
+      "runtime": "ollama",
+      "runtimeModel": "qwen3:0.6b",
+      "runtimeMinimumVersionDeclared": null,
+      "runtimeCompatibility": "real_agent_execution_measured_no_successful_tasks",
+      "selectionRationale": "Explicit user-selected smaller candidate for a controlled direct versus staged-context experiment. No useful task result or hardware recommendation is inferred from parameter count.",
+      "source": {
+        "publisher": "Qwen",
+        "repository": "https://huggingface.co/Qwen/Qwen3-0.6B",
+        "sourceRevision": null,
+        "sourceRevisionStatus": "exact_upstream_revision_used_by_ollama_not_attested",
+        "upstreamRevisionObserved": "c1899de289a04d12100db370d81485cdf75e47ca",
+        "upstreamMetadataUrl": "https://huggingface.co/api/models/Qwen/Qwen3-0.6B/revision/main",
+        "distributor": "Ollama library",
+        "packageUrl": "https://ollama.com/library/qwen3:0.6b"
+      },
+      "license": {
+        "spdx": "Apache-2.0",
+        "url": "https://huggingface.co/Qwen/Qwen3-0.6B/blob/c1899de289a04d12100db370d81485cdf75e47ca/LICENSE",
+        "modelClassification": "open_weights",
+        "openSourceAiAssessment": "not_established",
+        "redistributionState": "not_packaged",
+        "requiredRedistributionReview": "Preserve license, attribution and applicable NOTICE material; mark modifications; review the exact distributed artifact."
+      },
+      "artifact": {
+        "format": "GGUF",
+        "quantization": "Q4_K_M",
+        "manifestUrl": "https://registry.ollama.ai/v2/library/qwen3/manifests/0.6b",
+        "manifestDigest": "sha256:7df6b6e09427a769808717c0a93cadc4ae99ed4eb8bf5ca557c90846becea435",
+        "manifestSizeBytes": 858,
+        "manifestVerification": "sha256_computed_from_fetched_manifest",
+        "configDigest": "sha256:b0830f4ff6a0220cfd995455206353b0ed23c0aee865218b154b7a75087b4e55",
+        "configUrl": "https://registry.ollama.ai/v2/library/qwen3/blobs/sha256:b0830f4ff6a0220cfd995455206353b0ed23c0aee865218b154b7a75087b4e55",
+        "weightDigest": "sha256:7f4030143c1c477224c5434f8272c662a8b042079a0a584f0a27a1684fe2e1fa",
+        "weightSizeBytes": 522640096,
+        "downloadBytesExcludingManifestAndTransport": 522653767,
+        "weightVerification": "downloaded_size_and_sha256_verified",
+        "metadataNotes": [
+          "Package name is qwen3:0.6b; registry model_type reports 751.63M. Neither name nor download bytes determine total runtime memory."
+        ],
+        "registryEvidence": "evidence/qwen3-0.6b-registry-2026-09-27.json",
+        "reproducibleVerificationEvidence": "evidence/verified-artifacts-qwen3-0.6b-2026-09-27.json"
+      },
+      "capabilities": {
+        "advertised": [
+          "tools",
+          "thinking"
+        ],
+        "advertisedSource": "https://ollama.com/library/qwen3:0.6b",
+        "validatedInForger": [],
+        "structuredOutputsStatus": "schema_valid_in_12_native_preparation_calls_semantic_accuracy_not_validated",
+        "toolArgumentsStatus": "not_tested",
+        "cancellationStatus": "not_tested"
+      },
+      "evaluation": {
+        "modality": "text_only",
+        "measuredConfigurations": [
+          {
+            "evidence": "evidence/m1-qwen06-direct-2026-09-27.json",
+            "sha256": "7e44ad6fbf53abf40e37a793b58aa2fa3dac2420e95cd589ce423522e83daf5e",
+            "experiment": "v1",
+            "contextStrategy": "direct-v1",
+            "agentProfile": "compact-v1",
+            "contextWindowRequested": 16384,
+            "attempted": 3,
+            "passed": 0,
+            "taskIds": [
+              "bug-01"
+            ],
+            "toolCallsObserved": 0,
+            "limitations": [
+              "Three repeats of one task, not three independent tasks.",
+              "Schema-valid preparation is not semantic correctness or useful app development.",
+              "Source fingerprints differ across experiments; comparisons are paired only within each experiment."
+            ]
+          },
+          {
+            "evidence": "evidence/m1-qwen06-staged-2026-09-27.json",
+            "sha256": "36cecb96bab05616918c035d8902693df2923455555d7e4a5ef0fbcb0e7edc90",
+            "experiment": "v1",
+            "contextStrategy": "staged-v1",
+            "agentProfile": "compact-v1",
+            "contextWindowRequested": 16384,
+            "attempted": 3,
+            "passed": 0,
+            "taskIds": [
+              "bug-01"
+            ],
+            "toolCallsObserved": 0,
+            "limitations": [
+              "Three repeats of one task, not three independent tasks.",
+              "Schema-valid preparation is not semantic correctness or useful app development.",
+              "Source fingerprints differ across experiments; comparisons are paired only within each experiment."
+            ]
+          },
+          {
+            "evidence": "evidence/m1-qwen06-v2-direct-2026-09-27.json",
+            "sha256": "48ed015563c05c1ae4cddce884e88bc30a1578b7a757ab5628c350e5c900f9d9",
+            "experiment": "v2",
+            "contextStrategy": "direct-v1",
+            "agentProfile": "compact-v1",
+            "contextWindowRequested": 16384,
+            "attempted": 3,
+            "passed": 0,
+            "taskIds": [
+              "bug-01"
+            ],
+            "toolCallsObserved": 0,
+            "limitations": [
+              "Three repeats of one task, not three independent tasks.",
+              "Schema-valid preparation is not semantic correctness or useful app development.",
+              "Source fingerprints differ across experiments; comparisons are paired only within each experiment."
+            ]
+          },
+          {
+            "evidence": "evidence/m1-qwen06-v2-staged-2026-09-27.json",
+            "sha256": "fc312f55f3badcae33656e74593065cd1e5f2c4b47fa2bbcd99b7f72fdeb7966",
+            "experiment": "v2",
+            "contextStrategy": "staged-request-v2",
+            "agentProfile": "compact-v1",
+            "contextWindowRequested": 16384,
+            "attempted": 3,
+            "passed": 0,
+            "taskIds": [
+              "bug-01"
+            ],
+            "toolCallsObserved": 0,
+            "limitations": [
+              "Three repeats of one task, not three independent tasks.",
+              "Schema-valid preparation is not semantic correctness or useful app development.",
+              "Source fingerprints differ across experiments; comparisons are paired only within each experiment."
+            ]
+          }
+        ],
+        "realModelRuns": 12,
+        "taskSuccessRate": null,
+        "peakMemoryBytes": null,
+        "tokensPerSecond": null,
+        "recommendedHardware": [],
+        "pending": [
+          "useful_forger_fixture_acceptance",
+          "held_out_and_broader_task_evidence",
+          "strict_privacy_boundaries"
+        ],
+        "scopeDecision": "Two completed experiments on one repeated bug: each direct/prepared arm passes 0/3; v2 identifies the general goal but still selects unrelated files and produces no tools/edits. No development recommendation.",
+        "analysisEvidence": "evidence/qwen06-analysis-2026-09-27.json"
+      }
+    }
+  ]
+}

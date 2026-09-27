@@ -269,9 +269,17 @@ export class WhatsAppConnectionManager {
     if (!socket?.sendMessage) {
       return { success: false, userMessage: 'La conexión de WhatsApp no está lista para enviar.', technicalCode: 'whatsapp_send_unavailable', data: { deliveryState: 'not_sent', retryable: true } };
     }
-    const quoted = decodeStableMessageRef(input.replyToMessageRef);
+    const recentReply = input.replyToMessageId
+      ? (await this.store.readMessages({ chatId, limit: 500 })).find((message) => message.stableMessageRef.id === input.replyToMessageId)?.stableMessageRef
+      : undefined;
+    const quoted = decodeStableMessageRef(input.replyToMessageRef) ?? recentReply;
+    if (quoted && quoted.remoteJid !== chatId) throw new Error('whatsapp_reply_chat_mismatch');
     const finishSend = this.trackPendingSend(chatId);
     try {
+      // No asynchronous preparation follows this check: revocation must win up to the socket boundary.
+      if (context.authorizeWhatsAppSend && !await context.authorizeWhatsAppSend()) {
+        return { success: false, technicalCode: 'whatsapp_send_authorization_revoked', data: { deliveryState: 'not_sent', retryable: false } };
+      }
       const sent = await socket.sendMessage(
         chatId,
         { text },
@@ -306,6 +314,7 @@ export class WhatsAppConnectionManager {
       return {
         chat,
         type: 'group',
+        selfIds: this.authenticatedSelfIds(),
         metadata: await normalizeGroupMetadata(metadata, async (id) => (await this.store.getChat(id))?.title, (id) => this.resolveIdentityIds(id)),
       };
     }
@@ -522,9 +531,21 @@ export class WhatsAppConnectionManager {
     if (pending?.size) await Promise.all([...pending]);
   }
 
+  private authenticatedSelfIds(): string[] {
+    return [this.socket?.user?.id, this.socket?.user?.lid]
+      .filter((id): id is string => typeof id === 'string')
+      .map(normalizeWhatsAppUserJid)
+      .filter((id) => /^\d+@(s\.whatsapp\.net|lid)$/.test(id));
+  }
+
   private toLiveMessage(message: WhatsAppIndexedMessage): WhatsAppIndexedMessage {
+    const selfIds = this.authenticatedSelfIds();
+    const claimedSender = message.senderId ? normalizeWhatsAppUserJid(message.senderId) : undefined;
+    const verifiedSender = claimedSender && /^\d+@(s\.whatsapp\.net|lid)$/.test(claimedSender) ? claimedSender : undefined;
+    const ownSender = claimedSender ? (selfIds.includes(claimedSender) ? claimedSender : undefined) : selfIds[0];
     return {
       ...message,
+      senderId: message.fromMe ? ownSender : verifiedSender,
       attachments: message.attachments.map((attachment) => ({
         attachmentId: attachment.attachmentId,
         stableMessageRef: attachment.stableMessageRef,

@@ -235,3 +235,21 @@ test('Given the built-in connection adapter, when accounts are configured, check
     Object.assign(gmailToolModule, originals);
   }
 });
+
+test('WhatsApp connection adapters carry only host authorization and await the configured live message handler', async (t) => {
+  const { whatsappToolModule } = require('../../dist-electron/main/connections/modules/whatsapp/index.js');
+  const whatsapp = BUILT_IN_CONNECTION_MODULES.find(({ definition }) => definition.type === 'whatsapp');
+  const authorize = async () => true;
+  const message = { id: 'live-message' };
+  let toolContext;
+  t.mock.method(whatsappToolModule, 'execute', async (_input, context) => { toolContext = context; return { success: true }; });
+  const context = createContext([{ id: 'account', type: 'whatsapp', status: 'connected' }]);
+  context.authorizeWhatsAppSend = authorize;
+  await whatsapp.execute(context, { type: 'whatsapp', actionId: 'whatsapp.send_message', connectionId: 'account' });
+  assert.equal(toolContext.authorizeWhatsAppSend, authorize);
+  assert.equal(await toolContext.onWhatsAppMessage(message), undefined);
+  const received = [];
+  context.onWhatsAppMessage = async value => { received.push(value); return true; };
+  assert.equal(await toolContext.onWhatsAppMessage(message), true);
+  assert.deepEqual(received, [{ ...message, connectionId: 'account' }]);
+});

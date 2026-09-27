@@ -1,0 +1,458 @@
+{
+  "schemaVersion": 1,
+  "protocol": "forger-evaluator-controls-v1",
+  "evidenceClass": "evaluator_control",
+  "modelUsed": false,
+  "startedAt": "2026-09-27T00:18:38.058Z",
+  "state": "failed",
+  "evaluatorImage": "sha256:7f742e0385790c560e96d5d554d6bc29819e9b8ba860f0a19bbf879d58309f99",
+  "forgerRevision": "7fa965edc9408211d8f4336bb0ed0a4f30a88102",
+  "harnessHash": "7fbc413e0f90d16de1c755ac8d6d431e5fc9ee544b3f486b8e017ef061fa896d",
+  "acceptanceHash": "a75d3be687b67c6219ad9dfd89f94d76029678ad419fa158c366943f7dc7dde5",
+  "skeletonHash": "637afda2b28fb27c89367381ba58263d13ee36938ea2b33ccb5203708bad44e3",
+  "controls": [
+    {
+      "taskId": "template-01",
+      "taskHash": "435cca0cc22e91483e4e30deda89a2c0aea50556423a95b2134499106d9837ca",
+      "kind": "reference",
+      "startedAt": "2026-09-27T00:18:38.282Z",
+      "status": "failed",
+      "initialStateHash": "637afda2b28fb27c89367381ba58263d13ee36938ea2b33ccb5203708bad44e3",
+      "reference": {
+        "taskId": "template-01",
+        "changedFiles": [
+          "backend/src/app/desk.py",
+          "backend/src/app/main.py",
+          "backend/tests/test_reference_desk.py",
+          "frontend/src/features/dashboard/DashboardView.tsx"
+        ],
+        "addedTests": [
+          "backend/tests/test_reference_desk.py"
+        ],
+        "referenceHash": "4cbac3f0e4d054309eb62ef680d8e317e1addae60fa03e39ab4ecd0982405dc9",
+        "stateHash": "6b458f562f4c1fdef7b6e1754ef05d6985f681816cf2d03dd2ebb91629fc4286"
+      },
+      "evaluation": {
+        "schemaVersion": 1,
+        "evaluatorVersion": "0.1.0",
+        "taskId": "template-01",
+        "passed": false,
+        "checks": [
+          {
+            "name": "backend_compile",
+            "passed": true,
+            "completedCheckGroups": 1,
+            "elapsedMs": 151
+          },
+          {
+            "name": "frontend_build",
+            "passed": true,
+            "completedCheckGroups": 1,
+            "elapsedMs": 6169
+          },
+          {
+            "name": "backend_regression",
+            "passed": false,
+            "completedCheckGroups": 0,
+            "error": "python exited 1: ============================= test session starts ==============================\nplatform linux -- Python 3.12.14, pytest-9.1.1, pluggy-1.6.0\nrootdir: /work/app/backend\nconfigfile: pyproject.toml\ntestpaths: tests\nplugins: asyncio-1.4.0, anyio-4.15.1, cov-7.1.0\nasyncio: mode=Mode.AUTO, debug=False, asyncio_default_fixture_loop_scope=None, asyncio_default_test_loop_scope=function\ncollected 12 items\n\ntests/test_reference_desk.py .                                           [  8%]\ntests/test_stack_contract.py .....F..F..                                 [100%]\n\n=================================== FAILURES ===================================\n______________________ test_realtime_router_is_registered ______________________\n\nskeleton_app = <fastapi.applications.FastAPI object at 0xfb05754bf5f0>\n\n    def test_realtime_router_is_registered(skeleton_app: object) -> None:\n        websocket_paths = [\n            route.path\n            for route in skeleton_app.routes  # type: ignore[attr-defined]\n            if getattr(route, \"path\", None)\n        ]\n    \n>       assert \"/api/realtime/ws\" in websocket_paths\nE       AssertionError: assert '/api/realtime/ws' in ['/api/openapi.json', '/api/docs', '/docs/oauth2-redirect', '/api/redoc']\n\ntests/test_stack_contract.py:139: AssertionError\n_________ test_forger_desktop_helpers_pass_workspace_and_folder_grants _________\n\nmonkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0xfb0575173710>\n\n    def test_forger_desktop_helpers_pass_workspace_and_folder_grants(\n        monkeypatch: pytest.MonkeyPatch,\n    ) -> None:\n        from app import forger_desktop\n    \n        calls: list[tuple[str, str, dict | None]] = []\n    \n        def fake_request(method: str, path: str, body: dict | None, **_kwargs: object):\n            calls.append((method, path, body))\n            return {\"desktop_thread_id\": \"thread_1\", \"desktop_run_id\": \"run_1\", \"runId\": \"task_1\"}\n    \n        monkeypatch.setattr(forger_desktop, \"_request\", fake_request)\n        workspace = {\n            \"cwdGrantId\": \"workspace_1\",\n            \"additionalFolderGrantIds\": [\"workspace_2\"],\n        }\n    \n        forger_desktop.start_agent_task(\n            template_id=\"review\",\n            workspace_path=\"/tmp/app\",\n            workspace=workspace,\n        )\n        forger_desktop.start_manifest_agent_thread(\n            agent_id=\"advisor\",\n            workspace_path=\"/tmp/app\",\n            workspace=workspace,\n        )\n        forger_desktop.resume_manifest_agent_thread(\n            desktop_thread_id=\"thread_1\",\n            workspace_path=\"/tmp/app\",\n            workspace=workspace,\n        )\n        forger_desktop.steer_manifest_agent_run(\n            desktop_thread_id=\"thread_1\",\n            desktop_run_id=\"run_1\",\n            workspace_path=\"/tmp/app\",\n            workspace=workspace,\n        )\n        forger_desktop.request_folder_grant(grant_token=\"grant-token\")\n        forger_desktop.list_folder_grants()\n        forger_desktop.revoke_folder_grant(\"grant/id\")\n        forger_desktop.list_connections()\n        forger_desktop.connection_status(\"gmail\")\n        forger_desktop.get_connection_status(\"gmail\")\n        forger_desktop.configure_connection(\"gmail\", label=\"Personal Gmail\", connection_id=\"gmail-default\")\n        forger_desktop.request_connection_grant(\n            \"gmail\",\n            reason=\"Use Gmail from the app\",\n            connection_ids=[\"gmail-default\"],\n        )\n        forger_desktop.call_connection_action(\n            \"gmail\",\n            \"gmail.search_messages\",\n            {\"query\": \"from:example@example.com\"},\n            connection_id=\"gmail-default\",\n        )\n    \n>       assert calls[0] == (\n            \"POST\",\n            \"/agent-tasks\",\n            {\n                \"templateId\": \"review\",\n                \"locale\": None,\n                \"arguments\": None,\n                \"variables\": None,\n                \"attachments\": None,\n                \"runtime\": None,\n                \"workspacePath\": \"/tmp/app\",\n                \"workspace\": workspace,\n            },\n        )\nE       AssertionError: assert ('POST', '/ag...': None, ...}) == ('POST', '/ag...': None, ...})\nE         \nE         At index 2 diff: {'templateId': 'review', 'locale': None, 'arguments': None, 'variables': None, 'attachments': None, 'workspacePath': '/tmp/app', 'workspace': {'cwdGrantId': 'workspace_1', 'additionalFolderGrantIds': ['workspace_2']}} != {'templateId': 'review', 'locale': None, 'arguments': None, 'variables': None, 'attachments': None, 'runtime': None, 'workspacePath': '/tmp/app', 'workspace': {'cwdGrantId': 'workspace_1', 'additionalFolderGrantIds': ['workspace_2']}}\nE         Use -v to get more diff\n\ntests/test_stack_contract.py:238: AssertionError\n=============================== warnings summary ===============================\n../../../opt/venv/lib/python3.12/site-packages/fastapi/testclient.py:1\n  /opt/venv/lib/python3.12/site-packages/fastapi/testclient.py:1: StarletteDeprecationWarning: Using `httpx` with `starlette.testclient` is deprecated; install `httpx2` instead.\n    from starlette.testclient import TestClient as TestClient  # noqa\n\ntests/test_stack_contract.py::test_health_endpoint_validates_backend_and_database\n  /opt/venv/lib/python3.12/site-packages/sqlmodel/main.py:718: SAWarning: This declarative base already contains a class with the same class name and module name as app.background_jobs.BackgroundJob, and will be replaced in the string-lookup table.\n    DeclarativeMeta.__init__(cls, classname, bases, dict_, **kw)\n\ntests/test_stack_contract.py::test_health_endpoint_validates_backend_and_database\n  /opt/venv/lib/python3.12/site-packages/sqlmodel/main.py:718: SAWarning: This declarative base already contains a class with the same class name and module name as app.models.AppSetting, and will be replaced in the string-lookup table.\n    DeclarativeMeta.__init__(cls, classname, bases, dict_, **kw)\n\n-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html\n================================ tests coverage ================================\n_______________ coverage: platform linux, python 3.12.14-final-0 _______________\n\nName    Stmts   Miss Branch BrPart  Cover   Missing\n---------------------------------------------------\nTOTAL      71      0      2      0   100%\n\n6 files skipped due to complete coverage.\nRequired test coverage of 100% reached. Total coverage: 100.00%\n=========================== short test summary info ============================\nFAILED tests/test_stack_contract.py::test_realtime_router_is_registered - Ass...\nFAILED tests/test_stack_contract.py::test_forger_desktop_helpers_pass_workspace_and_folder_grants\n=================== 2 failed, 10 passed, 3 warnings in 1.80s ===================\n",
+            "elapsedMs": 2821
+          }
+        ],
+        "runtime": {
+          "node": "v24.21.0",
+          "pythonDependencies": "agent-detector==2.0.0\nannotated-doc==0.0.5\nannotated-types==0.8.0\nanyio==4.15.1\ncertifi==2026.7.22\nclick==8.5.0\ncoverage==7.16.1\ndetect-installer==0.2.1\ndnspython==2.8.0\nemail-validator==2.3.0\nfastapi==0.141.1\nfastapi-cli==0.0.32\nfastapi-cloud-cli==0.26.0\nfastar==0.12.0\ngreenlet==3.5.6\nh11==0.16.0\nhttpcore==1.0.9\nhttptools==0.8.0\nhttpx==0.28.1\nidna==3.20\niniconfig==2.3.0\nJinja2==3.1.6\nmarkdown-it-py==4.2.0\nMarkupSafe==3.0.3\nmdurl==0.1.2\npackaging==26.3\npluggy==1.6.0\npydantic==2.13.5\npydantic-extra-types==2.11.1\npydantic-settings==2.15.0\npydantic_core==2.46.5\nPygments==2.21.0\npytest==9.1.1\npytest-asyncio==1.4.0\npytest-cov==7.1.0\npython-dotenv==1.2.3\npython-multipart==0.0.32\nPyYAML==6.0.3\nrich==15.0.0\nrich-toolkit==0.20.5\nrignore==0.8.1\nruff==0.16.9\nsentry-sdk==2.70.0\nshellingham==1.5.4\nskeleton @ file:///opt/backend\nSQLAlchemy==2.0.54\nsqlmodel==0.0.47\nstarlette==1.7.0\ntyper==0.27.2\ntyping-inspection==0.4.4\ntyping_extensions==4.16.0\nurllib3==2.8.0\nuvicorn==0.54.0\nuvloop==0.22.1\nwatchfiles==1.3.0\nwebsockets==17.1\n",
+          "frontendDependencies": {
+            "version": "0.1.0",
+            "name": "skeleton-frontend",
+            "dependencies": {
+              "@eslint/js": {
+                "version": "9.39.5",
+                "resolved": "https://registry.npmjs.org/@eslint/js/-/js-9.39.5.tgz",
+                "overridden": false
+              },
+              "@radix-ui/react-dialog": {
+                "version": "1.1.23",
+                "resolved": "https://registry.npmjs.org/@radix-ui/react-dialog/-/react-dialog-1.1.23.tgz",
+                "overridden": false
+              },
+              "@radix-ui/react-dropdown-menu": {
+                "version": "2.1.24",
+                "resolved": "https://registry.npmjs.org/@radix-ui/react-dropdown-menu/-/react-dropdown-menu-2.1.24.tgz",
+                "overridden": false
+              },
+              "@radix-ui/react-label": {
+                "version": "2.1.15",
+                "resolved": "https://registry.npmjs.org/@radix-ui/react-label/-/react-label-2.1.15.tgz",
+                "overridden": false
+              },
+              "@radix-ui/react-select": {
+                "version": "2.3.7",
+                "resolved": "https://registry.npmjs.org/@radix-ui/react-select/-/react-select-2.3.7.tgz",
+                "overridden": false
+              },
+              "@radix-ui/react-separator": {
+                "version": "1.1.15",
+                "resolved": "https://registry.npmjs.org/@radix-ui/react-separator/-/react-separator-1.1.15.tgz",
+                "overridden": false
+              },
+              "@radix-ui/react-slot": {
+                "version": "1.3.3",
+                "resolved": "https://registry.npmjs.org/@radix-ui/react-slot/-/react-slot-1.3.3.tgz",
+                "overridden": false
+              },
+              "@shadcn/react": {
+                "version": "0.2.1",
+                "resolved": "https://registry.npmjs.org/@shadcn/react/-/react-0.2.1.tgz",
+                "overridden": false
+              },
+              "@tailwindcss/vite": {
+                "version": "4.3.3",
+                "resolved": "https://registry.npmjs.org/@tailwindcss/vite/-/vite-4.3.3.tgz",
+                "overridden": false
+              },
+              "@tanstack/react-query": {
+                "version": "5.104.0",
+                "resolved": "https://registry.npmjs.org/@tanstack/react-query/-/react-query-5.104.0.tgz",
+                "overridden": false
+              },
+              "@tanstack/react-router": {
+                "version": "1.170.39",
+                "resolved": "https://registry.npmjs.org/@tanstack/react-router/-/react-router-1.170.39.tgz",
+                "overridden": false
+              },
+              "@types/node": {
+                "version": "22.20.4",
+                "resolved": "https://registry.npmjs.org/@types/node/-/node-22.20.4.tgz",
+                "overridden": false
+              },
+              "@types/react-dom": {
+                "version": "19.3.0",
+                "resolved": "https://registry.npmjs.org/@types/react-dom/-/react-dom-19.3.0.tgz",
+                "overridden": false
+              },
+              "@types/react": {
+                "version": "19.3.0",
+                "resolved": "https://registry.npmjs.org/@types/react/-/react-19.3.0.tgz",
+                "overridden": false
+              },
+              "@vitejs/plugin-react": {
+                "version": "4.7.0",
+                "resolved": "https://registry.npmjs.org/@vitejs/plugin-react/-/plugin-react-4.7.0.tgz",
+                "overridden": false
+              },
+              "@vitest/coverage-v8": {
+                "version": "2.1.9",
+                "resolved": "https://registry.npmjs.org/@vitest/coverage-v8/-/coverage-v8-2.1.9.tgz",
+                "overridden": false
+              },
+              "class-variance-authority": {
+                "version": "0.7.1",
+                "resolved": "https://registry.npmjs.org/class-variance-authority/-/class-variance-authority-0.7.1.tgz",
+                "overridden": false
+              },
+              "clsx": {
+                "version": "2.1.1",
+                "resolved": "https://registry.npmjs.org/clsx/-/clsx-2.1.1.tgz",
+                "overridden": false
+              },
+              "eslint-plugin-react-hooks": {
+                "version": "5.2.0",
+                "resolved": "https://registry.npmjs.org/eslint-plugin-react-hooks/-/eslint-plugin-react-hooks-5.2.0.tgz",
+                "overridden": false
+              },
+              "eslint-plugin-react-refresh": {
+                "version": "0.4.26",
+                "resolved": "https://registry.npmjs.org/eslint-plugin-react-refresh/-/eslint-plugin-react-refresh-0.4.26.tgz",
+                "overridden": false
+              },
+              "eslint": {
+                "version": "9.39.5",
+                "resolved": "https://registry.npmjs.org/eslint/-/eslint-9.39.5.tgz",
+                "overridden": false
+              },
+              "globals": {
+                "version": "15.15.0",
+                "resolved": "https://registry.npmjs.org/globals/-/globals-15.15.0.tgz",
+                "overridden": false
+              },
+              "lucide-react": {
+                "version": "0.468.0",
+                "resolved": "https://registry.npmjs.org/lucide-react/-/lucide-react-0.468.0.tgz",
+                "overridden": false
+              },
+              "react-dom": {
+                "version": "19.3.0",
+                "resolved": "https://registry.npmjs.org/react-dom/-/react-dom-19.3.0.tgz",
+                "overridden": false
+              },
+              "react": {
+                "version": "19.3.0",
+                "resolved": "https://registry.npmjs.org/react/-/react-19.3.0.tgz",
+                "overridden": false
+              },
+              "tailwind-merge": {
+                "version": "2.6.1",
+                "resolved": "https://registry.npmjs.org/tailwind-merge/-/tailwind-merge-2.6.1.tgz",
+                "overridden": false
+              },
+              "tailwindcss": {
+                "version": "4.3.3",
+                "resolved": "https://registry.npmjs.org/tailwindcss/-/tailwindcss-4.3.3.tgz",
+                "overridden": false
+              },
+              "typescript-eslint": {
+                "version": "8.70.1",
+                "resolved": "https://registry.npmjs.org/typescript-eslint/-/typescript-eslint-8.70.1.tgz",
+                "overridden": false
+              },
+              "typescript": {
+                "version": "5.9.3",
+                "resolved": "https://registry.npmjs.org/typescript/-/typescript-5.9.3.tgz",
+                "overridden": false
+              },
+              "vite": {
+                "version": "5.4.21",
+                "resolved": "https://registry.npmjs.org/vite/-/vite-5.4.21.tgz",
+                "overridden": false
+              },
+              "vitest": {
+                "version": "2.1.9",
+                "resolved": "https://registry.npmjs.org/vitest/-/vitest-2.1.9.tgz",
+                "overridden": false
+              }
+            }
+          }
+        },
+        "externalRequests": [],
+        "error": "python exited 1: ============================= test session starts ==============================\nplatform linux -- Python 3.12.14, pytest-9.1.1, pluggy-1.6.0\nrootdir: /work/app/backend\nconfigfile: pyproject.toml\ntestpaths: tests\nplugins: asyncio-1.4.0, anyio-4.15.1, cov-7.1.0\nasyncio: mode=Mode.AUTO, debug=False, asyncio_default_fixture_loop_scope=None, asyncio_default_test_loop_scope=function\ncollected 12 items\n\ntests/test_reference_desk.py .                                           [  8%]\ntests/test_stack_contract.py .....F..F..                                 [100%]\n\n=================================== FAILURES ===================================\n______________________ test_realtime_router_is_registered ______________________\n\nskeleton_app = <fastapi.applications.FastAPI object at 0xfb05754bf5f0>\n\n    def test_realtime_router_is_registered(skeleton_app: object) -> None:\n        websocket_paths = [\n            route.path\n            for route in skeleton_app.routes  # type: ignore[attr-defined]\n            if getattr(route, \"path\", None)\n        ]\n    \n>       assert \"/api/realtime/ws\" in websocket_paths\nE       AssertionError: assert '/api/realtime/ws' in ['/api/openapi.json', '/api/docs', '/docs/oauth2-redirect', '/api/redoc']\n\ntests/test_stack_contract.py:139: AssertionError\n_________ test_forger_desktop_helpers_pass_workspace_and_folder_grants _________\n\nmonkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0xfb0575173710>\n\n    def test_forger_desktop_helpers_pass_workspace_and_folder_grants(\n        monkeypatch: pytest.MonkeyPatch,\n    ) -> None:\n        from app import forger_desktop\n    \n        calls: list[tuple[str, str, dict | None]] = []\n    \n        def fake_request(method: str, path: str, body: dict | None, **_kwargs: object):\n            calls.append((method, path, body))\n            return {\"desktop_thread_id\": \"thread_1\", \"desktop_run_id\": \"run_1\", \"runId\": \"task_1\"}\n    \n        monkeypatch.setattr(forger_desktop, \"_request\", fake_request)\n        workspace = {\n            \"cwdGrantId\": \"workspace_1\",\n            \"additionalFolderGrantIds\": [\"workspace_2\"],\n        }\n    \n        forger_desktop.start_agent_task(\n            template_id=\"review\",\n            workspace_path=\"/tmp/app\",\n            workspace=workspace,\n        )\n        forger_desktop.start_manifest_agent_thread(\n            agent_id=\"advisor\",\n            workspace_path=\"/tmp/app\",\n            workspace=workspace,\n        )\n        forger_desktop.resume_manifest_agent_thread(\n            desktop_thread_id=\"thread_1\",\n            workspace_path=\"/tmp/app\",\n            workspace=workspace,\n        )\n        forger_desktop.steer_manifest_agent_run(\n            desktop_thread_id=\"thread_1\",\n            desktop_run_id=\"run_1\",\n            workspace_path=\"/tmp/app\",\n            workspace=workspace,\n        )\n        forger_desktop.request_folder_grant(grant_token=\"grant-token\")\n        forger_desktop.list_folder_grants()\n        forger_desktop.revoke_folder_grant(\"grant/id\")\n        forger_desktop.list_connections()\n        forger_desktop.connection_status(\"gmail\")\n        forger_desktop.get_connection_status(\"gmail\")\n        forger_desktop.configure_connection(\"gmail\", label=\"Personal Gmail\", connection_id=\"gmail-default\")\n        forger_desktop.request_connection_grant(\n            \"gmail\",\n            reason=\"Use Gmail from the app\",\n            connection_ids=[\"gmail-default\"],\n        )\n        forger_desktop.call_connection_action(\n            \"gmail\",\n            \"gmail.search_messages\",\n            {\"query\": \"from:example@example.com\"},\n            connection_id=\"gmail-default\",\n        )\n    \n>       assert calls[0] == (\n            \"POST\",\n            \"/agent-tasks\",\n            {\n                \"templateId\": \"review\",\n                \"locale\": None,\n                \"arguments\": None,\n                \"variables\": None,\n                \"attachments\": None,\n                \"runtime\": None,\n                \"workspacePath\": \"/tmp/app\",\n                \"workspace\": workspace,\n            },\n        )\nE       AssertionError: assert ('POST', '/ag...': None, ...}) == ('POST', '/ag...': None, ...})\nE         \nE         At index 2 diff: {'templateId': 'review', 'locale': None, 'arguments': None, 'variables': None, 'attachments': None, 'workspacePath': '/tmp/app', 'workspace': {'cwdGrantId': 'workspace_1', 'additionalFolderGrantIds': ['workspace_2']}} != {'templateId': 'review', 'locale': None, 'arguments': None, 'variables': None, 'attachments': None, 'runtime': None, 'workspacePath': '/tmp/app', 'workspace': {'cwdGrantId': 'workspace_1', 'additionalFolderGrantIds': ['workspace_2']}}\nE         Use -v to get more diff\n\ntests/test_stack_contract.py:238: AssertionError\n=============================== warnings summary ===============================\n../../../opt/venv/lib/python3.12/site-packages/fastapi/testclient.py:1\n  /opt/venv/lib/python3.12/site-packages/fastapi/testclient.py:1: StarletteDeprecationWarning: Using `httpx` with `starlette.testclient` is deprecated; install `httpx2` instead.\n    from starlette.testclient import TestClient as TestClient  # noqa\n\ntests/test_stack_contract.py::test_health_endpoint_validates_backend_and_database\n  /opt/venv/lib/python3.12/site-packages/sqlmodel/main.py:718: SAWarning: This declarative base already contains a class with the same class name and module name as app.background_jobs.BackgroundJob, and will be replaced in the string-lookup table.\n    DeclarativeMeta.__init__(cls, classname, bases, dict_, **kw)\n\ntests/test_stack_contract.py::test_health_endpoint_validates_backend_and_database\n  /opt/venv/lib/python3.12/site-packages/sqlmodel/main.py:718: SAWarning: This declarative base already contains a class with the same class name and module name as app.models.AppSetting, and will be replaced in the string-lookup table.\n    DeclarativeMeta.__init__(cls, classname, bases, dict_, **kw)\n\n-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html\n================================ tests coverage ================================\n_______________ coverage: platform linux, python 3.12.14-final-0 _______________\n\nName    Stmts   Miss Branch BrPart  Cover   Missing\n---------------------------------------------------\nTOTAL      71      0      2      0   100%\n\n6 files skipped due to complete coverage.\nRequired test coverage of 100% reached. Total coverage: 100.00%\n=========================== short test summary info ============================\nFAILED tests/test_stack_contract.py::test_realtime_router_is_registered - Ass...\nFAILED tests/test_stack_contract.py::test_forger_desktop_helpers_pass_workspace_and_folder_grants\n=================== 2 failed, 10 passed, 3 warnings in 1.80s ===================\n",
+        "timedOut": false,
+        "code": 1
+      },
+      "expectedApplicationStatus": "passed",
+      "reason": "reference_solution_or_evaluator_failed",
+      "finishedAt": "2026-09-27T00:18:48.142Z"
+    },
+    {
+      "taskId": "template-01",
+      "taskHash": "435cca0cc22e91483e4e30deda89a2c0aea50556423a95b2134499106d9837ca",
+      "kind": "initial",
+      "startedAt": "2026-09-27T00:18:48.150Z",
+      "status": "failed",
+      "initialStateHash": "637afda2b28fb27c89367381ba58263d13ee36938ea2b33ccb5203708bad44e3",
+      "evaluation": {
+        "schemaVersion": 1,
+        "evaluatorVersion": "0.1.0",
+        "taskId": "template-01",
+        "passed": false,
+        "checks": [
+          {
+            "name": "backend_compile",
+            "passed": true,
+            "completedCheckGroups": 1,
+            "elapsedMs": 133
+          },
+          {
+            "name": "frontend_build",
+            "passed": true,
+            "completedCheckGroups": 1,
+            "elapsedMs": 5675
+          },
+          {
+            "name": "backend_regression",
+            "passed": false,
+            "completedCheckGroups": 0,
+            "error": "python exited 1: ============================= test session starts ==============================\nplatform linux -- Python 3.12.14, pytest-9.1.1, pluggy-1.6.0\nrootdir: /work/app/backend\nconfigfile: pyproject.toml\ntestpaths: tests\nplugins: asyncio-1.4.0, anyio-4.15.1, cov-7.1.0\nasyncio: mode=Mode.AUTO, debug=False, asyncio_default_fixture_loop_scope=None, asyncio_default_test_loop_scope=function\ncollected 11 items\n\ntests/test_stack_contract.py .....F..F..                                 [100%]\n\n=================================== FAILURES ===================================\n______________________ test_realtime_router_is_registered ______________________\n\nskeleton_app = <fastapi.applications.FastAPI object at 0xf5c5796a4f50>\n\n    def test_realtime_router_is_registered(skeleton_app: object) -> None:\n        websocket_paths = [\n            route.path\n            for route in skeleton_app.routes  # type: ignore[attr-defined]\n            if getattr(route, \"path\", None)\n        ]\n    \n>       assert \"/api/realtime/ws\" in websocket_paths\nE       AssertionError: assert '/api/realtime/ws' in ['/api/openapi.json', '/api/docs', '/docs/oauth2-redirect', '/api/redoc']\n\ntests/test_stack_contract.py:139: AssertionError\n_________ test_forger_desktop_helpers_pass_workspace_and_folder_grants _________\n\nmonkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0xf5c579232900>\n\n    def test_forger_desktop_helpers_pass_workspace_and_folder_grants(\n        monkeypatch: pytest.MonkeyPatch,\n    ) -> None:\n        from app import forger_desktop\n    \n        calls: list[tuple[str, str, dict | None]] = []\n    \n        def fake_request(method: str, path: str, body: dict | None, **_kwargs: object):\n            calls.append((method, path, body))\n            return {\"desktop_thread_id\": \"thread_1\", \"desktop_run_id\": \"run_1\", \"runId\": \"task_1\"}\n    \n        monkeypatch.setattr(forger_desktop, \"_request\", fake_request)\n        workspace = {\n            \"cwdGrantId\": \"workspace_1\",\n            \"additionalFolderGrantIds\": [\"workspace_2\"],\n        }\n    \n        forger_desktop.start_agent_task(\n            template_id=\"review\",\n            workspace_path=\"/tmp/app\",\n            workspace=workspace,\n        )\n        forger_desktop.start_manifest_agent_thread(\n            agent_id=\"advisor\",\n            workspace_path=\"/tmp/app\",\n            workspace=workspace,\n        )\n        forger_desktop.resume_manifest_agent_thread(\n            desktop_thread_id=\"thread_1\",\n            workspace_path=\"/tmp/app\",\n            workspace=workspace,\n        )\n        forger_desktop.steer_manifest_agent_run(\n            desktop_thread_id=\"thread_1\",\n            desktop_run_id=\"run_1\",\n            workspace_path=\"/tmp/app\",\n            workspace=workspace,\n        )\n        forger_desktop.request_folder_grant(grant_token=\"grant-token\")\n        forger_desktop.list_folder_grants()\n        forger_desktop.revoke_folder_grant(\"grant/id\")\n        forger_desktop.list_connections()\n        forger_desktop.connection_status(\"gmail\")\n        forger_desktop.get_connection_status(\"gmail\")\n        forger_desktop.configure_connection(\"gmail\", label=\"Personal Gmail\", connection_id=\"gmail-default\")\n        forger_desktop.request_connection_grant(\n            \"gmail\",\n            reason=\"Use Gmail from the app\",\n            connection_ids=[\"gmail-default\"],\n        )\n        forger_desktop.call_connection_action(\n            \"gmail\",\n            \"gmail.search_messages\",\n            {\"query\": \"from:example@example.com\"},\n            connection_id=\"gmail-default\",\n        )\n    \n>       assert calls[0] == (\n            \"POST\",\n            \"/agent-tasks\",\n            {\n                \"templateId\": \"review\",\n                \"locale\": None,\n                \"arguments\": None,\n                \"variables\": None,\n                \"attachments\": None,\n                \"runtime\": None,\n                \"workspacePath\": \"/tmp/app\",\n                \"workspace\": workspace,\n            },\n        )\nE       AssertionError: assert ('POST', '/ag...': None, ...}) == ('POST', '/ag...': None, ...})\nE         \nE         At index 2 diff: {'templateId': 'review', 'locale': None, 'arguments': None, 'variables': None, 'attachments': None, 'workspacePath': '/tmp/app', 'workspace': {'cwdGrantId': 'workspace_1', 'additionalFolderGrantIds': ['workspace_2']}} != {'templateId': 'review', 'locale': None, 'arguments': None, 'variables': None, 'attachments': None, 'runtime': None, 'workspacePath': '/tmp/app', 'workspace': {'cwdGrantId': 'workspace_1', 'additionalFolderGrantIds': ['workspace_2']}}\nE         Use -v to get more diff\n\ntests/test_stack_contract.py:238: AssertionError\n=============================== warnings summary ===============================\n../../../opt/venv/lib/python3.12/site-packages/fastapi/testclient.py:1\n  /opt/venv/lib/python3.12/site-packages/fastapi/testclient.py:1: StarletteDeprecationWarning: Using `httpx` with `starlette.testclient` is deprecated; install `httpx2` instead.\n    from starlette.testclient import TestClient as TestClient  # noqa\n\n-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html\n================================ tests coverage ================================\n_______________ coverage: platform linux, python 3.12.14-final-0 _______________\n\nName    Stmts   Miss Branch BrPart  Cover   Missing\n---------------------------------------------------\nTOTAL      64      0      2      0   100%\n\n5 files skipped due to complete coverage.\nRequired test coverage of 100% reached. Total coverage: 100.00%\n=========================== short test summary info ============================\nFAILED tests/test_stack_contract.py::test_realtime_router_is_registered - Ass...\nFAILED tests/test_stack_contract.py::test_forger_desktop_helpers_pass_workspace_and_folder_grants\n==================== 2 failed, 9 passed, 1 warning in 1.92s ====================\n",
+            "elapsedMs": 3001
+          }
+        ],
+        "runtime": {
+          "node": "v24.21.0",
+          "pythonDependencies": "agent-detector==2.0.0\nannotated-doc==0.0.5\nannotated-types==0.8.0\nanyio==4.15.1\ncertifi==2026.7.22\nclick==8.5.0\ncoverage==7.16.1\ndetect-installer==0.2.1\ndnspython==2.8.0\nemail-validator==2.3.0\nfastapi==0.141.1\nfastapi-cli==0.0.32\nfastapi-cloud-cli==0.26.0\nfastar==0.12.0\ngreenlet==3.5.6\nh11==0.16.0\nhttpcore==1.0.9\nhttptools==0.8.0\nhttpx==0.28.1\nidna==3.20\niniconfig==2.3.0\nJinja2==3.1.6\nmarkdown-it-py==4.2.0\nMarkupSafe==3.0.3\nmdurl==0.1.2\npackaging==26.3\npluggy==1.6.0\npydantic==2.13.5\npydantic-extra-types==2.11.1\npydantic-settings==2.15.0\npydantic_core==2.46.5\nPygments==2.21.0\npytest==9.1.1\npytest-asyncio==1.4.0\npytest-cov==7.1.0\npython-dotenv==1.2.3\npython-multipart==0.0.32\nPyYAML==6.0.3\nrich==15.0.0\nrich-toolkit==0.20.5\nrignore==0.8.1\nruff==0.16.9\nsentry-sdk==2.70.0\nshellingham==1.5.4\nskeleton @ file:///opt/backend\nSQLAlchemy==2.0.54\nsqlmodel==0.0.47\nstarlette==1.7.0\ntyper==0.27.2\ntyping-inspection==0.4.4\ntyping_extensions==4.16.0\nurllib3==2.8.0\nuvicorn==0.54.0\nuvloop==0.22.1\nwatchfiles==1.3.0\nwebsockets==17.1\n",
+          "frontendDependencies": {
+            "version": "0.1.0",
+            "name": "skeleton-frontend",
+            "dependencies": {
+              "@eslint/js": {
+                "version": "9.39.5",
+                "resolved": "https://registry.npmjs.org/@eslint/js/-/js-9.39.5.tgz",
+                "overridden": false
+              },
+              "@radix-ui/react-dialog": {
+                "version": "1.1.23",
+                "resolved": "https://registry.npmjs.org/@radix-ui/react-dialog/-/react-dialog-1.1.23.tgz",
+                "overridden": false
+              },
+              "@radix-ui/react-dropdown-menu": {
+                "version": "2.1.24",
+                "resolved": "https://registry.npmjs.org/@radix-ui/react-dropdown-menu/-/react-dropdown-menu-2.1.24.tgz",
+                "overridden": false
+              },
+              "@radix-ui/react-label": {
+                "version": "2.1.15",
+                "resolved": "https://registry.npmjs.org/@radix-ui/react-label/-/react-label-2.1.15.tgz",
+                "overridden": false
+              },
+              "@radix-ui/react-select": {
+                "version": "2.3.7",
+                "resolved": "https://registry.npmjs.org/@radix-ui/react-select/-/react-select-2.3.7.tgz",
+                "overridden": false
+              },
+              "@radix-ui/react-separator": {
+                "version": "1.1.15",
+                "resolved": "https://registry.npmjs.org/@radix-ui/react-separator/-/react-separator-1.1.15.tgz",
+                "overridden": false
+              },
+              "@radix-ui/react-slot": {
+                "version": "1.3.3",
+                "resolved": "https://registry.npmjs.org/@radix-ui/react-slot/-/react-slot-1.3.3.tgz",
+                "overridden": false
+              },
+              "@shadcn/react": {
+                "version": "0.2.1",
+                "resolved": "https://registry.npmjs.org/@shadcn/react/-/react-0.2.1.tgz",
+                "overridden": false
+              },
+              "@tailwindcss/vite": {
+                "version": "4.3.3",
+                "resolved": "https://registry.npmjs.org/@tailwindcss/vite/-/vite-4.3.3.tgz",
+                "overridden": false
+              },
+              "@tanstack/react-query": {
+                "version": "5.104.0",
+                "resolved": "https://registry.npmjs.org/@tanstack/react-query/-/react-query-5.104.0.tgz",
+                "overridden": false
+              },
+              "@tanstack/react-router": {
+                "version": "1.170.39",
+                "resolved": "https://registry.npmjs.org/@tanstack/react-router/-/react-router-1.170.39.tgz",
+                "overridden": false
+              },
+              "@types/node": {
+                "version": "22.20.4",
+                "resolved": "https://registry.npmjs.org/@types/node/-/node-22.20.4.tgz",
+                "overridden": false
+              },
+              "@types/react-dom": {
+                "version": "19.3.0",
+                "resolved": "https://registry.npmjs.org/@types/react-dom/-/react-dom-19.3.0.tgz",
+                "overridden": false
+              },
+              "@types/react": {
+                "version": "19.3.0",
+                "resolved": "https://registry.npmjs.org/@types/react/-/react-19.3.0.tgz",
+                "overridden": false
+              },
+              "@vitejs/plugin-react": {
+                "version": "4.7.0",
+                "resolved": "https://registry.npmjs.org/@vitejs/plugin-react/-/plugin-react-4.7.0.tgz",
+                "overridden": false
+              },
+              "@vitest/coverage-v8": {
+                "version": "2.1.9",
+                "resolved": "https://registry.npmjs.org/@vitest/coverage-v8/-/coverage-v8-2.1.9.tgz",
+                "overridden": false
+              },
+              "class-variance-authority": {
+                "version": "0.7.1",
+                "resolved": "https://registry.npmjs.org/class-variance-authority/-/class-variance-authority-0.7.1.tgz",
+                "overridden": false
+              },
+              "clsx": {
+                "version": "2.1.1",
+                "resolved": "https://registry.npmjs.org/clsx/-/clsx-2.1.1.tgz",
+                "overridden": false
+              },
+              "eslint-plugin-react-hooks": {
+                "version": "5.2.0",
+                "resolved": "https://registry.npmjs.org/eslint-plugin-react-hooks/-/eslint-plugin-react-hooks-5.2.0.tgz",
+                "overridden": false
+              },
+              "eslint-plugin-react-refresh": {
+                "version": "0.4.26",
+                "resolved": "https://registry.npmjs.org/eslint-plugin-react-refresh/-/eslint-plugin-react-refresh-0.4.26.tgz",
+                "overridden": false
+              },
+              "eslint": {
+                "version": "9.39.5",
+                "resolved": "https://registry.npmjs.org/eslint/-/eslint-9.39.5.tgz",
+                "overridden": false
+              },
+              "globals": {
+                "version": "15.15.0",
+                "resolved": "https://registry.npmjs.org/globals/-/globals-15.15.0.tgz",
+                "overridden": false
+              },
+              "lucide-react": {
+                "version": "0.468.0",
+                "resolved": "https://registry.npmjs.org/lucide-react/-/lucide-react-0.468.0.tgz",
+                "overridden": false
+              },
+              "react-dom": {
+                "version": "19.3.0",
+                "resolved": "https://registry.npmjs.org/react-dom/-/react-dom-19.3.0.tgz",
+                "overridden": false
+              },
+              "react": {
+                "version": "19.3.0",
+                "resolved": "https://registry.npmjs.org/react/-/react-19.3.0.tgz",
+                "overridden": false
+              },
+              "tailwind-merge": {
+                "version": "2.6.1",
+                "resolved": "https://registry.npmjs.org/tailwind-merge/-/tailwind-merge-2.6.1.tgz",
+                "overridden": false
+              },
+              "tailwindcss": {
+                "version": "4.3.3",
+                "resolved": "https://registry.npmjs.org/tailwindcss/-/tailwindcss-4.3.3.tgz",
+                "overridden": false
+              },
+              "typescript-eslint": {
+                "version": "8.70.1",
+                "resolved": "https://registry.npmjs.org/typescript-eslint/-/typescript-eslint-8.70.1.tgz",
+                "overridden": false
+              },
+              "typescript": {
+                "version": "5.9.3",
+                "resolved": "https://registry.npmjs.org/typescript/-/typescript-5.9.3.tgz",
+                "overridden": false
+              },
+              "vite": {
+                "version": "5.4.21",
+                "resolved": "https://registry.npmjs.org/vite/-/vite-5.4.21.tgz",
+                "overridden": false
+              },
+              "vitest": {
+                "version": "2.1.9",
+                "resolved": "https://registry.npmjs.org/vitest/-/vitest-2.1.9.tgz",
+                "overridden": false
+              }
+            }
+          }
+        },
+        "externalRequests": [],
+        "error": "python exited 1: ============================= test session starts ==============================\nplatform linux -- Python 3.12.14, pytest-9.1.1, pluggy-1.6.0\nrootdir: /work/app/backend\nconfigfile: pyproject.toml\ntestpaths: tests\nplugins: asyncio-1.4.0, anyio-4.15.1, cov-7.1.0\nasyncio: mode=Mode.AUTO, debug=False, asyncio_default_fixture_loop_scope=None, asyncio_default_test_loop_scope=function\ncollected 11 items\n\ntests/test_stack_contract.py .....F..F..                                 [100%]\n\n=================================== FAILURES ===================================\n______________________ test_realtime_router_is_registered ______________________\n\nskeleton_app = <fastapi.applications.FastAPI object at 0xf5c5796a4f50>\n\n    def test_realtime_router_is_registered(skeleton_app: object) -> None:\n        websocket_paths = [\n            route.path\n            for route in skeleton_app.routes  # type: ignore[attr-defined]\n            if getattr(route, \"path\", None)\n        ]\n    \n>       assert \"/api/realtime/ws\" in websocket_paths\nE       AssertionError: assert '/api/realtime/ws' in ['/api/openapi.json', '/api/docs', '/docs/oauth2-redirect', '/api/redoc']\n\ntests/test_stack_contract.py:139: AssertionError\n_________ test_forger_desktop_helpers_pass_workspace_and_folder_grants _________\n\nmonkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0xf5c579232900>\n\n    def test_forger_desktop_helpers_pass_workspace_and_folder_grants(\n        monkeypatch: pytest.MonkeyPatch,\n    ) -> None:\n        from app import forger_desktop\n    \n        calls: list[tuple[str, str, dict | None]] = []\n    \n        def fake_request(method: str, path: str, body: dict | None, **_kwargs: object):\n            calls.append((method, path, body))\n            return {\"desktop_thread_id\": \"thread_1\", \"desktop_run_id\": \"run_1\", \"runId\": \"task_1\"}\n    \n        monkeypatch.setattr(forger_desktop, \"_request\", fake_request)\n        workspace = {\n            \"cwdGrantId\": \"workspace_1\",\n            \"additionalFolderGrantIds\": [\"workspace_2\"],\n        }\n    \n        forger_desktop.start_agent_task(\n            template_id=\"review\",\n            workspace_path=\"/tmp/app\",\n            workspace=workspace,\n        )\n        forger_desktop.start_manifest_agent_thread(\n            agent_id=\"advisor\",\n            workspace_path=\"/tmp/app\",\n            workspace=workspace,\n        )\n        forger_desktop.resume_manifest_agent_thread(\n            desktop_thread_id=\"thread_1\",\n            workspace_path=\"/tmp/app\",\n            workspace=workspace,\n        )\n        forger_desktop.steer_manifest_agent_run(\n            desktop_thread_id=\"thread_1\",\n            desktop_run_id=\"run_1\",\n            workspace_path=\"/tmp/app\",\n            workspace=workspace,\n        )\n        forger_desktop.request_folder_grant(grant_token=\"grant-token\")\n        forger_desktop.list_folder_grants()\n        forger_desktop.revoke_folder_grant(\"grant/id\")\n        forger_desktop.list_connections()\n        forger_desktop.connection_status(\"gmail\")\n        forger_desktop.get_connection_status(\"gmail\")\n        forger_desktop.configure_connection(\"gmail\", label=\"Personal Gmail\", connection_id=\"gmail-default\")\n        forger_desktop.request_connection_grant(\n            \"gmail\",\n            reason=\"Use Gmail from the app\",\n            connection_ids=[\"gmail-default\"],\n        )\n        forger_desktop.call_connection_action(\n            \"gmail\",\n            \"gmail.search_messages\",\n            {\"query\": \"from:example@example.com\"},\n            connection_id=\"gmail-default\",\n        )\n    \n>       assert calls[0] == (\n            \"POST\",\n            \"/agent-tasks\",\n            {\n                \"templateId\": \"review\",\n                \"locale\": None,\n                \"arguments\": None,\n                \"variables\": None,\n                \"attachments\": None,\n                \"runtime\": None,\n                \"workspacePath\": \"/tmp/app\",\n                \"workspace\": workspace,\n            },\n        )\nE       AssertionError: assert ('POST', '/ag...': None, ...}) == ('POST', '/ag...': None, ...})\nE         \nE         At index 2 diff: {'templateId': 'review', 'locale': None, 'arguments': None, 'variables': None, 'attachments': None, 'workspacePath': '/tmp/app', 'workspace': {'cwdGrantId': 'workspace_1', 'additionalFolderGrantIds': ['workspace_2']}} != {'templateId': 'review', 'locale': None, 'arguments': None, 'variables': None, 'attachments': None, 'runtime': None, 'workspacePath': '/tmp/app', 'workspace': {'cwdGrantId': 'workspace_1', 'additionalFolderGrantIds': ['workspace_2']}}\nE         Use -v to get more diff\n\ntests/test_stack_contract.py:238: AssertionError\n=============================== warnings summary ===============================\n../../../opt/venv/lib/python3.12/site-packages/fastapi/testclient.py:1\n  /opt/venv/lib/python3.12/site-packages/fastapi/testclient.py:1: StarletteDeprecationWarning: Using `httpx` with `starlette.testclient` is deprecated; install `httpx2` instead.\n    from starlette.testclient import TestClient as TestClient  # noqa\n\n-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html\n================================ tests coverage ================================\n_______________ coverage: platform linux, python 3.12.14-final-0 _______________\n\nName    Stmts   Miss Branch BrPart  Cover   Missing\n---------------------------------------------------\nTOTAL      64      0      2      0   100%\n\n5 files skipped due to complete coverage.\nRequired test coverage of 100% reached. Total coverage: 100.00%\n=========================== short test summary info ============================\nFAILED tests/test_stack_contract.py::test_realtime_router_is_registered - Ass...\nFAILED tests/test_stack_contract.py::test_forger_desktop_helpers_pass_workspace_and_folder_grants\n==================== 2 failed, 9 passed, 1 warning in 1.92s ====================\n",
+        "timedOut": false,
+        "code": 1
+      },
+      "expectedApplicationStatus": "failed",
+      "expectedRejectionGroup": "task_acceptance",
+      "reason": "unexpected_failure_does_not_validate_negative_control",
+      "finishedAt": "2026-09-27T00:18:57.724Z"
+    }
+  ],
+  "prerequisites": {
+    "ready": true,
+    "dockerVersion": "29.1.3",
+    "evaluatorImage": "sha256:7f742e0385790c560e96d5d554d6bc29819e9b8ba860f0a19bbf879d58309f99"
+  },
+  "finishedAt": "2026-09-27T00:18:57.729Z",
+  "summary": {
+    "selected": 2,
+    "passed": 0,
+    "failed": 2,
+    "positivePassed": 0,
+    "negativeCorrectlyRejected": 0
+  },
+  "allFiveFamiliesValidated": false
+}
