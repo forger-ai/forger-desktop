@@ -796,7 +796,7 @@ export class RepositoryCollaborationService {
             });
         const text = everyoneAuthorized
           ? output.text
-          : `${PREFIX} ${task ? reference(task) : ''}: hay una actualización disponible para revisión local en Forger. / An update is available for local review in Forger.`;
+          : `${PREFIX} ${reference(task!)}: hay una actualización disponible para revisión local en Forger. / An update is available for local review in Forger.`;
         const response = await this.transport.sendMessage({
           connectionId: group.connectionId,
           chatId: group.chatId,

@@ -45,16 +45,17 @@ export class RepositoryCollaborationStore {
     if (this.transactionDepth > 0) return fn();
     this.db.exec('BEGIN IMMEDIATE');
     this.transactionDepth += 1;
+    let result: T;
     try {
-      const result = fn();
+      result = fn();
       this.db.exec('COMMIT');
-      return result;
     } catch (error) {
       this.db.exec('ROLLBACK');
       throw error;
     } finally {
       this.transactionDepth -= 1;
     }
+    return result;
   }
   close(): void {
     (

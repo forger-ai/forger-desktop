@@ -789,3 +789,398 @@ test('one failed destination preserves its order without blocking replies to ano
   );
   await f.close();
 });
+
+test('configuration and retry reject missing groups, foreign projects and former participants', async () => {
+    const f = await setup();
+    try {
+        f.service.start();
+        await assert.rejects(f.service.addRepository({ groupId: 'missing', name: 'X', root: f.root }), /configurado/);
+        await assert.rejects(f.service.configureGroup({ connectionId: 'c', chatId: 'missing', title: 'X', enabled: false }), /disponible/);
+        await assert.rejects(f.service.addRepository({ groupId: f.group.id, name: 'Other', root: f.root }), /vinculado/);
+        await assert.rejects(f.service.setAccess({ groupId: f.group.id, participantId: 'outsider', displayName: 'X', repositoryIds: [f.repo.id] }), /pertenece/);
+        await assert.rejects(f.service.setAccess({ groupId: f.group.id, participantId: 'alice@s.whatsapp.net', displayName: 'X', repositoryIds: ['missing'] }), /vinculados/);
+        await assert.rejects(f.service.retryTask({ taskId: 'missing' }), /reintentarse/);
+        await assert.rejects(f.service.cancelTask({ taskId: 'missing' }), /disponible/);
+        await f.service.handleMessage(f.message());
+        await f.settle();
+        const task = f.store.tasks()[0];
+        await assert.rejects(f.service.retryTask({ taskId: task.id }), /reintentarse/);
+        f.store.updateTask(task.id, { status: 'failed' }, 1002);
+        f.transport.listParticipants = async () => [];
+        await assert.rejects(f.service.retryTask({ taskId: task.id }), /acceso/);
+        await assert.rejects(f.service.configureGroup({ connectionId: 'c', chatId: 'chat@g.us', title: 'Team', enabled: true }), /autoriza/);
+        await f.service.removeRepository({ groupId: f.group.id, repositoryId: f.repo.id });
+        assert.deepEqual(f.service.snapshot('c').repositories, []);
+        await assert.rejects(f.service.retryTask({ taskId: task.id }), /acceso/);
+    }
+    finally {
+        await f.close();
+    }
+});
+test('invalid timestamps, oversized commands and missing task references never create executable work', async () => {
+    const f = await setup();
+    try {
+        for (const extra of [{ messageId: '' }, { senderId: '' }, { timestamp: NaN }, { timestamp: 301001 }, { text: 'Forger, ' + 'x'.repeat(12001) }, { chatId: 'absent@g.us' }])
+            await f.service.handleMessage(f.message(extra));
+        await f.service.handleMessage(f.message({ text: 'Forger, estado #missing' }));
+        await f.service.handleMessage(f.message({ text: 'Forger, #missing continue' }));
+        await f.settle();
+        assert.equal(f.calls.length, 0);
+        assert.ok(f.sent.some(x => x.text.includes('Task not found')));
+        await f.service.stop();
+        await f.service.handleMessage(f.message());
+        assert.equal(f.store.tasks().length, 0);
+    }
+    finally {
+        await f.close();
+    }
+});
+test('reply continuation follows the latest attributable turn and failed chains require local review', async () => {
+    const f = await setup();
+    try {
+        f.transport.listParticipants = async () => [{ participantId: 'alice@s.whatsapp.net' }];
+        await f.service.handleMessage(f.message({ senderName: undefined }));
+        await f.settle();
+        await f.service.flushOutbox();
+        const first = f.store.tasks()[0];
+        const completed = f.store.outbox().find(x => x.taskId === first.id && x.text.includes('Completed'));
+        await f.service.handleMessage(f.message({ text: 'Forger, continue', replyToMessageId: completed.messageId }));
+        await f.settle();
+        await f.service.handleMessage(f.message({ text: `Forger, #${first.id} third` }));
+        await f.settle();
+        const tasks = f.store.tasks();
+        assert.equal(tasks.length, 3);
+        const second = tasks.find(x => x.prompt === 'continue');
+        const third = tasks.find(x => x.prompt === 'third');
+        assert.equal(third.parentTaskId, second.id);
+        assert.equal(first.participantName, 'alice@s.whatsapp.net');
+        f.store.updateTask(third.id, { status: 'failed' }, 1002);
+        await f.service.handleMessage(f.message({ text: `Forger, #${first.id} fourth` }));
+        await f.settle();
+        assert.equal(f.store.tasks().length, 3);
+        assert.ok(f.sent.some(x => x.text.includes('Review this task')));
+        const status = f.message({ text: `Forger, estado #${first.id}` });
+        await f.service.handleMessage(status);
+        await f.settle();
+        const outputs = f.store.outbox().length;
+        await f.service.handleMessage(status);
+        await f.settle();
+        assert.equal(f.store.outbox().length, outputs);
+    }
+    finally {
+        await f.close();
+    }
+});
+for (const [failure, code] of [[Error('repository_execution_auth_required'), 'authentication_required'], [Error('repository_execution_roots_invalid'), 'repository_unavailable'], ['non-error', 'execution_failed']])
+    test(`execution reports safe ${code} without exposing exception details`, async () => {
+        const f = await setup(async () => { throw failure; });
+        try {
+            await f.service.handleMessage(f.message());
+            await f.settle();
+            assert.equal(f.store.tasks()[0].errorCode, code);
+        }
+        finally {
+            await f.close();
+        }
+    });
+test('selection and queue limits produce guidance without accepting oversized work', async () => {
+    let release;
+    const f = await setup(() => new Promise(resolve => { release = resolve; }));
+    try {
+        const repositories = [f.repo];
+        for (let i = 0; i < 10; i++)
+            repositories.push(f.store.addRepository(f.group.id, `Repo${i}`, `/unavailable/${i}`));
+        f.store.setAccess({ groupId: f.group.id, participantId: 'alice@s.whatsapp.net', displayName: 'Alice', repositoryIds: repositories.map(x => x.id) });
+        await f.service.handleMessage(f.message({ text: 'Forger, ambiguous' }));
+        await f.service.handleMessage(f.message({ text: `Forger, ${repositories.map(x => x.name).join(' + ')}: too much` }));
+        assert.equal(f.store.tasks().length, 0);
+        await f.service.handleMessage(f.message());
+        await f.settle();
+        for (let i = 0; i < 100; i++)
+            f.store.createTask({ groupId: f.group.id, participantId: 'alice@s.whatsapp.net', participantName: 'Alice', repositoryIds: [f.repo.id], prompt: 'queued', sourceMessageId: `queued${i}` }, 1001);
+        await f.service.handleMessage(f.message());
+        assert.equal(f.store.tasks().length, 101);
+        assert.ok(f.store.outbox().some(x => x.text.includes('queue is full')));
+        release({ text: 'Done' });
+        await f.service.stop();
+    }
+    finally {
+        release?.({ text: 'Done' });
+        await f.close();
+    }
+});
+for (const mode of ['paused', 'no-grant', 'cancelled', 'author-left', 'requester-left', 'revoked-during-roster', 'paused-during-roster', 'author-left-before-send', 'requester-left-before-send', 'new-recipient-before-send'])
+    test(`pending delivery is suppressed or retained safely when ${mode}`, async () => {
+        const f = await setup();
+        try {
+            const author = 'alice@s.whatsapp.net', requester = 'bob@lid';
+            f.store.setAccess({ groupId: f.group.id, participantId: requester, displayName: 'Bob', repositoryIds: [f.repo.id] });
+            const task = f.store.createTask({ groupId: f.group.id, participantId: author, participantName: 'Alice', repositoryIds: [f.repo.id], prompt: 'work', sourceMessageId: 'm' }, 1001);
+            f.store.updateTask(task.id, { status: mode === 'cancelled' ? 'cancelled' : 'completed' }, 1002);
+            f.store.enqueueOutput({ groupId: f.group.id, taskId: task.id, participantId: requester, text: 'private result' });
+            let rosterCalls = 0;
+            f.transport.listParticipants = async () => {
+                rosterCalls++;
+                if (mode === 'revoked-during-roster' && rosterCalls === 1)
+                    f.store.setAccess({ groupId: f.group.id, participantId: author, displayName: 'Alice', repositoryIds: [] });
+                if (mode === 'paused-during-roster' && rosterCalls === 1)
+                    f.store.configureGroup({ connectionId: 'c', chatId: 'chat@g.us', title: 'Team', enabled: false }, 1003);
+                if (mode === 'author-left' || (mode === 'author-left-before-send' && rosterCalls >= 2))
+                    return [{ participantId: requester }];
+                if (mode === 'requester-left' || (mode === 'requester-left-before-send' && rosterCalls >= 2))
+                    return [{ participantId: author }];
+                if (mode === 'new-recipient-before-send' && rosterCalls >= 2)
+                    return [{ participantId: author }, { participantId: requester }, { participantId: 'new@lid' }];
+                return [{ participantId: author }, { participantId: requester }];
+            };
+            if (mode === 'paused')
+                f.store.configureGroup({ connectionId: 'c', chatId: 'chat@g.us', title: 'Team', enabled: false }, 1003);
+            if (mode === 'no-grant')
+                f.store.setAccess({ groupId: f.group.id, participantId: requester, displayName: 'Bob', repositoryIds: [] });
+            await f.service.flushOutbox();
+            assert.equal(f.sent.length, 0);
+            assert.notEqual(f.store.outbox()[0].status, 'sent');
+        }
+        finally {
+            await f.close();
+        }
+    });
+test('revoking one participant suppresses their notices and affected task results without discarding unrelated output', async () => {
+    const f = await setup();
+    try {
+        const alice = 'alice@s.whatsapp.net', bob = 'bob@lid';
+        f.store.setAccess({ groupId: f.group.id, participantId: bob, displayName: 'Bob', repositoryIds: [f.repo.id] });
+        const task = f.store.createTask({ groupId: f.group.id, participantId: bob, participantName: 'Bob', repositoryIds: [f.repo.id], prompt: 'work', sourceMessageId: 'm' }, 1001);
+        f.store.updateTask(task.id, { status: 'completed' }, 1002);
+        for (const output of [{ participantId: alice, text: 'notice' }, { participantId: bob, text: 'result', taskId: task.id }, { participantId: bob, text: 'unrelated' }])
+            f.store.enqueueOutput({ groupId: f.group.id, ...output });
+        await f.service.setAccess({ groupId: f.group.id, participantId: alice, displayName: 'Alice', repositoryIds: [] });
+        const outbox = f.store.outbox();
+        assert.equal(outbox.find(x => x.text === 'notice').status, 'suppressed');
+        assert.equal(outbox.find(x => x.text === 'result').status, 'suppressed');
+        assert.equal(outbox.find(x => x.text === 'unrelated').status, 'pending');
+    }
+    finally {
+        await f.close();
+    }
+});
+test('cancelled parent cascades to queued continuations and suppresses their pending acknowledgements', async () => {
+    const f = await setup();
+    try {
+        await f.service.stop();
+        const base = { groupId: f.group.id, participantId: 'alice@s.whatsapp.net', participantName: 'Alice', repositoryIds: [f.repo.id], prompt: 'work', sourceMessageId: 'm' };
+        const parent = f.store.createTask(base, 1001), child = f.store.createTask({ ...base, parentTaskId: parent.id }, 1002);
+        f.store.enqueueOutput({ groupId: f.group.id, taskId: child.id, participantId: base.participantId, text: 'queued' });
+        await f.service.cancelTask({ taskId: parent.id });
+        assert.equal(f.store.task(child.id).status, 'cancelled');
+        assert.equal(f.store.outbox()[0].status, 'suppressed');
+        await f.service.cancelTask({ taskId: parent.id });
+        await f.service.flushOutbox();
+    }
+    finally {
+        await f.close();
+    }
+});
+for (const mode of ['paused', 'revoked', 'shutdown'])
+    test(`intake rechecks ${mode} after waiting for live membership`, async () => {
+        const f = await setup();
+        try {
+            let release;
+            f.transport.listParticipants = () => new Promise(resolve => { release = resolve; });
+            const intake = f.service.handleMessage(f.message());
+            await new Promise(resolve => setImmediate(resolve));
+            let stopping;
+            if (mode === 'paused')
+                f.store.configureGroup({ connectionId: 'c', chatId: 'chat@g.us', title: 'Team', enabled: false }, 1002);
+            if (mode === 'revoked')
+                f.store.setAccess({ groupId: f.group.id, participantId: 'alice@s.whatsapp.net', displayName: 'Alice', repositoryIds: [] });
+            if (mode === 'shutdown')
+                stopping = f.service.stop();
+            release([{ participantId: 'alice@s.whatsapp.net' }]);
+            await intake;
+            await stopping;
+            assert.equal(f.store.tasks().length, 0);
+        }
+        finally {
+            await f.close();
+        }
+    });
+for (const outcome of ['absent', 'offline', 'shutdown'])
+    test(`periodic membership verification ${outcome} prevents unattended writes`, async (t) => {
+        t.mock.timers.enable({ apis: ['setInterval'] });
+        let finish;
+        const f = await setup(() => new Promise(resolve => { finish = resolve; }));
+        try {
+            await f.service.handleMessage(f.message());
+            await f.settle();
+            await f.service.flushOutbox();
+            let release;
+            f.transport.listParticipants = async () => new Promise((resolve, reject) => { release = () => outcome === 'offline' ? reject(Error('offline')) : resolve([]); });
+            t.mock.timers.tick(10000);
+            let stopping;
+            if (outcome === 'shutdown')
+                stopping = f.service.stop();
+            release();
+            await new Promise(resolve => setImmediate(resolve));
+            finish({ text: 'should not publish' });
+            await stopping;
+            await f.settle();
+            assert.notEqual(f.store.tasks()[0].status, 'completed');
+        }
+        finally {
+            finish?.({ text: 'stopped' });
+            await f.close();
+        }
+    });
+test('membership lost after executor completion cancels the task and never shares its result', async () => {
+    let finish;
+    const f = await setup(() => new Promise(resolve => { finish = resolve; }));
+    try {
+        await f.service.handleMessage(f.message());
+        await f.settle();
+        await f.service.flushOutbox();
+        f.transport.listParticipants = async () => [];
+        finish({ text: 'private result' });
+        await f.settle();
+        assert.equal(f.store.tasks()[0].status, 'cancelled');
+        assert.ok(f.sent.every(x => !x.text.includes('private result')));
+    }
+    finally {
+        finish?.({ text: 'stop' });
+        await f.close();
+    }
+});
+test('revocation during final membership verification prevents successful task completion', async () => {
+    let finish;
+    const f = await setup(() => new Promise(resolve => { finish = resolve; }));
+    try {
+        await f.service.handleMessage(f.message());
+        await f.settle();
+        await f.service.flushOutbox();
+        f.transport.listParticipants = async () => { f.store.setAccess({ groupId: f.group.id, participantId: 'alice@s.whatsapp.net', displayName: 'Alice', repositoryIds: [] }); return [{ participantId: 'alice@s.whatsapp.net' }]; };
+        finish({ text: 'private result' });
+        await f.settle();
+        assert.notEqual(f.store.tasks()[0].status, 'completed');
+    }
+    finally {
+        finish?.({ text: 'stop' });
+        await f.close();
+    }
+});
+test('a task whose grants were revoked while the process was stopped is cancelled on restart', async () => {
+    const f = await setup();
+    try {
+        await f.service.stop();
+        const task = f.store.createTask({ groupId: f.group.id, participantId: 'alice@s.whatsapp.net', participantName: 'Alice', repositoryIds: [f.repo.id], prompt: 'work', sourceMessageId: 'm' }, 1001);
+        f.store.setAccess({ groupId: f.group.id, participantId: 'alice@s.whatsapp.net', displayName: 'Alice', repositoryIds: [] });
+        f.service.start();
+        assert.equal(f.store.task(task.id).status, 'cancelled');
+        assert.equal(f.calls.length, 0);
+    }
+    finally {
+        await f.close();
+    }
+});
+test('queued intake is ignored if stopped before its microtask runs and runtime failures stay safely classified', async () => {
+    const f = await setup(async () => { throw Error('repository_execution_runtime_missing'); });
+    try {
+        await f.service.handleMessage(f.message());
+        await f.settle();
+        assert.equal(f.store.tasks()[0].errorCode, 'runtime_unavailable');
+        const pending = f.service.handleMessage(f.message());
+        const stopping = f.service.stop();
+        await pending;
+        await stopping;
+        assert.equal(f.store.tasks().length, 1);
+    }
+    finally {
+        await f.close();
+    }
+});
+test('an authorized participant cannot continue another task outside their current project grants', async () => {
+    const f = await setup();
+    try {
+        await f.service.handleMessage(f.message());
+        await f.settle();
+        const task = f.store.tasks()[0];
+        const other = f.store.addRepository(f.group.id, 'Other', '/tmp/other');
+        f.store.setAccess({ groupId: f.group.id, participantId: 'bob@lid', displayName: 'Bob', repositoryIds: [other.id] });
+        await f.service.handleMessage(f.message({ senderId: 'bob@lid', text: `Forger, #${task.id} continue` }));
+        assert.equal(f.store.tasks().length, 1);
+    }
+    finally {
+        await f.close();
+    }
+});
+test('successful tasks without a conversation retain a null session rather than inventing a resume id', async () => {
+    const f = await setup(async () => ({ text: 'Done' }));
+    try {
+        await f.service.handleMessage(f.message());
+        await f.settle();
+        const first = f.store.tasks()[0];
+        assert.equal(first.conversationId, null);
+        await f.service.handleMessage(f.message({ text: `Forger, #${first.id} next` }));
+        await f.settle();
+        assert.ok(f.store.tasks().every(x => x.conversationId === null));
+    }
+    finally {
+        await f.close();
+    }
+});
+test('repository preflight detects changed canonical identity before the executor starts', async (t) => {
+    const f = await setup();
+    try {
+        const validation = require('../../dist-electron/main/repository-collaboration/repository-validation.js');
+        t.mock.method(validation, 'validateRepositoryRoot', async () => '/changed/canonical-root');
+        await f.service.handleMessage(f.message());
+        await f.settle();
+        assert.equal(f.calls.length, 0);
+        assert.equal(f.store.tasks()[0].errorCode, 'repository_unavailable');
+    }
+    finally {
+        await f.close();
+    }
+});
+test('shutdown during delivery stops the next queued reply and suppresses an unavailable group', async (t) => {
+    const f = await setup();
+    let stopping;
+    try {
+        const input = { groupId: f.group.id, participantId: 'alice@s.whatsapp.net', text: 'notice' };
+        f.store.enqueueOutput(input);
+        f.store.enqueueOutput(input);
+        f.transport.sendMessage = async () => { stopping = f.service.stop(); return { messageId: 'last' }; };
+        await f.service.flushOutbox();
+        await stopping;
+        assert.equal(f.store.outbox().filter(x => x.status === 'sent').length, 1);
+        f.transport.sendMessage = async () => ({ messageId: 'next' });
+        f.service.start();
+        await f.service.flushOutbox();
+        f.store.enqueueOutput(input);
+        const mock = t.mock.method(f.store, 'group', () => undefined);
+        await f.service.flushOutbox();
+        mock.mock.restore();
+        assert.equal(f.store.outbox().at(-1).status, 'suppressed');
+    }
+    finally {
+        await stopping;
+        await f.close();
+    }
+});
+test('a missing task snapshot during a failed execution cannot fabricate a completed result', async (t) => {
+    let fail;
+    const f = await setup(() => new Promise((_resolve, reject) => { fail = reject; }));
+    try {
+        await f.service.handleMessage(f.message());
+        await f.settle();
+        await f.service.flushOutbox();
+        const mock = t.mock.method(f.store, 'task', () => undefined);
+        fail(Error('failed'));
+        await f.settle();
+        mock.mock.restore();
+        assert.equal(f.store.tasks()[0].status, 'failed');
+    }
+    finally {
+        fail?.(Error('stopped'));
+        await f.close();
+    }
+});

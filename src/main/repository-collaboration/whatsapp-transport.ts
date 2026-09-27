@@ -129,10 +129,9 @@ export class WhatsAppRepositoryTransport
           });
           if (
             !result.success &&
-            result.technicalCode === 'whatsapp_send_rate_limited' &&
-            attempt < 2
+            result.technicalCode === 'whatsapp_send_rate_limited'
           ) {
-            await this.clock.sleep(1600 * (attempt + 1));
+            if (attempt < 2) await this.clock.sleep(1600 * (attempt + 1));
             continue;
           }
           const data = record(result.data);
