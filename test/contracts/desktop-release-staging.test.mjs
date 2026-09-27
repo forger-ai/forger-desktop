@@ -19,7 +19,7 @@ async function fixture(t) {
   }
   return directory;
 }
-const metadata = () => ({ body: notes, draft: true, prerelease: false, assets: [] });
+const metadata = () => ({ body: notes, isDraft: true, assets: [] });
 
 test('staging uploads only verified platform installers and keeps the release unrecommended', async (t) => {
   const directory = await fixture(t); const calls = [];
@@ -30,7 +30,7 @@ test('staging uploads only verified platform installers and keeps the release un
 
 test('staging fails before upload for stable releases, missing changelog, or corrupted installer', async (t) => {
   const directory = await fixture(t);
-  for (const release of [{ ...metadata(), draft: false, prerelease: true }, { ...metadata(), draft: false, prerelease: false }, { ...metadata(), body: '' }, { ...metadata(), body: 'Forger Desktop v0.5.20' }]) {
+  for (const release of [{ ...metadata(), isDraft: false, prerelease: true }, { ...metadata(), isDraft: false, prerelease: false }, { ...metadata(), body: '' }, { ...metadata(), body: 'Forger Desktop v0.5.20' }]) {
     const calls = [];
     await assert.rejects(stageReleaseAssets({ tag, repository, directory, installers: [INSTALLERS[0]], gh: async (args) => { calls.push(args); return JSON.stringify(release); } }));
     assert.equal(calls.length, 1);
@@ -96,9 +96,25 @@ test('failed download or mismatched published bytes never promotes a partial rel
 test('optional blockmaps are preserved and a failed upload cannot publish or replace files', async (t) => {
   const directory = await fixture(t); const calls = [];
   await fs.writeFile(path.join(directory, `${INSTALLERS[0]}.blockmap`), 'blockmap');
-  await stageReleaseAssets({ tag, repository, directory, installers: [INSTALLERS[0]], gh: async (args) => { calls.push(args); return JSON.stringify({ ...metadata(), draft: true, prerelease: false }); } });
+  await stageReleaseAssets({ tag, repository, directory, installers: [INSTALLERS[0]], gh: async (args) => { calls.push(args); return JSON.stringify({ ...metadata(), isDraft: true, prerelease: false }); } });
   assert.equal(calls.filter((args) => args[1] === 'upload').length, 3);
   calls.length = 0;
   await assert.rejects(stageReleaseAssets({ tag, repository, directory, installers: [INSTALLERS[0]], gh: async (args) => { calls.push(args); if (args[1] === 'upload') throw new Error('network failed'); return JSON.stringify(metadata()); } }), /network failed/);
   assert.ok(calls.every((args) => args[1] !== 'edit' && !args.includes('--clobber')));
+});
+
+
+test('draft metadata uses the authenticated draft-aware release lookup before staging and publishing', async (t) => {
+  const directory = await fixture(t);
+  for (const operation of [stageReleaseAssets, publishReleaseAssets]) {
+    const calls = [];
+    const gh = async (args) => {
+      calls.push(args);
+      if (args[0] === 'api') throw new Error('GitHub by-tag lookup returns404 for private drafts');
+      if (args[1] === 'view') return JSON.stringify(metadata());
+      return '';
+    };
+    await operation({ tag, repository, directory, installers: [INSTALLERS[0]], gh });
+    assert.deepEqual(calls[0], ['release', 'view', tag, '--repo', repository, '--json', 'body,isDraft,assets']);
+  }
 });

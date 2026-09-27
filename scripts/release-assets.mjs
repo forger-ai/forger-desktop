@@ -20,7 +20,8 @@ async function releaseMetadata({ tag, repository, gh }) {
   if (!/^forger-desktop\/v\d+\.\d+\.\d+$/.test(tag) || !/^[\w.-]+\/[\w.-]+$/.test(repository)) {
     throw new Error('A Desktop release tag and repository are required.');
   }
-  const release = JSON.parse(await gh(['api', `repos/${repository}/releases/tags/${encodeURIComponent(tag)}`]));
+  // GitHub's by-tag REST endpoint omits private drafts; gh resolves drafts through its authenticated lookup.
+  const release = JSON.parse(await gh(['release', 'view', tag, '--repo', repository, '--json', 'body,isDraft,assets']));
   if (!release.body?.trim() || release.body.trim() === `Forger Desktop v${tag.split('/v')[1]}` || !/^\s*[-*]\s+\S/m.test(release.body)) {
     throw new Error(`Release ${tag} must exist with changelog notes before publishing artifacts.`);
   }
@@ -64,7 +65,7 @@ async function verifiedFiles(directory, installers) {
 
 export async function stageReleaseAssets({ tag, repository, directory, installers, gh = runGh }) {
   const release = await releaseMetadata({ tag, repository, gh });
-  if (!release.draft) {
+  if (!release.isDraft) {
     throw new Error('Prepare the release as a draft with --latest=false before staging installers.');
   }
   const files = await verifiedFiles(directory, installers);
