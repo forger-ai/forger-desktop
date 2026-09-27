@@ -1,0 +1,119 @@
+{
+  "schemaVersion": 1,
+  "evidenceClass": "software_verification_not_model_benchmark",
+  "completedAt": "2026-09-26T21:40:48Z",
+  "forger": {
+    "version": "0.5.17",
+    "revision": "7fa965edc9408211d8f4336bb0ed0a4f30a88102",
+    "dirty": true,
+    "sourceSha256": "1550f12adabb8ca80c04e3c806f7cf218c4ad65b07afdbc06730cf78f32a5b06",
+    "compiledProviderSha256": "94188a2672c5a983ff2831ee60ef7ab4d1f43c8b9f6f6c86f86280bf0b49eddc",
+    "harnessSha256": "2dce3b278a9b197337ebaa57eda7fe84ed963c288562bcef7b80cd5e2fbc4f57"
+  },
+  "environment": {
+    "platform": "darwin",
+    "architecture": "arm64",
+    "cpu": "Apple M1",
+    "totalMemoryBytes": 8589934592,
+    "nodeVersion": "v24.18.0",
+    "cliVersion": "codex-cli 0.144.1",
+    "cliSha256": "29915529b97697def1a957b0505e770aa6a45744435d62fc263e98d7619e167a"
+  },
+  "checks": [
+    {
+      "command": "npm run build:electron",
+      "exitCode": 0,
+      "scope": "Electron main/preload/shared TypeScript compilation"
+    },
+    {
+      "command": "npm run typecheck",
+      "exitCode": 0,
+      "scope": "Desktop renderer and Electron TypeScript; documentation validation/generation"
+    },
+    {
+      "command": "npm run lint",
+      "exitCode": 0,
+      "scope": "Repository ESLint, including new harness/evaluator/fixture files"
+    },
+    {
+      "command": "node --test test/main/local-inference.test.mjs test/main/local-inference-policy.test.mjs test/main/local-inference-process.test.mjs test/main/local-inference-gateway.test.mjs test/main/local-development-hardware.test.mjs test/main/local-development-benchmark.test.mjs test/main/llm-provider-run-service.test.mjs test/main/chat-orchestrator.test.mjs test/contracts/llm-provider-boundaries.test.mjs",
+      "exitCode": 0,
+      "tests": 139,
+      "passed": 139,
+      "failed": 0,
+      "cancelled": 0,
+      "skipped": 0,
+      "todo": 0,
+      "testRunnerDurationMs": 12374.665667,
+      "scope": "Focused behavior/integration tests and existing provider/chat regressions. Runtime/CLI fixtures are synthetic except actual OS/process operations; no model inference."
+    },
+    {
+      "command": "git diff --check",
+      "exitCode": 0
+    },
+    {
+      "command": "node scripts/local-development/benchmark.mjs --list",
+      "exitCode": 0,
+      "catalogued": 30,
+      "implementedSpecifications": 5,
+      "planned": 25
+    },
+    {
+      "command": "node scripts/local-development/benchmark.mjs --check",
+      "exitCode": 0,
+      "ready": false,
+      "reason": "docker_unavailable",
+      "evidence": "preflight-final-2026-09-26.json"
+    },
+    {
+      "command": "node scripts/local-development/benchmark.mjs --cloud-plan --suite all",
+      "exitCode": 0,
+      "executionEnabled": false,
+      "evidence": "cloud-plan-2026-09-26.json"
+    },
+    {
+      "command": "node scripts/local-development/probe-codex-cli.mjs <installed-codex>",
+      "exitCode": 0,
+      "scenarios": 6,
+      "passed": 6,
+      "evidence": "cli-protocol-2026-09-26.json",
+      "scope": "Real pinned Codex CLI; synthetic tool/file-edit loop and redirect statuses 301, 302, 303, 307, 308"
+    }
+  ],
+  "securityReview": {
+    "evidenceClass": "source_inspection",
+    "closedFindings": [
+      "Cloud fallback/auth avoided in explicit local branch",
+      "Real-CLI inference redirects contained by fixed-target authenticated gateway",
+      "Original evaluator input files mounted read-only instead of copied into mutable execution paths"
+    ],
+    "pending": [
+      "Actual Docker mount enforcement and baseline validation",
+      "Model generation cancellation and runtime resource release",
+      "Full agent/runtime/descendant egress observation",
+      "Strict modality across background memory, diagnostics, tools and apps",
+      "Complete protection against deliberate evaluator sabotage is not established"
+    ]
+  },
+  "modelEvaluation": {
+    "attemptedTasks": 0,
+    "validatedConfigurations": 0,
+    "modelPerformanceMeasured": false,
+    "cloudInferenceCalls": 0,
+    "downloadedModelWeights": false
+  },
+  "notExecuted": [
+    "Real Ollama inference",
+    "Docker app compilation/startup/acceptance",
+    "M1 model speed/peak memory/context calibration",
+    "Other hardware/platform runtime verification",
+    "Cloud model comparison",
+    "Repository-wide coverage measurement",
+    "Packaged Electron GUI end-to-end test"
+  ],
+  "limitations": [
+    "139 tests refer only to the explicitly listed suite; they are not 139 model tasks or full repository coverage.",
+    "Test execution durations do not measure model performance.",
+    "A synthetic runtime version field does not establish an installed Ollama runtime."
+  ]
+}

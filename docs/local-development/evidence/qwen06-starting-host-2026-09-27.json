@@ -1,0 +1,47 @@
+{
+  "observedAt": "2026-09-27T12:13:02.183Z",
+  "hardware": {
+    "schemaVersion": 1,
+    "observedAt": "2026-09-27T12:13:02.184Z",
+    "os": {
+      "platform": "darwin",
+      "architecture": "arm64",
+      "release": "25.5.0"
+    },
+    "cpu": {
+      "model": "Apple M1",
+      "logicalCores": 8
+    },
+    "memory": {
+      "totalBytes": 8589934592,
+      "freeBytes": 175702016,
+      "availableForModelBytes": null,
+      "unified": true
+    },
+    "gpu": {
+      "devices": [
+        {
+          "name": "Apple M1",
+          "backendReported": null,
+          "usableMemoryBytes": null
+        }
+      ],
+      "accelerationTested": false
+    },
+    "disk": {
+      "availableBytes": 15211311104
+    },
+    "performance": null,
+    "recommendation": {
+      "status": "insufficient_evidence",
+      "reason": "Hardware detection does not demonstrate app-development success. Run the measured task suite before recommending a configuration."
+    },
+    "unavailable": [
+      "available_model_memory_not_measured",
+      "performance_not_measured"
+    ]
+  },
+  "systemSwap": "vm.swapusage: total = 2048.00M  used = 1702.81M  free = 345.19M  (encrypted)",
+  "ownedRuntime": "COMMAND   PID USER   FD   TYPE             DEVICE SIZE/OFF NODE NAME\nollama  24723 kupa    3u  IPv4 0x38c18aee56cdb031      0t0  TCP 127.0.0.1:11445 (LISTEN)",
+  "limitation": "Foreground applications remain open; available inference headroom is not inferred from free memory."
+}

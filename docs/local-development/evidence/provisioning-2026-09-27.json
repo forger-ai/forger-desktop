@@ -1,0 +1,45 @@
+{
+  "schemaVersion": 1,
+  "observedAt": "2026-09-27T00:21:48.706638+00:00",
+  "evidenceClass": "local_evaluation_environment",
+  "authorization": "User explicitly requested all following steps on this computer; isolated runtime/model and evaluator preparation.",
+  "runtime": {
+    "version": "0.34.4",
+    "endpoint": "http://127.0.0.1:11445",
+    "cloudDisabled": true,
+    "parallelRequests": 1,
+    "maximumLoadedModels": 1,
+    "defaultContextLengthRequested": 8192,
+    "privateHome": true,
+    "inheritedEnvironmentCleared": true,
+    "networkProfile": "(version 1)(allow default)(deny network*)(allow network-bind (local ip \"localhost:*\"))(allow network-inbound (local ip \"localhost:*\"))(allow network-outbound (remote ip \"localhost:*\"))"
+  },
+  "vm": {
+    "manager": "Lima",
+    "version": "2.2.0",
+    "name": "forger-local-eval",
+    "type": "vz",
+    "architecture": "aarch64",
+    "memoryBytes": 3221225472,
+    "cpus": 2,
+    "diskMaximumBytes": 12884901888,
+    "image": "https://cloud-images.ubuntu.com/releases/resolute/release-20260720/ubuntu-26.04-server-cloudimg-arm64.img",
+    "imageSha256": "7bcf159e29ad0000bfed9c57875908c39268f5ed1257f4958fa6a9f5f60edd54",
+    "dockerInstallation": "Ubuntu signed apt docker.io; no remote shell installer",
+    "existingUserVmChanged": false,
+    "dockerDefaultContextChanged": false,
+    "sharedHostPaths": "Dedicated synthetic scratch and immutable evaluator only, read-only"
+  },
+  "initialWorkload": {
+    "swapUsedBytesApprox": 6220414976.0,
+    "diskAvailableKiB": 15992456,
+    "userApplicationsClosed": false,
+    "interpretation": "Existing workload; not a causal attribution or clean-machine benchmark"
+  },
+  "limitations": [
+    "Ollama allows loopback worker traffic; another local service could relay traffic. No absolute egress isolation claim.",
+    "Ollama endpoint remains trusted and locally unauthenticated; only the per-run inference gateway authenticates Codex.",
+    "Network syscall canaries are synthetic and do not alone attest every real runtime operation.",
+    "No global firewall, packet capture of other applications, production change or credential modification."
+  ]
+}

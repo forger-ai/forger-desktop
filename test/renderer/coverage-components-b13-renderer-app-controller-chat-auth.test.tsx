@@ -26,7 +26,7 @@ describe('RendererAppController runtime selection and authentication polling', (
       const current = await renderControllerHarness(bridge);
       act(() => current.result.current.setSelectedAgentProvider(provider));
       act(() => current.result.current.handleStartNewConversation());
-      await act(async () => current.result.current.handleSendMessage(`Hello ${provider}`));
+      await act(async () => current.result.current.handleSendMessage(`Hello ${provider}`, { mode: 'free_chat' }));
       expect(bridge.call('chatStartRun')).toHaveBeenCalledWith(expect.objectContaining({
         provider, authProfileId: `${provider}-profile`,
       }));

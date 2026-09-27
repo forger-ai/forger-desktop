@@ -1,0 +1,11 @@
+{
+  "acknowledged": true,
+  "targetModelResident": false,
+  "otherResidentModelCount": 0,
+  "source": "ollama_api_ps",
+  "sampledAt": "2026-09-27T01:03:04.186Z",
+  "memoryUsageMeasured": false,
+  "targetModels": [],
+  "elapsedMs": 22.338500000000003,
+  "memoryReleaseMeasured": false
+}

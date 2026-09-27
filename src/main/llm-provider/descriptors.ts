@@ -1,3 +1,4 @@
+import type { LocalInferenceEvidence } from './local/types';
 import type { AgentProvider, ClaudeEffort, CodexReasoningEffort } from '../../shared/types';
 import { antigravityCliAdapter } from './adapters/antigravity-cli-adapter';
 import { claudeCliAdapter } from './adapters/claude-cli-adapter';
@@ -27,6 +28,7 @@ export interface LlmProviderDescriptorRunInput extends Omit<LlmCliRunInput, 'cli
 }
 
 export interface LlmProviderRunOutput extends LlmRunResult {
+  localInference?: LocalInferenceEvidence;
   code: number;
   threadId?: string;
 }

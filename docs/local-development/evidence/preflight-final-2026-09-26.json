@@ -1,0 +1,32 @@
+{
+  "schemaVersion": 1,
+  "createdAt": "2026-09-26T21:40:47.539Z",
+  "protocol": "forger-common-local-v1",
+  "comparisonMode": "controlled",
+  "forger": {
+    "version": "0.5.17",
+    "revision": "7fa965edc9408211d8f4336bb0ed0a4f30a88102",
+    "dirty": true,
+    "sourceSha256": "1550f12adabb8ca80c04e3c806f7cf218c4ad65b07afdbc06730cf78f32a5b06",
+    "compiledProviderSha256": "94188a2672c5a983ff2831ee60ef7ab4d1f43c8b9f6f6c86f86280bf0b49eddc",
+    "harnessSha256": "2dce3b278a9b197337ebaa57eda7fe84ed963c288562bcef7b80cd5e2fbc4f57"
+  },
+  "hardware": {
+    "platform": "darwin",
+    "architecture": "arm64",
+    "cpu": "Apple M1",
+    "logicalCpuCount": 8,
+    "totalMemoryBytes": 8589934592,
+    "freeMemoryBytes": 212549632,
+    "availableForModelBytes": null,
+    "availableForModelReason": "Free RAM does not include the runtime, KV cache, unified GPU memory, OS, Forger, browser and build headroom; no available-for-model estimate is derived.",
+    "classification": "detection only, not a calibration or performance measurement"
+  },
+  "catalogVersion": "0.1.0",
+  "results": [],
+  "state": "preflight_only",
+  "prerequisites": {
+    "ready": false,
+    "reason": "docker_unavailable"
+  }
+}

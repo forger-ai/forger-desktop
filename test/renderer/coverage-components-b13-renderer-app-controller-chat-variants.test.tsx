@@ -116,8 +116,7 @@ describe('RendererAppController chat state and event variants', () => {
     act(() => result.current.handleDeleteConversation('free'));
     act(() => result.current.handleStartNewConversation());
     expect(bridge.call('filesReleaseSelections')).toHaveBeenCalledWith({ grantIds: ['staged'] });
-    const active = result.current.activeConversationId!;
-    act(() => result.current.handleDeleteConversation(active));
-    expect(result.current.chatHistoryItems.some((item) => item.id === active)).toBe(false);
+    expect(result.current.activeConversationId).toBeNull();
+    expect(result.current.chatHistoryItems.map((item) => item.id)).toEqual(['edit']);
   });
 });

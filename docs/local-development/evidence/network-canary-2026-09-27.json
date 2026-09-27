@@ -1,0 +1,515 @@
+{
+  "schemaVersion": 1,
+  "kind": "synthetic-subprocess-network-canary",
+  "observedAt": "2026-09-27T00:10:50.411Z",
+  "platform": "darwin",
+  "externalTrafficAttempted": false,
+  "dnsLookupAttempted": false,
+  "codexProcessTested": false,
+  "ollamaProcessTested": false,
+  "sandboxExecutable": "/usr/bin/sandbox-exec",
+  "profileSha256": "624dcc0c3a7a863ce872a1a4b7dfd6167e68b454a5ca5e7a7d0a7502bdeb6499",
+  "profileText": "(version 1)\n(allow default)\n(deny network*)\n(allow network-outbound (remote ip \"127.0.0.1:55922\"))\n",
+  "cases": [
+    {
+      "transport": "tcp4",
+      "depth": 0,
+      "mode": "baseline",
+      "routeExplicitlyAllowed": false,
+      "receiverObservedNonce": true,
+      "outcome": "reachable",
+      "attempt": {
+        "connected": true,
+        "acknowledged": true,
+        "errorCode": null,
+        "wallMs": 2.41
+      }
+    },
+    {
+      "transport": "tcp4",
+      "depth": 0,
+      "mode": "restricted",
+      "routeExplicitlyAllowed": false,
+      "receiverObservedNonce": false,
+      "outcome": "blocked",
+      "attempt": {
+        "errorCode": "PROBE_PROCESS_FAILED",
+        "exitCode": 65,
+        "diagnosticBytes": 154
+      }
+    },
+    {
+      "transport": "tcp4",
+      "depth": 1,
+      "mode": "baseline",
+      "routeExplicitlyAllowed": false,
+      "receiverObservedNonce": true,
+      "outcome": "reachable",
+      "attempt": {
+        "connected": true,
+        "acknowledged": true,
+        "errorCode": null,
+        "wallMs": 5.265708000000004
+      }
+    },
+    {
+      "transport": "tcp4",
+      "depth": 1,
+      "mode": "restricted",
+      "routeExplicitlyAllowed": false,
+      "receiverObservedNonce": false,
+      "outcome": "blocked",
+      "attempt": {
+        "errorCode": "PROBE_PROCESS_FAILED",
+        "exitCode": 65,
+        "diagnosticBytes": 154
+      }
+    },
+    {
+      "transport": "tcp4",
+      "depth": 2,
+      "mode": "baseline",
+      "routeExplicitlyAllowed": false,
+      "receiverObservedNonce": true,
+      "outcome": "reachable",
+      "attempt": {
+        "connected": true,
+        "acknowledged": true,
+        "errorCode": null,
+        "wallMs": 2.0562910000000016
+      }
+    },
+    {
+      "transport": "tcp4",
+      "depth": 2,
+      "mode": "restricted",
+      "routeExplicitlyAllowed": false,
+      "receiverObservedNonce": false,
+      "outcome": "blocked",
+      "attempt": {
+        "errorCode": "PROBE_PROCESS_FAILED",
+        "exitCode": 65,
+        "diagnosticBytes": 154
+      }
+    },
+    {
+      "transport": "tcp6",
+      "depth": 0,
+      "mode": "baseline",
+      "routeExplicitlyAllowed": false,
+      "receiverObservedNonce": true,
+      "outcome": "reachable",
+      "attempt": {
+        "connected": true,
+        "acknowledged": true,
+        "errorCode": null,
+        "wallMs": 5.00075
+      }
+    },
+    {
+      "transport": "tcp6",
+      "depth": 0,
+      "mode": "restricted",
+      "routeExplicitlyAllowed": false,
+      "receiverObservedNonce": false,
+      "outcome": "blocked",
+      "attempt": {
+        "errorCode": "PROBE_PROCESS_FAILED",
+        "exitCode": 65,
+        "diagnosticBytes": 154
+      }
+    },
+    {
+      "transport": "tcp6",
+      "depth": 1,
+      "mode": "baseline",
+      "routeExplicitlyAllowed": false,
+      "receiverObservedNonce": true,
+      "outcome": "reachable",
+      "attempt": {
+        "connected": true,
+        "acknowledged": true,
+        "errorCode": null,
+        "wallMs": 4.651249999999997
+      }
+    },
+    {
+      "transport": "tcp6",
+      "depth": 1,
+      "mode": "restricted",
+      "routeExplicitlyAllowed": false,
+      "receiverObservedNonce": false,
+      "outcome": "blocked",
+      "attempt": {
+        "errorCode": "PROBE_PROCESS_FAILED",
+        "exitCode": 65,
+        "diagnosticBytes": 154
+      }
+    },
+    {
+      "transport": "tcp6",
+      "depth": 2,
+      "mode": "baseline",
+      "routeExplicitlyAllowed": false,
+      "receiverObservedNonce": true,
+      "outcome": "reachable",
+      "attempt": {
+        "connected": true,
+        "acknowledged": true,
+        "errorCode": null,
+        "wallMs": 4.057708999999999
+      }
+    },
+    {
+      "transport": "tcp6",
+      "depth": 2,
+      "mode": "restricted",
+      "routeExplicitlyAllowed": false,
+      "receiverObservedNonce": false,
+      "outcome": "blocked",
+      "attempt": {
+        "errorCode": "PROBE_PROCESS_FAILED",
+        "exitCode": 65,
+        "diagnosticBytes": 154
+      }
+    },
+    {
+      "transport": "udp4",
+      "depth": 0,
+      "mode": "baseline",
+      "routeExplicitlyAllowed": false,
+      "receiverObservedNonce": true,
+      "outcome": "reachable",
+      "attempt": {
+        "connected": true,
+        "acknowledged": true,
+        "errorCode": null,
+        "wallMs": 2.5555839999999996
+      }
+    },
+    {
+      "transport": "udp4",
+      "depth": 0,
+      "mode": "restricted",
+      "routeExplicitlyAllowed": false,
+      "receiverObservedNonce": false,
+      "outcome": "blocked",
+      "attempt": {
+        "errorCode": "PROBE_PROCESS_FAILED",
+        "exitCode": 65,
+        "diagnosticBytes": 154
+      }
+    },
+    {
+      "transport": "udp4",
+      "depth": 1,
+      "mode": "baseline",
+      "routeExplicitlyAllowed": false,
+      "receiverObservedNonce": true,
+      "outcome": "reachable",
+      "attempt": {
+        "connected": true,
+        "acknowledged": true,
+        "errorCode": null,
+        "wallMs": 3.715833
+      }
+    },
+    {
+      "transport": "udp4",
+      "depth": 1,
+      "mode": "restricted",
+      "routeExplicitlyAllowed": false,
+      "receiverObservedNonce": false,
+      "outcome": "blocked",
+      "attempt": {
+        "errorCode": "PROBE_PROCESS_FAILED",
+        "exitCode": 65,
+        "diagnosticBytes": 154
+      }
+    },
+    {
+      "transport": "udp4",
+      "depth": 2,
+      "mode": "baseline",
+      "routeExplicitlyAllowed": false,
+      "receiverObservedNonce": true,
+      "outcome": "reachable",
+      "attempt": {
+        "connected": true,
+        "acknowledged": true,
+        "errorCode": null,
+        "wallMs": 2.455707999999998
+      }
+    },
+    {
+      "transport": "udp4",
+      "depth": 2,
+      "mode": "restricted",
+      "routeExplicitlyAllowed": false,
+      "receiverObservedNonce": false,
+      "outcome": "blocked",
+      "attempt": {
+        "errorCode": "PROBE_PROCESS_FAILED",
+        "exitCode": 65,
+        "diagnosticBytes": 154
+      }
+    },
+    {
+      "transport": "udp6",
+      "depth": 0,
+      "mode": "baseline",
+      "routeExplicitlyAllowed": false,
+      "receiverObservedNonce": true,
+      "outcome": "reachable",
+      "attempt": {
+        "connected": true,
+        "acknowledged": true,
+        "errorCode": null,
+        "wallMs": 6.666625
+      }
+    },
+    {
+      "transport": "udp6",
+      "depth": 0,
+      "mode": "restricted",
+      "routeExplicitlyAllowed": false,
+      "receiverObservedNonce": false,
+      "outcome": "blocked",
+      "attempt": {
+        "errorCode": "PROBE_PROCESS_FAILED",
+        "exitCode": 65,
+        "diagnosticBytes": 154
+      }
+    },
+    {
+      "transport": "udp6",
+      "depth": 1,
+      "mode": "baseline",
+      "routeExplicitlyAllowed": false,
+      "receiverObservedNonce": true,
+      "outcome": "reachable",
+      "attempt": {
+        "connected": true,
+        "acknowledged": true,
+        "errorCode": null,
+        "wallMs": 5.703709
+      }
+    },
+    {
+      "transport": "udp6",
+      "depth": 1,
+      "mode": "restricted",
+      "routeExplicitlyAllowed": false,
+      "receiverObservedNonce": false,
+      "outcome": "blocked",
+      "attempt": {
+        "errorCode": "PROBE_PROCESS_FAILED",
+        "exitCode": 65,
+        "diagnosticBytes": 154
+      }
+    },
+    {
+      "transport": "udp6",
+      "depth": 2,
+      "mode": "baseline",
+      "routeExplicitlyAllowed": false,
+      "receiverObservedNonce": true,
+      "outcome": "reachable",
+      "attempt": {
+        "connected": true,
+        "acknowledged": true,
+        "errorCode": null,
+        "wallMs": 7.983750000000001
+      }
+    },
+    {
+      "transport": "udp6",
+      "depth": 2,
+      "mode": "restricted",
+      "routeExplicitlyAllowed": false,
+      "receiverObservedNonce": false,
+      "outcome": "blocked",
+      "attempt": {
+        "errorCode": "PROBE_PROCESS_FAILED",
+        "exitCode": 65,
+        "diagnosticBytes": 154
+      }
+    },
+    {
+      "transport": "unix",
+      "depth": 0,
+      "mode": "baseline",
+      "routeExplicitlyAllowed": false,
+      "receiverObservedNonce": true,
+      "outcome": "reachable",
+      "attempt": {
+        "connected": true,
+        "acknowledged": true,
+        "errorCode": null,
+        "wallMs": 1.8653750000000002
+      }
+    },
+    {
+      "transport": "unix",
+      "depth": 0,
+      "mode": "restricted",
+      "routeExplicitlyAllowed": false,
+      "receiverObservedNonce": false,
+      "outcome": "blocked",
+      "attempt": {
+        "errorCode": "PROBE_PROCESS_FAILED",
+        "exitCode": 65,
+        "diagnosticBytes": 154
+      }
+    },
+    {
+      "transport": "unix",
+      "depth": 1,
+      "mode": "baseline",
+      "routeExplicitlyAllowed": false,
+      "receiverObservedNonce": true,
+      "outcome": "reachable",
+      "attempt": {
+        "connected": true,
+        "acknowledged": true,
+        "errorCode": null,
+        "wallMs": 2.418499999999998
+      }
+    },
+    {
+      "transport": "unix",
+      "depth": 1,
+      "mode": "restricted",
+      "routeExplicitlyAllowed": false,
+      "receiverObservedNonce": false,
+      "outcome": "blocked",
+      "attempt": {
+        "errorCode": "PROBE_PROCESS_FAILED",
+        "exitCode": 65,
+        "diagnosticBytes": 154
+      }
+    },
+    {
+      "transport": "unix",
+      "depth": 2,
+      "mode": "baseline",
+      "routeExplicitlyAllowed": false,
+      "receiverObservedNonce": true,
+      "outcome": "reachable",
+      "attempt": {
+        "connected": true,
+        "acknowledged": true,
+        "errorCode": null,
+        "wallMs": 2.8026659999999985
+      }
+    },
+    {
+      "transport": "unix",
+      "depth": 2,
+      "mode": "restricted",
+      "routeExplicitlyAllowed": false,
+      "receiverObservedNonce": false,
+      "outcome": "blocked",
+      "attempt": {
+        "errorCode": "PROBE_PROCESS_FAILED",
+        "exitCode": 65,
+        "diagnosticBytes": 154
+      }
+    },
+    {
+      "transport": "tcp4",
+      "depth": 0,
+      "mode": "baseline",
+      "routeExplicitlyAllowed": true,
+      "receiverObservedNonce": true,
+      "outcome": "reachable",
+      "attempt": {
+        "connected": true,
+        "acknowledged": true,
+        "errorCode": null,
+        "wallMs": 2.0455000000000005
+      }
+    },
+    {
+      "transport": "tcp4",
+      "depth": 0,
+      "mode": "restricted",
+      "routeExplicitlyAllowed": true,
+      "receiverObservedNonce": false,
+      "outcome": "blocked",
+      "attempt": {
+        "errorCode": "PROBE_PROCESS_FAILED",
+        "exitCode": 65,
+        "diagnosticBytes": 154
+      }
+    },
+    {
+      "transport": "tcp4",
+      "depth": 1,
+      "mode": "baseline",
+      "routeExplicitlyAllowed": true,
+      "receiverObservedNonce": true,
+      "outcome": "reachable",
+      "attempt": {
+        "connected": true,
+        "acknowledged": true,
+        "errorCode": null,
+        "wallMs": 2.0515000000000008
+      }
+    },
+    {
+      "transport": "tcp4",
+      "depth": 1,
+      "mode": "restricted",
+      "routeExplicitlyAllowed": true,
+      "receiverObservedNonce": false,
+      "outcome": "blocked",
+      "attempt": {
+        "errorCode": "PROBE_PROCESS_FAILED",
+        "exitCode": 65,
+        "diagnosticBytes": 154
+      }
+    },
+    {
+      "transport": "tcp4",
+      "depth": 2,
+      "mode": "baseline",
+      "routeExplicitlyAllowed": true,
+      "receiverObservedNonce": true,
+      "outcome": "reachable",
+      "attempt": {
+        "connected": true,
+        "acknowledged": true,
+        "errorCode": null,
+        "wallMs": 2.024083000000001
+      }
+    },
+    {
+      "transport": "tcp4",
+      "depth": 2,
+      "mode": "restricted",
+      "routeExplicitlyAllowed": true,
+      "receiverObservedNonce": false,
+      "outcome": "blocked",
+      "attempt": {
+        "errorCode": "PROBE_PROCESS_FAILED",
+        "exitCode": 65,
+        "diagnosticBytes": 154
+      }
+    }
+  ],
+  "limitations": [
+    "This measures controlled Node subprocesses and descendants only; it does not establish the network behavior of Codex, Ollama, Forger or arbitrary applications.",
+    "No external destination or DNS resolution is attempted. Loopback/Unix nonce receipt is the observable canary.",
+    "Already-open network file descriptors, privileged services and IPC-mediated access are outside this probe.",
+    "The profile denies network operations while allowing other operations by default; it is not a filesystem or general process sandbox.",
+    "Runtime/GPU isolation and resistance to a compromised operating system are not claimed."
+  ],
+  "summary": {
+    "reachable": 18,
+    "denied": 0,
+    "leaked": 0,
+    "blocked": 18,
+    "inconclusive": 0
+  }
+}

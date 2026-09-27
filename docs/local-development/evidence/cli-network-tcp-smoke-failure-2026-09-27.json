@@ -1,0 +1,94 @@
+{
+  "schemaVersion": 1,
+  "evidenceClass": "real_cli_synthetic_runtime",
+  "observedAt": "2026-09-27T00:31:16.849Z",
+  "cliVersion": "codex-cli 0.144.1",
+  "passed": false,
+  "scenario": "tool_loop",
+  "failure": "ENOENT: no such file or directory, open '/var/folders/zc/bzx8rpmd503dkkmymj3w9yfm0000gn/T/forger-local-cli-probe-vcz9cj/probe-result.txt'",
+  "agentExitCode": 0,
+  "toolName": "exec_command",
+  "responseTurns": 2,
+  "requests": [
+    "/api/tags",
+    "/api/show",
+    "/api/version",
+    "/v1/responses",
+    "/v1/responses"
+  ],
+  "redirectStatus": null,
+  "redirectedRequests": 0,
+  "canaryBodyBytes": 0,
+  "realModelInference": false,
+  "performanceMeasured": false,
+  "processEgressVerified": false,
+  "networkSandboxRequested": true,
+  "outerNetworkPolicy": {
+    "kind": "macos-seatbelt-evaluation",
+    "status": "configured_not_verified",
+    "allowedGatewayPort": 56861,
+    "profileSha256": "744d9d330adb866bb99437e589491d2f89304e3d43046742c623a66cfe0a5ba0",
+    "profileText": "(version 1)\n(allow default)\n(deny network*)\n(allow network-outbound (remote tcp \"localhost:56861\"))\n",
+    "limitations": [
+      "Only the spawned Codex process tree is wrapped; the Forger host and user-owned Ollama service are not wrapped.",
+      "Pre-opened descriptors and privileged IPC are outside this guarantee.",
+      "Nested Codex sandbox compatibility and actual subprocess network behavior require live verification."
+    ]
+  },
+  "toolLoopSucceededUnderPolicy": false,
+  "sandboxInitializationDenied": true,
+  "syntheticDiagnostics": {
+    "events": [
+      {
+        "type": "thread.started",
+        "thread_id": "01a0e045-f66f-7241-acf7-d73e576f8367"
+      },
+      {
+        "type": "item.completed",
+        "item": {
+          "id": "item_0",
+          "type": "error",
+          "message": "Model metadata for `forger-protocol-probe:synthetic` not found. Defaulting to fallback metadata; this can degrade performance and cause issues."
+        }
+      },
+      {
+        "type": "turn.started"
+      },
+      {
+        "type": "item.completed",
+        "item": {
+          "id": "item_1",
+          "type": "error",
+          "message": "Skill descriptions were shortened to fit the 2% skills context budget. Codex can still see every skill, but some descriptions are shorter. Disable unused skills or plugins to leave more room for the rest."
+        }
+      },
+      {
+        "type": "item.completed",
+        "item": {
+          "id": "item_2",
+          "type": "agent_message",
+          "text": "Synthetic protocol probe complete."
+        }
+      },
+      {
+        "type": "turn.completed",
+        "usage": {
+          "input_tokens": 2,
+          "cached_input_tokens": 0,
+          "output_tokens": 2,
+          "reasoning_output_tokens": 0
+        }
+      }
+    ],
+    "stderr": "",
+    "toolOutputs": [
+      {
+        "type": "function_call_output",
+        "call_id": "call_probe",
+        "output": "Chunk ID: 462b44\nWall time: 0.0000 seconds\nProcess exited with code 71\nOriginal token count: 14\nOutput:\nsandbox-exec: sandbox_apply: Operation not permitted\n"
+      }
+    ],
+    "unparsedStdoutLines": 0,
+    "truncated": false
+  }
+}

@@ -1,0 +1,2097 @@
+{
+  "schemaVersion": 1,
+  "createdAt": "2026-09-27T01:30:54.279Z",
+  "protocol": "forger-common-local-v1",
+  "comparisonMode": "controlled",
+  "executionProfile": "m1-serial-v1",
+  "forger": {
+    "version": "0.5.17",
+    "revision": "7fa965edc9408211d8f4336bb0ed0a4f30a88102",
+    "dirty": true,
+    "sourceSha256": "ebcb6f8a354fc3776edf1ff688686a67f3b98ac8c726539d5d30e0fcbee7e120",
+    "compiledProviderSha256": "b1550b369b58b6caf323bb2d8a1ee1bd8a63e8cbd6e6be7c08c06e75ba678812",
+    "harnessSha256": "dc96386c2b6d535115459267abee7b7a6e9f411c8a343793209972d246baf3b0"
+  },
+  "hardware": {
+    "platform": "darwin",
+    "architecture": "arm64",
+    "cpu": "Apple M1",
+    "logicalCpuCount": 8,
+    "totalMemoryBytes": 8589934592,
+    "freeMemoryBytes": 599703552,
+    "availableForModelBytes": null,
+    "availableForModelReason": "Free RAM does not include the runtime, KV cache, unified GPU memory, OS, Forger, browser and build headroom; no available-for-model estimate is derived.",
+    "classification": "detection only, not a calibration or performance measurement"
+  },
+  "catalogVersion": "0.1.0",
+  "results": [
+    {
+      "schemaVersion": 1,
+      "taskId": "bug-01",
+      "taskHash": "26c659f3f12554db115a3ab113090a552b7fb6a8ae222b51666489261b296443",
+      "trial": 1,
+      "partition": "development",
+      "band": "S",
+      "family": "bug",
+      "creationMode": "supported_template",
+      "startedAt": "2026-09-27T01:31:10.469Z",
+      "status": "failed",
+      "attempted": true,
+      "intervention": false,
+      "evidenceClass": "real_model",
+      "elapsedMs": 89217.077791,
+      "agentElapsedMs": 60892.857083,
+      "evaluationElapsedMs": 28267.480083999995,
+      "configuration": {
+        "endpoint": "http://127.0.0.1:11445",
+        "model": "qwen3:1.7b",
+        "modelDigest": "sha256:8f68893c685c3ddff2aa3fffce2aa60a30bb2da65ca488b61fff134a4d1730e7",
+        "contextWindow": 16384,
+        "agentProfile": "single-agent-no-thinking-v1",
+        "cliPath": "/Users/kupa/Library/Application Support/forger-desktop/codex-cli/node_modules/@openai/codex-darwin-arm64/vendor/aarch64-apple-darwin/bin/codex",
+        "evaluatorImage": "sha256:de5bb77888ef8a6826ffa49ab9132d287c4e9e26a187c5a143213eeaa2e28406"
+      },
+      "configurationHash": "2385b328c2fd63f05b954e39df0d4d04829b10dfa1305260cd9b0ea30239b105",
+      "budget": {
+        "timeMs": 600000,
+        "toolCalls": 60,
+        "retries": 0,
+        "evaluationTimeMs": 240000
+      },
+      "metrics": {
+        "timeToFirstTokenMs": {
+          "value": null,
+          "reason": "Codex JSONL does not expose the first model token. First process output is not TTFT."
+        },
+        "generationTokensPerSecond": {
+          "value": null,
+          "reason": "No token-timed inference trace is available."
+        },
+        "peakRuntimeMemoryBytes": {
+          "value": null,
+          "reason": "Runtime and unified GPU memory are not sampled by this runner."
+        },
+        "outOfMemory": {
+          "value": null,
+          "reason": "Only explicit process/runtime resource errors are identifiable; OS memory pressure is not instrumented."
+        },
+        "promptTokens": {
+          "value": null,
+          "reason": "The model tokenizer and complete rendered tool/context messages are not observed."
+        },
+        "cloudCost": {
+          "value": null,
+          "reason": "Local execution; no cloud billing request is made."
+        },
+        "modelLoadMs": {
+          "value": null,
+          "reason": "Load timing is not separately observed; the model may already be resident."
+        },
+        "initialDownloadMs": {
+          "value": null,
+          "reason": "Downloads are outside benchmark execution and never initiated by this runner."
+        }
+      },
+      "observed": {
+        "harnessRetries": 0,
+        "internalModelRetries": {
+          "value": null,
+          "reason": "Internal CLI/runtime retries are not exposed as a reliable counter."
+        },
+        "toolCalls": 0,
+        "toolCallEvidence": "Distinct item IDs with explicit command/file/tool types in Codex JSONL; not inferred from token count.",
+        "timeouts": 0,
+        "modifiedFiles": [],
+        "relevantFilesRead": {
+          "value": null,
+          "reason": "Complete file retrieval is not exposed by the CLI stream."
+        },
+        "unexpectedFiles": []
+      },
+      "loadPhase": {
+        "value": "uncontrolled",
+        "reason": "Cold start, resident model and initial download are not conflated. Load state must be independently instrumented before cold/warm comparison."
+      },
+      "privacy": {
+        "inference": "loopback only; enforced by provider preflight",
+        "evaluator": "Docker network=none, no host write mounts, no secrets injected",
+        "agentSubprocesses": "Codex safe workspace sandbox; no claim of absolute host or OS isolation"
+      },
+      "prerequisites": {
+        "ready": true,
+        "dockerVersion": "29.1.3",
+        "evaluatorImage": "sha256:de5bb77888ef8a6826ffa49ab9132d287c4e9e26a187c5a143213eeaa2e28406",
+        "evidenceClass": "real_model",
+        "cliSha256": "29915529b97697def1a957b0505e770aa6a45744435d62fc263e98d7619e167a",
+        "checkedAt": "2026-09-27T01:31:08.187Z",
+        "daemonStateAtAgentStart": "stopped_by_serial_controller",
+        "revalidationBeforeEvaluationRequired": true
+      },
+      "initialStateHash": "f11b2d55b16737dc86153ed97a259aea244ecc92cc7674e5531eb1f73939366e",
+      "fixturePreparation": {
+        "recipe": "compose-commons-and-task-overlay-v1",
+        "sourceSha256": "637afda2b28fb27c89367381ba58263d13ee36938ea2b33ccb5203708bad44e3",
+        "recipeSha256": "6036091cbf9be2115fd77aa286fdc5049a36d75fa1816ffc44a867272baa9968",
+        "fixture": "bug",
+        "commonsOverlays": [
+          {
+            "source": "commons/backend/database.py",
+            "destination": "backend/src/app/database.py",
+            "sha256": "e43ccac0a455cc85dc264236c45786f6e13796243a7dbf5efa904773581d51cc"
+          },
+          {
+            "source": "commons/backend/background_jobs.py",
+            "destination": "backend/src/app/background_jobs.py",
+            "sha256": "60a712fcf8afa2cc2b66252081c65039a4f1a10f2c4ae69465dd3623fb6e691f"
+          },
+          {
+            "source": "commons/backend/health.py",
+            "destination": "backend/src/app/health.py",
+            "sha256": "08393b2dede3315f93f68e19afc10bb5d86f1539d5f631e232cee56a2f70aecf"
+          },
+          {
+            "source": "commons/backend/cors.py",
+            "destination": "backend/src/app/cors.py",
+            "sha256": "455be5c1ee83dccea9fb39b7dcb87894bde9f8f96bd6fe224f8d5d309f815f2c"
+          },
+          {
+            "source": "commons/backend/forger_desktop.py",
+            "destination": "backend/src/app/forger_desktop.py",
+            "sha256": "86344f21fe9bed921481663bbe8b976f64b0dab2c0302c050e4be82105c42425"
+          },
+          {
+            "source": "commons/backend/forger_context.py",
+            "destination": "backend/src/app/forger_context.py",
+            "sha256": "676690142e17e5eb0473bfd0666ac74762ffafe72b411cb0e139f9c20eba548f"
+          },
+          {
+            "source": "commons/backend/desktop_events.py",
+            "destination": "backend/src/app/desktop_events.py",
+            "sha256": "59d20c634cd5fd0649b9e6f462eb58d9c4d3fdc3397eb82dfdbc65f93e80ef3f"
+          },
+          {
+            "source": "commons/backend/desktop_task_jobs.py",
+            "destination": "backend/src/app/desktop_task_jobs.py",
+            "sha256": "05e57a9f78b910cc35cc3fe226884cefa48127f598eda85ad1bc383e356ce315"
+          },
+          {
+            "source": "commons/backend/desktop_agent_jobs.py",
+            "destination": "backend/src/app/desktop_agent_jobs.py",
+            "sha256": "3ca436ee447c2429c914cb9548e52fe979e5c5d274dadbb76e964dfccf51b708"
+          },
+          {
+            "source": "commons/backend/realtime.py",
+            "destination": "backend/src/app/realtime.py",
+            "sha256": "66599ef269e60fc00960a980a25979e69c52226e55620442ebf7b2431e1c423a"
+          },
+          {
+            "source": "commons/frontend/client.ts",
+            "destination": "frontend/src/api/client.ts",
+            "sha256": "2739db9fb448942d432bc2eeef55911e9890b515fa8a6ae75275e27738da2a1c"
+          },
+          {
+            "source": "commons/frontend/locale.ts",
+            "destination": "frontend/src/api/locale.ts",
+            "sha256": "f2285f57d586cb514a936fe9eec7bc009f655f380902b02dae46a789fa0ee923"
+          },
+          {
+            "source": "commons/frontend/forgerBrand.ts",
+            "destination": "frontend/src/api/forgerBrand.ts",
+            "sha256": "b324f36b508bccd9b327a445f34cd5dde03f1d8fd10c8e6df27822a6e7412b31"
+          },
+          {
+            "source": "commons/frontend/remoteTunnel.ts",
+            "destination": "frontend/src/api/remoteTunnel.ts",
+            "sha256": "db4629225f8ca4e50ceb1c4f7f15556a53d108f6b85bde8ca17dd498386d1a4d"
+          }
+        ],
+        "preparedStateSha256": "f11b2d55b16737dc86153ed97a259aea244ecc92cc7674e5531eb1f73939366e",
+        "sha256": "73b4bfa6c7754637701431b12eed6818467f0f97505e7493ecce2c85b3b86b88"
+      },
+      "acceptanceHash": "569654b371214fc285a15f0af366304e5b1a408e306f4180c1a9606be4b5b093",
+      "promptHash": "08309827290c145ab31d9dde4f8acf4ebe5b42b8cd6b7a5ad7a7c3640e89682c",
+      "agent": {
+        "code": 0,
+        "usage": {
+          "inputTokens": 34149,
+          "cachedInputTokens": 25471,
+          "outputTokens": 444,
+          "reasoningOutputTokens": 0,
+          "turns": 1
+        },
+        "claimedCompletion": false,
+        "metadata": {
+          "runtime": "ollama",
+          "runtimeVersion": "0.34.4",
+          "model": "qwen3:1.7b",
+          "modelDigest": "8f68893c685c3ddff2aa3fffce2aa60a30bb2da65ca488b61fff134a4d1730e7",
+          "reportedCapabilities": [
+            "completion",
+            "tools",
+            "thinking"
+          ],
+          "validatedCapabilities": [],
+          "requestedAgentContextWindow": 16384,
+          "effectiveRuntimeContext": null,
+          "effectiveRuntimeContextReason": "Agent context budget does not establish effective Ollama num_ctx.",
+          "observedToolContracts": [
+            {
+              "type": "function",
+              "name": "exec_command",
+              "namespace": ""
+            },
+            {
+              "type": "function",
+              "name": "write_stdin",
+              "namespace": ""
+            },
+            {
+              "type": "function",
+              "name": "update_plan",
+              "namespace": ""
+            },
+            {
+              "type": "function",
+              "name": "request_user_input",
+              "namespace": ""
+            },
+            {
+              "type": "function",
+              "name": "view_image",
+              "namespace": ""
+            }
+          ],
+          "agentProfile": "single-agent-no-thinking-v1",
+          "requestedReasoning": "none",
+          "appliedSettings": {
+            "features.multi_agent": false,
+            "model_reasoning_effort": "none",
+            "model_supports_reasoning_summaries": true,
+            "model_reasoning_summary": "none"
+          },
+          "contractSha256": null
+        }
+      },
+      "protectedFileChanges": [],
+      "evaluation": {
+        "schemaVersion": 1,
+        "evaluatorVersion": "0.2.0",
+        "taskId": "bug-01",
+        "passed": false,
+        "checks": [
+          {
+            "name": "backend_compile",
+            "passed": true,
+            "completedCheckGroups": 1,
+            "elapsedMs": 188
+          },
+          {
+            "name": "frontend_build",
+            "passed": true,
+            "completedCheckGroups": 1,
+            "elapsedMs": 7332
+          },
+          {
+            "name": "backend_regression",
+            "passed": true,
+            "completedCheckGroups": 1,
+            "elapsedMs": 3340
+          },
+          {
+            "name": "frontend_regression",
+            "passed": true,
+            "completedCheckGroups": 1,
+            "elapsedMs": 1358
+          },
+          {
+            "name": "runtime_health",
+            "passed": true,
+            "completedCheckGroups": 1,
+            "elapsedMs": 9
+          },
+          {
+            "name": "task_acceptance",
+            "passed": false,
+            "completedCheckGroups": 0,
+            "error": "Expected values to be strictly equal:\n+ actual - expected\n\n+ '  Trim me  '\n- 'Trim me'\n",
+            "elapsedMs": 1665
+          }
+        ],
+        "runtime": {
+          "node": "v24.21.0",
+          "pythonDependencies": "agent-detector==2.0.0\nannotated-doc==0.0.5\nannotated-types==0.8.0\nanyio==4.15.1\ncertifi==2026.7.22\nclick==8.5.0\ncoverage==7.16.1\ndetect-installer==0.2.1\ndnspython==2.8.0\nemail-validator==2.3.0\nfastapi==0.136.3\nfastapi-cli==0.0.32\nfastapi-cloud-cli==0.26.0\nfastar==0.12.0\ngreenlet==3.5.6\nh11==0.16.0\nhttpcore==1.0.9\nhttptools==0.8.0\nhttpx==0.28.1\nidna==3.20\niniconfig==2.3.0\nJinja2==3.1.6\nmarkdown-it-py==4.2.0\nMarkupSafe==3.0.3\nmdurl==0.1.2\npackaging==26.3\npluggy==1.6.0\npydantic==2.13.5\npydantic-extra-types==2.11.1\npydantic-settings==2.15.0\npydantic_core==2.46.5\nPygments==2.21.0\npytest==9.1.1\npytest-asyncio==1.4.0\npytest-cov==7.1.0\npython-dotenv==1.2.3\npython-multipart==0.0.32\nPyYAML==6.0.3\nrich==15.0.0\nrich-toolkit==0.20.5\nrignore==0.8.1\nruff==0.16.9\nsentry-sdk==2.70.0\nshellingham==1.5.4\nskeleton @ file:///opt/backend\nSQLAlchemy==2.0.54\nsqlmodel==0.0.47\nstarlette==1.7.0\ntyper==0.27.2\ntyping-inspection==0.4.4\ntyping_extensions==4.16.0\nurllib3==2.8.0\nuvicorn==0.54.0\nuvloop==0.22.1\nwatchfiles==1.3.0\nwebsockets==17.1\n",
+          "frontendDependencies": {
+            "version": "0.1.0",
+            "name": "skeleton-frontend",
+            "dependencies": {
+              "@eslint/js": {
+                "version": "9.39.5",
+                "resolved": "https://registry.npmjs.org/@eslint/js/-/js-9.39.5.tgz",
+                "overridden": false
+              },
+              "@radix-ui/react-dialog": {
+                "version": "1.1.23",
+                "resolved": "https://registry.npmjs.org/@radix-ui/react-dialog/-/react-dialog-1.1.23.tgz",
+                "overridden": false
+              },
+              "@radix-ui/react-dropdown-menu": {
+                "version": "2.1.24",
+                "resolved": "https://registry.npmjs.org/@radix-ui/react-dropdown-menu/-/react-dropdown-menu-2.1.24.tgz",
+                "overridden": false
+              },
+              "@radix-ui/react-label": {
+                "version": "2.1.15",
+                "resolved": "https://registry.npmjs.org/@radix-ui/react-label/-/react-label-2.1.15.tgz",
+                "overridden": false
+              },
+              "@radix-ui/react-select": {
+                "version": "2.3.7",
+                "resolved": "https://registry.npmjs.org/@radix-ui/react-select/-/react-select-2.3.7.tgz",
+                "overridden": false
+              },
+              "@radix-ui/react-separator": {
+                "version": "1.1.15",
+                "resolved": "https://registry.npmjs.org/@radix-ui/react-separator/-/react-separator-1.1.15.tgz",
+                "overridden": false
+              },
+              "@radix-ui/react-slot": {
+                "version": "1.3.3",
+                "resolved": "https://registry.npmjs.org/@radix-ui/react-slot/-/react-slot-1.3.3.tgz",
+                "overridden": false
+              },
+              "@shadcn/react": {
+                "version": "0.2.1",
+                "resolved": "https://registry.npmjs.org/@shadcn/react/-/react-0.2.1.tgz",
+                "overridden": false
+              },
+              "@tailwindcss/vite": {
+                "version": "4.3.3",
+                "resolved": "https://registry.npmjs.org/@tailwindcss/vite/-/vite-4.3.3.tgz",
+                "overridden": false
+              },
+              "@tanstack/react-query": {
+                "version": "5.104.0",
+                "resolved": "https://registry.npmjs.org/@tanstack/react-query/-/react-query-5.104.0.tgz",
+                "overridden": false
+              },
+              "@tanstack/react-router": {
+                "version": "1.170.39",
+                "resolved": "https://registry.npmjs.org/@tanstack/react-router/-/react-router-1.170.39.tgz",
+                "overridden": false
+              },
+              "@types/node": {
+                "version": "22.20.4",
+                "resolved": "https://registry.npmjs.org/@types/node/-/node-22.20.4.tgz",
+                "overridden": false
+              },
+              "@types/react-dom": {
+                "version": "19.3.0",
+                "resolved": "https://registry.npmjs.org/@types/react-dom/-/react-dom-19.3.0.tgz",
+                "overridden": false
+              },
+              "@types/react": {
+                "version": "19.3.0",
+                "resolved": "https://registry.npmjs.org/@types/react/-/react-19.3.0.tgz",
+                "overridden": false
+              },
+              "@vitejs/plugin-react": {
+                "version": "4.7.0",
+                "resolved": "https://registry.npmjs.org/@vitejs/plugin-react/-/plugin-react-4.7.0.tgz",
+                "overridden": false
+              },
+              "@vitest/coverage-v8": {
+                "version": "2.1.9",
+                "resolved": "https://registry.npmjs.org/@vitest/coverage-v8/-/coverage-v8-2.1.9.tgz",
+                "overridden": false
+              },
+              "class-variance-authority": {
+                "version": "0.7.1",
+                "resolved": "https://registry.npmjs.org/class-variance-authority/-/class-variance-authority-0.7.1.tgz",
+                "overridden": false
+              },
+              "clsx": {
+                "version": "2.1.1",
+                "resolved": "https://registry.npmjs.org/clsx/-/clsx-2.1.1.tgz",
+                "overridden": false
+              },
+              "eslint-plugin-react-hooks": {
+                "version": "5.2.0",
+                "resolved": "https://registry.npmjs.org/eslint-plugin-react-hooks/-/eslint-plugin-react-hooks-5.2.0.tgz",
+                "overridden": false
+              },
+              "eslint-plugin-react-refresh": {
+                "version": "0.4.26",
+                "resolved": "https://registry.npmjs.org/eslint-plugin-react-refresh/-/eslint-plugin-react-refresh-0.4.26.tgz",
+                "overridden": false
+              },
+              "eslint": {
+                "version": "9.39.5",
+                "resolved": "https://registry.npmjs.org/eslint/-/eslint-9.39.5.tgz",
+                "overridden": false
+              },
+              "globals": {
+                "version": "15.15.0",
+                "resolved": "https://registry.npmjs.org/globals/-/globals-15.15.0.tgz",
+                "overridden": false
+              },
+              "lucide-react": {
+                "version": "0.468.0",
+                "resolved": "https://registry.npmjs.org/lucide-react/-/lucide-react-0.468.0.tgz",
+                "overridden": false
+              },
+              "react-dom": {
+                "version": "19.3.0",
+                "resolved": "https://registry.npmjs.org/react-dom/-/react-dom-19.3.0.tgz",
+                "overridden": false
+              },
+              "react": {
+                "version": "19.3.0",
+                "resolved": "https://registry.npmjs.org/react/-/react-19.3.0.tgz",
+                "overridden": false
+              },
+              "tailwind-merge": {
+                "version": "2.6.1",
+                "resolved": "https://registry.npmjs.org/tailwind-merge/-/tailwind-merge-2.6.1.tgz",
+                "overridden": false
+              },
+              "tailwindcss": {
+                "version": "4.3.3",
+                "resolved": "https://registry.npmjs.org/tailwindcss/-/tailwindcss-4.3.3.tgz",
+                "overridden": false
+              },
+              "typescript-eslint": {
+                "version": "8.70.1",
+                "resolved": "https://registry.npmjs.org/typescript-eslint/-/typescript-eslint-8.70.1.tgz",
+                "overridden": false
+              },
+              "typescript": {
+                "version": "5.9.3",
+                "resolved": "https://registry.npmjs.org/typescript/-/typescript-5.9.3.tgz",
+                "overridden": false
+              },
+              "vite": {
+                "version": "5.4.21",
+                "resolved": "https://registry.npmjs.org/vite/-/vite-5.4.21.tgz",
+                "overridden": false
+              },
+              "vitest": {
+                "version": "2.1.9",
+                "resolved": "https://registry.npmjs.org/vitest/-/vitest-2.1.9.tgz",
+                "overridden": false
+              }
+            }
+          }
+        },
+        "externalRequests": [],
+        "error": "Expected values to be strictly equal:\n+ actual - expected\n\n+ '  Trim me  '\n- 'Trim me'\n",
+        "timedOut": false,
+        "code": 1
+      },
+      "failure": "acceptance_failed",
+      "finishedAt": "2026-09-27T01:32:39.746Z",
+      "serialExecution": {
+        "profile": "m1-serial-v1",
+        "vm": "forger-local-eval",
+        "lifecycle": [
+          {
+            "action": "vm_start_preflight",
+            "startedAt": "2026-09-27T01:30:54.526Z",
+            "status": "completed",
+            "result": {
+              "commandExitCode": 0,
+              "vm": "forger-local-eval",
+              "timeoutMs": 120000
+            },
+            "finishedAt": "2026-09-27T01:31:05.240Z",
+            "elapsedMs": 10714.092125
+          },
+          {
+            "action": "evaluator_preflight",
+            "startedAt": "2026-09-27T01:31:05.240Z",
+            "status": "completed",
+            "result": {
+              "ready": true,
+              "dockerVersion": "29.1.3",
+              "evaluatorImage": "sha256:de5bb77888ef8a6826ffa49ab9132d287c4e9e26a187c5a143213eeaa2e28406",
+              "evidenceClass": "real_model",
+              "cliSha256": "29915529b97697def1a957b0505e770aa6a45744435d62fc263e98d7619e167a"
+            },
+            "finishedAt": "2026-09-27T01:31:08.187Z",
+            "elapsedMs": 2947.062208000001
+          },
+          {
+            "action": "vm_stop_before_agent",
+            "startedAt": "2026-09-27T01:31:08.187Z",
+            "status": "completed",
+            "result": {
+              "commandExitCode": 0,
+              "vm": "forger-local-eval",
+              "timeoutMs": 60000
+            },
+            "finishedAt": "2026-09-27T01:31:10.427Z",
+            "elapsedMs": 2240.1190829999996
+          },
+          {
+            "action": "observe_model_before_agent",
+            "startedAt": "2026-09-27T01:31:10.427Z",
+            "status": "completed",
+            "result": {
+              "targetModelResident": false,
+              "otherResidentModelCount": 0,
+              "source": "ollama_api_ps",
+              "sampledAt": "2026-09-27T01:31:10.468Z",
+              "memoryUsageMeasured": false,
+              "targetModels": []
+            },
+            "finishedAt": "2026-09-27T01:31:10.468Z",
+            "elapsedMs": 41.07045900000048
+          },
+          {
+            "action": "observe_model_after_agent",
+            "startedAt": "2026-09-27T01:32:11.408Z",
+            "status": "completed",
+            "result": {
+              "targetModelResident": true,
+              "otherResidentModelCount": 0,
+              "source": "ollama_api_ps",
+              "sampledAt": "2026-09-27T01:32:11.423Z",
+              "memoryUsageMeasured": false,
+              "targetModels": [
+                {
+                  "digestReported": "8f68893c685c3ddff2aa3fffce2aa60a30bb2da65ca488b61fff134a4d1730e7",
+                  "digestMatchesRequested": true,
+                  "contextLengthReported": 16384,
+                  "sizeBytesReported": 3164518480,
+                  "sizeVramBytesReported": 3164518480
+                }
+              ]
+            },
+            "finishedAt": "2026-09-27T01:32:11.423Z",
+            "elapsedMs": 14.390500000008615
+          },
+          {
+            "action": "unload_model_before_evaluation",
+            "startedAt": "2026-09-27T01:32:11.477Z",
+            "status": "completed",
+            "result": {
+              "acknowledged": true,
+              "targetModelResident": false,
+              "otherResidentModelCount": 0,
+              "source": "ollama_api_ps",
+              "sampledAt": "2026-09-27T01:32:11.530Z",
+              "memoryUsageMeasured": false,
+              "targetModels": [],
+              "elapsedMs": 52.8449580000015,
+              "memoryReleaseMeasured": false
+            },
+            "finishedAt": "2026-09-27T01:32:11.530Z",
+            "elapsedMs": 52.92041699998663
+          },
+          {
+            "action": "vm_start_evaluation",
+            "startedAt": "2026-09-27T01:32:11.530Z",
+            "status": "completed",
+            "result": {
+              "commandExitCode": 0,
+              "vm": "forger-local-eval",
+              "timeoutMs": 120000
+            },
+            "finishedAt": "2026-09-27T01:32:23.087Z",
+            "elapsedMs": 11557.355250000008
+          },
+          {
+            "action": "evaluator_revalidation",
+            "startedAt": "2026-09-27T01:32:23.087Z",
+            "status": "completed",
+            "result": {
+              "ready": true,
+              "dockerVersion": "29.1.3",
+              "evaluatorImage": "sha256:de5bb77888ef8a6826ffa49ab9132d287c4e9e26a187c5a143213eeaa2e28406",
+              "evidenceClass": "real_model",
+              "cliSha256": "29915529b97697def1a957b0505e770aa6a45744435d62fc263e98d7619e167a"
+            },
+            "finishedAt": "2026-09-27T01:32:23.592Z",
+            "elapsedMs": 505.38604199999827
+          }
+        ],
+        "networkPolicy": "codex-workspace",
+        "wholeCliEgressVerified": false,
+        "networkLimitations": [
+          "The existing Codex workspace-write tool sandbox has network_access=false; the authenticated gateway rejects inference redirects.",
+          "The whole CLI process is not covered by an outer network sandbox, and its total egress is unverified."
+        ],
+        "runtimeModelResidentBeforeAgent": false,
+        "residencyAfterAgent": {
+          "targetModelResident": true,
+          "otherResidentModelCount": 0,
+          "source": "ollama_api_ps",
+          "sampledAt": "2026-09-27T01:32:11.423Z",
+          "memoryUsageMeasured": false,
+          "targetModels": [
+            {
+              "digestReported": "8f68893c685c3ddff2aa3fffce2aa60a30bb2da65ca488b61fff134a4d1730e7",
+              "digestMatchesRequested": true,
+              "contextLengthReported": 16384,
+              "sizeBytesReported": 3164518480,
+              "sizeVramBytesReported": 3164518480
+            }
+          ]
+        },
+        "agentResources": {
+          "sampleIntervalMs": 1000,
+          "sampleCount": 56,
+          "samples": [
+            {
+              "observedAt": "2026-09-27T01:31:10.533Z",
+              "systemTotalMemoryBytes": 8589934592,
+              "systemFreeMemoryBytes": 1458094080,
+              "runtimeProcessCount": 1,
+              "runtimeTreeRssBytes": 6782976,
+              "vm": {
+                "pageSizeBytes": 16384,
+                "freeBytes": 1319501824,
+                "inactiveBytes": 1415954432,
+                "speculativeBytes": 135774208,
+                "wiredBytes": 2088189952,
+                "compressorBytes": 1759936512,
+                "pageouts": 1938403,
+                "swapins": 15136199,
+                "swapouts": 17169405
+              },
+              "swap": {
+                "totalBytes": 8589934592,
+                "usedBytes": 7428898816,
+                "freeBytes": 1161035776
+              },
+              "unavailable": []
+            },
+            {
+              "observedAt": "2026-09-27T01:31:11.551Z",
+              "systemTotalMemoryBytes": 8589934592,
+              "systemFreeMemoryBytes": 869761024,
+              "runtimeProcessCount": 2,
+              "runtimeTreeRssBytes": 150470656,
+              "vm": {
+                "pageSizeBytes": 16384,
+                "freeBytes": 496156672,
+                "inactiveBytes": 1440202752,
+                "speculativeBytes": 290832384,
+                "wiredBytes": 2459746304,
+                "compressorBytes": 1721581568,
+                "pageouts": 1938403,
+                "swapins": 15136263,
+                "swapouts": 17169405
+              },
+              "swap": {
+                "totalBytes": 8589934592,
+                "usedBytes": 7428898816,
+                "freeBytes": 1161035776
+              },
+              "unavailable": []
+            },
+            {
+              "observedAt": "2026-09-27T01:31:12.573Z",
+              "systemTotalMemoryBytes": 8589934592,
+              "systemFreeMemoryBytes": 79675392,
+              "runtimeProcessCount": 2,
+              "runtimeTreeRssBytes": 1506918400,
+              "vm": {
+                "pageSizeBytes": 16384,
+                "freeBytes": 15384576,
+                "inactiveBytes": 840663040,
+                "speculativeBytes": 65454080,
+                "wiredBytes": 3516268544,
+                "compressorBytes": 2623078400,
+                "pageouts": 1938651,
+                "swapins": 15136714,
+                "swapouts": 17169405
+              },
+              "swap": {
+                "totalBytes": 8589934592,
+                "usedBytes": 7412121600,
+                "freeBytes": 1177812992
+              },
+              "unavailable": []
+            },
+            {
+              "observedAt": "2026-09-27T01:31:13.648Z",
+              "systemTotalMemoryBytes": 8589934592,
+              "systemFreeMemoryBytes": 193314816,
+              "runtimeProcessCount": 2,
+              "runtimeTreeRssBytes": 3153641472,
+              "vm": {
+                "pageSizeBytes": 16384,
+                "freeBytes": 63815680,
+                "inactiveBytes": 448970752,
+                "speculativeBytes": 124813312,
+                "wiredBytes": 5283053568,
+                "compressorBytes": 1491894272,
+                "pageouts": 1938753,
+                "swapins": 15138216,
+                "swapouts": 17222645
+              },
+              "swap": {
+                "totalBytes": 8589934592,
+                "usedBytes": 8267623301.12,
+                "freeBytes": 322311290.88
+              },
+              "unavailable": []
+            },
+            {
+              "observedAt": "2026-09-27T01:31:14.680Z",
+              "systemTotalMemoryBytes": 8589934592,
+              "systemFreeMemoryBytes": 112508928,
+              "runtimeProcessCount": 2,
+              "runtimeTreeRssBytes": 3137961984,
+              "vm": {
+                "pageSizeBytes": 16384,
+                "freeBytes": 62980096,
+                "inactiveBytes": 543784960,
+                "speculativeBytes": 52854784,
+                "wiredBytes": 5165678592,
+                "compressorBytes": 1562165248,
+                "pageouts": 1938839,
+                "swapins": 15139466,
+                "swapouts": 17222645
+              },
+              "swap": {
+                "totalBytes": 8589934592,
+                "usedBytes": 8250846085.12,
+                "freeBytes": 339088506.88
+              },
+              "unavailable": []
+            },
+            {
+              "observedAt": "2026-09-27T01:31:15.705Z",
+              "systemTotalMemoryBytes": 8589934592,
+              "systemFreeMemoryBytes": 196870144,
+              "runtimeProcessCount": 2,
+              "runtimeTreeRssBytes": 3091185664,
+              "vm": {
+                "pageSizeBytes": 16384,
+                "freeBytes": 96927744,
+                "inactiveBytes": 486359040,
+                "speculativeBytes": 92389376,
+                "wiredBytes": 5277171712,
+                "compressorBytes": 1460338688,
+                "pageouts": 1938850,
+                "swapins": 15146384,
+                "swapouts": 17238341
+              },
+              "swap": {
+                "totalBytes": 8589934592,
+                "usedBytes": 8440910970.88,
+                "freeBytes": 149023621.12
+              },
+              "unavailable": []
+            },
+            {
+              "observedAt": "2026-09-27T01:31:16.728Z",
+              "systemTotalMemoryBytes": 8589934592,
+              "systemFreeMemoryBytes": 102170624,
+              "runtimeProcessCount": 2,
+              "runtimeTreeRssBytes": 3093446656,
+              "vm": {
+                "pageSizeBytes": 16384,
+                "freeBytes": 63225856,
+                "inactiveBytes": 458735616,
+                "speculativeBytes": 46596096,
+                "wiredBytes": 5301747712,
+                "compressorBytes": 1613725696,
+                "pageouts": 1938853,
+                "swapins": 15151921,
+                "swapouts": 17239029
+              },
+              "swap": {
+                "totalBytes": 9663676416,
+                "usedBytes": 8298304634.88,
+                "freeBytes": 1365371781.12
+              },
+              "unavailable": []
+            },
+            {
+              "observedAt": "2026-09-27T01:31:17.756Z",
+              "systemTotalMemoryBytes": 8589934592,
+              "systemFreeMemoryBytes": 110395392,
+              "runtimeProcessCount": 2,
+              "runtimeTreeRssBytes": 3090530304,
+              "vm": {
+                "pageSizeBytes": 16384,
+                "freeBytes": 57671680,
+                "inactiveBytes": 459685888,
+                "speculativeBytes": 46170112,
+                "wiredBytes": 5323128832,
+                "compressorBytes": 1588150272,
+                "pageouts": 1938872,
+                "swapins": 15155361,
+                "swapouts": 17246417
+              },
+              "swap": {
+                "totalBytes": 9663676416,
+                "usedBytes": 8369010114.56,
+                "freeBytes": 1294666301.44
+              },
+              "unavailable": []
+            },
+            {
+              "observedAt": "2026-09-27T01:31:18.849Z",
+              "systemTotalMemoryBytes": 8589934592,
+              "systemFreeMemoryBytes": 109248512,
+              "runtimeProcessCount": 2,
+              "runtimeTreeRssBytes": 3092889600,
+              "vm": {
+                "pageSizeBytes": 16384,
+                "freeBytes": 59146240,
+                "inactiveBytes": 471171072,
+                "speculativeBytes": 46579712,
+                "wiredBytes": 5292130304,
+                "compressorBytes": 1599864832,
+                "pageouts": 1938884,
+                "swapins": 15157805,
+                "swapouts": 17248801
+              },
+              "swap": {
+                "totalBytes": 9663676416,
+                "usedBytes": 8374515138.56,
+                "freeBytes": 1289161277.44
+              },
+              "unavailable": []
+            },
+            {
+              "observedAt": "2026-09-27T01:31:19.887Z",
+              "systemTotalMemoryBytes": 8589934592,
+              "systemFreeMemoryBytes": 99467264,
+              "runtimeProcessCount": 2,
+              "runtimeTreeRssBytes": 3096625152,
+              "vm": {
+                "pageSizeBytes": 16384,
+                "freeBytes": 60162048,
+                "inactiveBytes": 513884160,
+                "speculativeBytes": 38600704,
+                "wiredBytes": 5273534464,
+                "compressorBytes": 1548550144,
+                "pageouts": 1938895,
+                "swapins": 15158439,
+                "swapouts": 17249265
+              },
+              "swap": {
+                "totalBytes": 9663676416,
+                "usedBytes": 8373728706.56,
+                "freeBytes": 1289947709.44
+              },
+              "unavailable": []
+            },
+            {
+              "observedAt": "2026-09-27T01:31:20.924Z",
+              "systemTotalMemoryBytes": 8589934592,
+              "systemFreeMemoryBytes": 124813312,
+              "runtimeProcessCount": 2,
+              "runtimeTreeRssBytes": 3098066944,
+              "vm": {
+                "pageSizeBytes": 16384,
+                "freeBytes": 77742080,
+                "inactiveBytes": 505610240,
+                "speculativeBytes": 44793856,
+                "wiredBytes": 5243338752,
+                "compressorBytes": 1566752768,
+                "pageouts": 1938924,
+                "swapins": 15159365,
+                "swapouts": 17249265
+              },
+              "swap": {
+                "totalBytes": 9663676416,
+                "usedBytes": 8348562882.56,
+                "freeBytes": 1315113533.44
+              },
+              "unavailable": []
+            },
+            {
+              "observedAt": "2026-09-27T01:31:21.950Z",
+              "systemTotalMemoryBytes": 8589934592,
+              "systemFreeMemoryBytes": 73334784,
+              "runtimeProcessCount": 2,
+              "runtimeTreeRssBytes": 3080945664,
+              "vm": {
+                "pageSizeBytes": 16384,
+                "freeBytes": 62357504,
+                "inactiveBytes": 450281472,
+                "speculativeBytes": 19939328,
+                "wiredBytes": 5452365824,
+                "compressorBytes": 1532280832,
+                "pageouts": 1938942,
+                "swapins": 15160279,
+                "swapouts": 17256185
+              },
+              "swap": {
+                "totalBytes": 9663676416,
+                "usedBytes": 8453619712,
+                "freeBytes": 1210056704
+              },
+              "unavailable": []
+            },
+            {
+              "observedAt": "2026-09-27T01:31:23.011Z",
+              "systemTotalMemoryBytes": 8589934592,
+              "systemFreeMemoryBytes": 114114560,
+              "runtimeProcessCount": 2,
+              "runtimeTreeRssBytes": 3076980736,
+              "vm": {
+                "pageSizeBytes": 16384,
+                "freeBytes": 66322432,
+                "inactiveBytes": 510672896,
+                "speculativeBytes": 51658752,
+                "wiredBytes": 5329829888,
+                "compressorBytes": 1440006144,
+                "pageouts": 1938978,
+                "swapins": 15165884,
+                "swapouts": 17259893
+              },
+              "swap": {
+                "totalBytes": 9663676416,
+                "usedBytes": 8422036602.88,
+                "freeBytes": 1241639813.12
+              },
+              "unavailable": []
+            },
+            {
+              "observedAt": "2026-09-27T01:31:24.106Z",
+              "systemTotalMemoryBytes": 8589934592,
+              "systemFreeMemoryBytes": 120324096,
+              "runtimeProcessCount": 2,
+              "runtimeTreeRssBytes": 3096559616,
+              "vm": {
+                "pageSizeBytes": 16384,
+                "freeBytes": 61161472,
+                "inactiveBytes": 547979264,
+                "speculativeBytes": 37421056,
+                "wiredBytes": 5301927936,
+                "compressorBytes": 1454751744,
+                "pageouts": 1938998,
+                "swapins": 15170333,
+                "swapouts": 17259893
+              },
+              "swap": {
+                "totalBytes": 9663676416,
+                "usedBytes": 8346539130.88,
+                "freeBytes": 1317137285.12
+              },
+              "unavailable": []
+            },
+            {
+              "observedAt": "2026-09-27T01:31:25.228Z",
+              "systemTotalMemoryBytes": 8589934592,
+              "systemFreeMemoryBytes": 112705536,
+              "runtimeProcessCount": 2,
+              "runtimeTreeRssBytes": 3077029888,
+              "vm": {
+                "pageSizeBytes": 16384,
+                "freeBytes": 59768832,
+                "inactiveBytes": 505741312,
+                "speculativeBytes": 50855936,
+                "wiredBytes": 5295570944,
+                "compressorBytes": 1515126784,
+                "pageouts": 1939016,
+                "swapins": 15172464,
+                "swapouts": 17259893
+              },
+              "swap": {
+                "totalBytes": 9663676416,
+                "usedBytes": 8312984698.88,
+                "freeBytes": 1350691717.12
+              },
+              "unavailable": []
+            },
+            {
+              "observedAt": "2026-09-27T01:31:26.502Z",
+              "systemTotalMemoryBytes": 8589934592,
+              "systemFreeMemoryBytes": 114180096,
+              "runtimeProcessCount": 2,
+              "runtimeTreeRssBytes": 3087433728,
+              "vm": {
+                "pageSizeBytes": 16384,
+                "freeBytes": 63717376,
+                "inactiveBytes": 521469952,
+                "speculativeBytes": 55738368,
+                "wiredBytes": 5262737408,
+                "compressorBytes": 1508556800,
+                "pageouts": 1939033,
+                "swapins": 15176309,
+                "swapouts": 17263081
+              },
+              "swap": {
+                "totalBytes": 9663676416,
+                "usedBytes": 8306494013.44,
+                "freeBytes": 1357182402.56
+              },
+              "unavailable": []
+            },
+            {
+              "observedAt": "2026-09-27T01:31:27.588Z",
+              "systemTotalMemoryBytes": 8589934592,
+              "systemFreeMemoryBytes": 83542016,
+              "runtimeProcessCount": 2,
+              "runtimeTreeRssBytes": 3077963776,
+              "vm": {
+                "pageSizeBytes": 16384,
+                "freeBytes": 24707072,
+                "inactiveBytes": 513949696,
+                "speculativeBytes": 24526848,
+                "wiredBytes": 5296717824,
+                "compressorBytes": 1592098816,
+                "pageouts": 1939068,
+                "swapins": 15177789,
+                "swapouts": 17263081
+              },
+              "swap": {
+                "totalBytes": 9663676416,
+                "usedBytes": 8281328189.44,
+                "freeBytes": 1382348226.56
+              },
+              "unavailable": []
+            },
+            {
+              "observedAt": "2026-09-27T01:31:28.881Z",
+              "systemTotalMemoryBytes": 8589934592,
+              "systemFreeMemoryBytes": 106381312,
+              "runtimeProcessCount": 2,
+              "runtimeTreeRssBytes": 3078045696,
+              "vm": {
+                "pageSizeBytes": 16384,
+                "freeBytes": 64421888,
+                "inactiveBytes": 496746496,
+                "speculativeBytes": 18792448,
+                "wiredBytes": 5355012096,
+                "compressorBytes": 1534672896,
+                "pageouts": 1939105,
+                "swapins": 15180233,
+                "swapouts": 17272593
+              },
+              "swap": {
+                "totalBytes": 9663676416,
+                "usedBytes": 8395224514.56,
+                "freeBytes": 1268451901.44
+              },
+              "unavailable": []
+            },
+            {
+              "observedAt": "2026-09-27T01:31:30.123Z",
+              "systemTotalMemoryBytes": 8589934592,
+              "systemFreeMemoryBytes": 128876544,
+              "runtimeProcessCount": 2,
+              "runtimeTreeRssBytes": 3100196864,
+              "vm": {
+                "pageSizeBytes": 16384,
+                "freeBytes": 74792960,
+                "inactiveBytes": 469860352,
+                "speculativeBytes": 47529984,
+                "wiredBytes": 5286215680,
+                "compressorBytes": 1590788096,
+                "pageouts": 1939128,
+                "swapins": 15182300,
+                "swapouts": 17272593
+              },
+              "swap": {
+                "totalBytes": 9663676416,
+                "usedBytes": 8361670082.56,
+                "freeBytes": 1302006333.44
+              },
+              "unavailable": []
+            },
+            {
+              "observedAt": "2026-09-27T01:31:31.362Z",
+              "systemTotalMemoryBytes": 8589934592,
+              "systemFreeMemoryBytes": 101335040,
+              "runtimeProcessCount": 2,
+              "runtimeTreeRssBytes": 3078225920,
+              "vm": {
+                "pageSizeBytes": 16384,
+                "freeBytes": 60571648,
+                "inactiveBytes": 484802560,
+                "speculativeBytes": 35962880,
+                "wiredBytes": 5331337216,
+                "compressorBytes": 1553252352,
+                "pageouts": 1939144,
+                "swapins": 15184922,
+                "swapouts": 17277793
+              },
+              "swap": {
+                "totalBytes": 9663676416,
+                "usedBytes": 8404923842.56,
+                "freeBytes": 1258752573.44
+              },
+              "unavailable": []
+            },
+            {
+              "observedAt": "2026-09-27T01:31:32.625Z",
+              "systemTotalMemoryBytes": 8589934592,
+              "systemFreeMemoryBytes": 100401152,
+              "runtimeProcessCount": 2,
+              "runtimeTreeRssBytes": 3079258112,
+              "vm": {
+                "pageSizeBytes": 16384,
+                "freeBytes": 57638912,
+                "inactiveBytes": 484474880,
+                "speculativeBytes": 30326784,
+                "wiredBytes": 5334892544,
+                "compressorBytes": 1568309248,
+                "pageouts": 1939171,
+                "swapins": 15188522,
+                "swapouts": 17281997
+              },
+              "swap": {
+                "totalBytes": 9663676416,
+                "usedBytes": 8415084544,
+                "freeBytes": 1248591872
+              },
+              "unavailable": []
+            },
+            {
+              "observedAt": "2026-09-27T01:31:33.895Z",
+              "systemTotalMemoryBytes": 8589934592,
+              "systemFreeMemoryBytes": 74760192,
+              "runtimeProcessCount": 2,
+              "runtimeTreeRssBytes": 3101786112,
+              "vm": {
+                "pageSizeBytes": 16384,
+                "freeBytes": 60997632,
+                "inactiveBytes": 469647360,
+                "speculativeBytes": 23805952,
+                "wiredBytes": 5357617152,
+                "compressorBytes": 1575239680,
+                "pageouts": 1939195,
+                "swapins": 15190369,
+                "swapouts": 17285133
+              },
+              "swap": {
+                "totalBytes": 9663676416,
+                "usedBytes": 8441298944,
+                "freeBytes": 1222377472
+              },
+              "unavailable": []
+            },
+            {
+              "observedAt": "2026-09-27T01:31:35.008Z",
+              "systemTotalMemoryBytes": 8589934592,
+              "systemFreeMemoryBytes": 117161984,
+              "runtimeProcessCount": 2,
+              "runtimeTreeRssBytes": 3079634944,
+              "vm": {
+                "pageSizeBytes": 16384,
+                "freeBytes": 65110016,
+                "inactiveBytes": 481443840,
+                "speculativeBytes": 45367296,
+                "wiredBytes": 5330599936,
+                "compressorBytes": 1543290880,
+                "pageouts": 1939224,
+                "swapins": 15192105,
+                "swapouts": 17287989
+              },
+              "swap": {
+                "totalBytes": 9663676416,
+                "usedBytes": 8454542458.88,
+                "freeBytes": 1209133957.12
+              },
+              "unavailable": []
+            },
+            {
+              "observedAt": "2026-09-27T01:31:36.115Z",
+              "systemTotalMemoryBytes": 8589934592,
+              "systemFreeMemoryBytes": 94650368,
+              "runtimeProcessCount": 2,
+              "runtimeTreeRssBytes": 3101573120,
+              "vm": {
+                "pageSizeBytes": 16384,
+                "freeBytes": 63356928,
+                "inactiveBytes": 468860928,
+                "speculativeBytes": 27901952,
+                "wiredBytes": 5356601344,
+                "compressorBytes": 1580269568,
+                "pageouts": 1939253,
+                "swapins": 15194473,
+                "swapouts": 17290565
+              },
+              "swap": {
+                "totalBytes": 9663676416,
+                "usedBytes": 8463182725.12,
+                "freeBytes": 1200493690.88
+              },
+              "unavailable": []
+            },
+            {
+              "observedAt": "2026-09-27T01:31:37.309Z",
+              "systemTotalMemoryBytes": 8589934592,
+              "systemFreeMemoryBytes": 97501184,
+              "runtimeProcessCount": 2,
+              "runtimeTreeRssBytes": 3080568832,
+              "vm": {
+                "pageSizeBytes": 16384,
+                "freeBytes": 61030400,
+                "inactiveBytes": 511705088,
+                "speculativeBytes": 13860864,
+                "wiredBytes": 5345509376,
+                "compressorBytes": 1527349248,
+                "pageouts": 1939283,
+                "swapins": 15197211,
+                "swapouts": 17293841
+              },
+              "swap": {
+                "totalBytes": 9663676416,
+                "usedBytes": 8466527682.56,
+                "freeBytes": 1197148733.44
+              },
+              "unavailable": []
+            },
+            {
+              "observedAt": "2026-09-27T01:31:38.630Z",
+              "systemTotalMemoryBytes": 8589934592,
+              "systemFreeMemoryBytes": 101498880,
+              "runtimeProcessCount": 2,
+              "runtimeTreeRssBytes": 3102048256,
+              "vm": {
+                "pageSizeBytes": 16384,
+                "freeBytes": 58900480,
+                "inactiveBytes": 509870080,
+                "speculativeBytes": 28327936,
+                "wiredBytes": 5285511168,
+                "compressorBytes": 1561837568,
+                "pageouts": 1939314,
+                "swapins": 15201593,
+                "swapouts": 17293841
+              },
+              "swap": {
+                "totalBytes": 9663676416,
+                "usedBytes": 8399418818.56,
+                "freeBytes": 1264257597.44
+              },
+              "unavailable": []
+            },
+            {
+              "observedAt": "2026-09-27T01:31:39.722Z",
+              "systemTotalMemoryBytes": 8589934592,
+              "systemFreeMemoryBytes": 90750976,
+              "runtimeProcessCount": 2,
+              "runtimeTreeRssBytes": 3081371648,
+              "vm": {
+                "pageSizeBytes": 16384,
+                "freeBytes": 58064896,
+                "inactiveBytes": 488194048,
+                "speculativeBytes": 26329088,
+                "wiredBytes": 5297684480,
+                "compressorBytes": 1601945600,
+                "pageouts": 1939338,
+                "swapins": 15205771,
+                "swapouts": 17298753
+              },
+              "swap": {
+                "totalBytes": 9663676416,
+                "usedBytes": 8412788162.56,
+                "freeBytes": 1250888253.44
+              },
+              "unavailable": []
+            },
+            {
+              "observedAt": "2026-09-27T01:31:40.893Z",
+              "systemTotalMemoryBytes": 8589934592,
+              "systemFreeMemoryBytes": 81723392,
+              "runtimeProcessCount": 2,
+              "runtimeTreeRssBytes": 3089088512,
+              "vm": {
+                "pageSizeBytes": 16384,
+                "freeBytes": 61341696,
+                "inactiveBytes": 487260160,
+                "speculativeBytes": 15925248,
+                "wiredBytes": 5345034240,
+                "compressorBytes": 1578172416,
+                "pageouts": 1939504,
+                "swapins": 15206846,
+                "swapouts": 17305165
+              },
+              "swap": {
+                "totalBytes": 9663676416,
+                "usedBytes": 8492679168,
+                "freeBytes": 1170997248
+              },
+              "unavailable": []
+            },
+            {
+              "observedAt": "2026-09-27T01:31:41.987Z",
+              "systemTotalMemoryBytes": 8589934592,
+              "systemFreeMemoryBytes": 100958208,
+              "runtimeProcessCount": 2,
+              "runtimeTreeRssBytes": 3093643264,
+              "vm": {
+                "pageSizeBytes": 16384,
+                "freeBytes": 59260928,
+                "inactiveBytes": 466534400,
+                "speculativeBytes": 43368448,
+                "wiredBytes": 5337251840,
+                "compressorBytes": 1568407552,
+                "pageouts": 1939518,
+                "swapins": 15208350,
+                "swapouts": 17306729
+              },
+              "swap": {
+                "totalBytes": 9663676416,
+                "usedBytes": 8501529149.44,
+                "freeBytes": 1162147266.56
+              },
+              "unavailable": []
+            },
+            {
+              "observedAt": "2026-09-27T01:31:43.071Z",
+              "systemTotalMemoryBytes": 8589934592,
+              "systemFreeMemoryBytes": 112754688,
+              "runtimeProcessCount": 2,
+              "runtimeTreeRssBytes": 3091857408,
+              "vm": {
+                "pageSizeBytes": 16384,
+                "freeBytes": 65077248,
+                "inactiveBytes": 519274496,
+                "speculativeBytes": 48857088,
+                "wiredBytes": 5284462592,
+                "compressorBytes": 1505525760,
+                "pageouts": 1939578,
+                "swapins": 15210986,
+                "swapouts": 17306729
+              },
+              "swap": {
+                "totalBytes": 9663676416,
+                "usedBytes": 8451197501.44,
+                "freeBytes": 1212478914.56
+              },
+              "unavailable": []
+            },
+            {
+              "observedAt": "2026-09-27T01:31:44.137Z",
+              "systemTotalMemoryBytes": 8589934592,
+              "systemFreeMemoryBytes": 103628800,
+              "runtimeProcessCount": 2,
+              "runtimeTreeRssBytes": 3092627456,
+              "vm": {
+                "pageSizeBytes": 16384,
+                "freeBytes": 68255744,
+                "inactiveBytes": 513654784,
+                "speculativeBytes": 29982720,
+                "wiredBytes": 5346836480,
+                "compressorBytes": 1485488128,
+                "pageouts": 1939645,
+                "swapins": 15212462,
+                "swapouts": 17308157
+              },
+              "swap": {
+                "totalBytes": 9663676416,
+                "usedBytes": 8449425408,
+                "freeBytes": 1214251008
+              },
+              "unavailable": []
+            },
+            {
+              "observedAt": "2026-09-27T01:31:45.490Z",
+              "systemTotalMemoryBytes": 8589934592,
+              "systemFreeMemoryBytes": 88031232,
+              "runtimeProcessCount": 2,
+              "runtimeTreeRssBytes": 3097493504,
+              "vm": {
+                "pageSizeBytes": 16384,
+                "freeBytes": 59572224,
+                "inactiveBytes": 471957504,
+                "speculativeBytes": 29507584,
+                "wiredBytes": 5341659136,
+                "compressorBytes": 1584431104,
+                "pageouts": 1939669,
+                "swapins": 15213833,
+                "swapouts": 17308157
+              },
+              "swap": {
+                "totalBytes": 9663676416,
+                "usedBytes": 8432648192,
+                "freeBytes": 1231028224
+              },
+              "unavailable": []
+            },
+            {
+              "observedAt": "2026-09-27T01:31:46.621Z",
+              "systemTotalMemoryBytes": 8589934592,
+              "systemFreeMemoryBytes": 101171200,
+              "runtimeProcessCount": 2,
+              "runtimeTreeRssBytes": 3099475968,
+              "vm": {
+                "pageSizeBytes": 16384,
+                "freeBytes": 62046208,
+                "inactiveBytes": 489684992,
+                "speculativeBytes": 24363008,
+                "wiredBytes": 5388173312,
+                "compressorBytes": 1510539264,
+                "pageouts": 1939682,
+                "swapins": 15215611,
+                "swapouts": 17312077
+              },
+              "swap": {
+                "totalBytes": 9663676416,
+                "usedBytes": 8471707648,
+                "freeBytes": 1191968768
+              },
+              "unavailable": []
+            },
+            {
+              "observedAt": "2026-09-27T01:31:47.808Z",
+              "systemTotalMemoryBytes": 8589934592,
+              "systemFreeMemoryBytes": 95993856,
+              "runtimeProcessCount": 2,
+              "runtimeTreeRssBytes": 3098460160,
+              "vm": {
+                "pageSizeBytes": 16384,
+                "freeBytes": 59949056,
+                "inactiveBytes": 455442432,
+                "speculativeBytes": 39944192,
+                "wiredBytes": 5362417664,
+                "compressorBytes": 1578041344,
+                "pageouts": 1939707,
+                "swapins": 15216760,
+                "swapouts": 17315941
+              },
+              "swap": {
+                "totalBytes": 9663676416,
+                "usedBytes": 8512339968,
+                "freeBytes": 1151336448
+              },
+              "unavailable": []
+            },
+            {
+              "observedAt": "2026-09-27T01:31:48.928Z",
+              "systemTotalMemoryBytes": 8589934592,
+              "systemFreeMemoryBytes": 102023168,
+              "runtimeProcessCount": 2,
+              "runtimeTreeRssBytes": 3094183936,
+              "vm": {
+                "pageSizeBytes": 16384,
+                "freeBytes": 61407232,
+                "inactiveBytes": 479232000,
+                "speculativeBytes": 39878656,
+                "wiredBytes": 5290950656,
+                "compressorBytes": 1598095360,
+                "pageouts": 1939720,
+                "swapins": 15218935,
+                "swapouts": 17316413
+              },
+              "swap": {
+                "totalBytes": 9663676416,
+                "usedBytes": 8475639808,
+                "freeBytes": 1188036608
+              },
+              "unavailable": []
+            },
+            {
+              "observedAt": "2026-09-27T01:31:50.016Z",
+              "systemTotalMemoryBytes": 8589934592,
+              "systemFreeMemoryBytes": 112705536,
+              "runtimeProcessCount": 2,
+              "runtimeTreeRssBytes": 3091054592,
+              "vm": {
+                "pageSizeBytes": 16384,
+                "freeBytes": 58589184,
+                "inactiveBytes": 454000640,
+                "speculativeBytes": 49856512,
+                "wiredBytes": 5333319680,
+                "compressorBytes": 1590870016,
+                "pageouts": 1939919,
+                "swapins": 15219467,
+                "swapouts": 17318905
+              },
+              "swap": {
+                "totalBytes": 9663676416,
+                "usedBytes": 8508082749.44,
+                "freeBytes": 1155593666.56
+              },
+              "unavailable": []
+            },
+            {
+              "observedAt": "2026-09-27T01:31:51.125Z",
+              "systemTotalMemoryBytes": 8589934592,
+              "systemFreeMemoryBytes": 87588864,
+              "runtimeProcessCount": 2,
+              "runtimeTreeRssBytes": 3090907136,
+              "vm": {
+                "pageSizeBytes": 16384,
+                "freeBytes": 63242240,
+                "inactiveBytes": 473006080,
+                "speculativeBytes": 28999680,
+                "wiredBytes": 5330042880,
+                "compressorBytes": 1594310656,
+                "pageouts": 1940003,
+                "swapins": 15219875,
+                "swapouts": 17320261
+              },
+              "swap": {
+                "totalBytes": 9663676416,
+                "usedBytes": 8521902981.12,
+                "freeBytes": 1141773434.88
+              },
+              "unavailable": []
+            },
+            {
+              "observedAt": "2026-09-27T01:31:52.265Z",
+              "systemTotalMemoryBytes": 8589934592,
+              "systemFreeMemoryBytes": 101777408,
+              "runtimeProcessCount": 2,
+              "runtimeTreeRssBytes": 3091382272,
+              "vm": {
+                "pageSizeBytes": 16384,
+                "freeBytes": 61227008,
+                "inactiveBytes": 484950016,
+                "speculativeBytes": 37978112,
+                "wiredBytes": 5291376640,
+                "compressorBytes": 1588527104,
+                "pageouts": 1940130,
+                "swapins": 15222478,
+                "swapouts": 17321617
+              },
+              "swap": {
+                "totalBytes": 9663676416,
+                "usedBytes": 8502116352,
+                "freeBytes": 1161560064
+              },
+              "unavailable": []
+            },
+            {
+              "observedAt": "2026-09-27T01:31:53.370Z",
+              "systemTotalMemoryBytes": 8589934592,
+              "systemFreeMemoryBytes": 109690880,
+              "runtimeProcessCount": 2,
+              "runtimeTreeRssBytes": 3137241088,
+              "vm": {
+                "pageSizeBytes": 16384,
+                "freeBytes": 60129280,
+                "inactiveBytes": 474120192,
+                "speculativeBytes": 45187072,
+                "wiredBytes": 5292425216,
+                "compressorBytes": 1600831488,
+                "pageouts": 1940250,
+                "swapins": 15226601,
+                "swapouts": 17323937
+              },
+              "swap": {
+                "totalBytes": 9663676416,
+                "usedBytes": 8472494080,
+                "freeBytes": 1191182336
+              },
+              "unavailable": []
+            },
+            {
+              "observedAt": "2026-09-27T01:31:54.409Z",
+              "systemTotalMemoryBytes": 8589934592,
+              "systemFreeMemoryBytes": 100499456,
+              "runtimeProcessCount": 2,
+              "runtimeTreeRssBytes": 3127017472,
+              "vm": {
+                "pageSizeBytes": 16384,
+                "freeBytes": 65929216,
+                "inactiveBytes": 451756032,
+                "speculativeBytes": 41025536,
+                "wiredBytes": 5361844224,
+                "compressorBytes": 1574404096,
+                "pageouts": 1940293,
+                "swapins": 15227327,
+                "swapouts": 17326581
+              },
+              "swap": {
+                "totalBytes": 9663676416,
+                "usedBytes": 8507422146.56,
+                "freeBytes": 1156254269.44
+              },
+              "unavailable": []
+            },
+            {
+              "observedAt": "2026-09-27T01:31:55.548Z",
+              "systemTotalMemoryBytes": 8589934592,
+              "systemFreeMemoryBytes": 101416960,
+              "runtimeProcessCount": 2,
+              "runtimeTreeRssBytes": 3096477696,
+              "vm": {
+                "pageSizeBytes": 16384,
+                "freeBytes": 60358656,
+                "inactiveBytes": 467632128,
+                "speculativeBytes": 36454400,
+                "wiredBytes": 5357010944,
+                "compressorBytes": 1564737536,
+                "pageouts": 1940492,
+                "swapins": 15227852,
+                "swapouts": 17328273
+              },
+              "swap": {
+                "totalBytes": 9663676416,
+                "usedBytes": 8526757888,
+                "freeBytes": 1136918528
+              },
+              "unavailable": []
+            },
+            {
+              "observedAt": "2026-09-27T01:31:56.636Z",
+              "systemTotalMemoryBytes": 8589934592,
+              "systemFreeMemoryBytes": 113672192,
+              "runtimeProcessCount": 2,
+              "runtimeTreeRssBytes": 3094953984,
+              "vm": {
+                "pageSizeBytes": 16384,
+                "freeBytes": 59686912,
+                "inactiveBytes": 492060672,
+                "speculativeBytes": 44531712,
+                "wiredBytes": 5291278336,
+                "compressorBytes": 1564491776,
+                "pageouts": 1940518,
+                "swapins": 15228185,
+                "swapouts": 17328273
+              },
+              "swap": {
+                "totalBytes": 9663676416,
+                "usedBytes": 8518369280,
+                "freeBytes": 1145307136
+              },
+              "unavailable": []
+            },
+            {
+              "observedAt": "2026-09-27T01:31:57.752Z",
+              "systemTotalMemoryBytes": 8589934592,
+              "systemFreeMemoryBytes": 88588288,
+              "runtimeProcessCount": 2,
+              "runtimeTreeRssBytes": 3141861376,
+              "vm": {
+                "pageSizeBytes": 16384,
+                "freeBytes": 41926656,
+                "inactiveBytes": 481722368,
+                "speculativeBytes": 28000256,
+                "wiredBytes": 5358501888,
+                "compressorBytes": 1572192256,
+                "pageouts": 1940531,
+                "swapins": 15228665,
+                "swapouts": 17328273
+              },
+              "swap": {
+                "totalBytes": 9663676416,
+                "usedBytes": 8518369280,
+                "freeBytes": 1145307136
+              },
+              "unavailable": []
+            },
+            {
+              "observedAt": "2026-09-27T01:31:58.805Z",
+              "systemTotalMemoryBytes": 8589934592,
+              "systemFreeMemoryBytes": 106299392,
+              "runtimeProcessCount": 2,
+              "runtimeTreeRssBytes": 3104391168,
+              "vm": {
+                "pageSizeBytes": 16384,
+                "freeBytes": 58998784,
+                "inactiveBytes": 455655424,
+                "speculativeBytes": 41549824,
+                "wiredBytes": 5372903424,
+                "compressorBytes": 1567162368,
+                "pageouts": 1940554,
+                "swapins": 15229248,
+                "swapouts": 17328537
+              },
+              "swap": {
+                "totalBytes": 9663676416,
+                "usedBytes": 8514311290.88,
+                "freeBytes": 1149365125.12
+              },
+              "unavailable": []
+            },
+            {
+              "observedAt": "2026-09-27T01:31:59.902Z",
+              "systemTotalMemoryBytes": 8589934592,
+              "systemFreeMemoryBytes": 103202816,
+              "runtimeProcessCount": 2,
+              "runtimeTreeRssBytes": 3100475392,
+              "vm": {
+                "pageSizeBytes": 16384,
+                "freeBytes": 63389696,
+                "inactiveBytes": 466141184,
+                "speculativeBytes": 41467904,
+                "wiredBytes": 5305171968,
+                "compressorBytes": 1608237056,
+                "pageouts": 1940560,
+                "swapins": 15229881,
+                "swapouts": 17330357
+              },
+              "swap": {
+                "totalBytes": 9663676416,
+                "usedBytes": 8535733698.56,
+                "freeBytes": 1127942717.44
+              },
+              "unavailable": []
+            },
+            {
+              "observedAt": "2026-09-27T01:32:00.989Z",
+              "systemTotalMemoryBytes": 8589934592,
+              "systemFreeMemoryBytes": 85573632,
+              "runtimeProcessCount": 2,
+              "runtimeTreeRssBytes": 3092021248,
+              "vm": {
+                "pageSizeBytes": 16384,
+                "freeBytes": 61276160,
+                "inactiveBytes": 486801408,
+                "speculativeBytes": 30310400,
+                "wiredBytes": 5270372352,
+                "compressorBytes": 1618116608,
+                "pageouts": 1940574,
+                "swapins": 15230493,
+                "swapouts": 17330357
+              },
+              "swap": {
+                "totalBytes": 9663676416,
+                "usedBytes": 8527345090.56,
+                "freeBytes": 1136331325.44
+              },
+              "unavailable": []
+            },
+            {
+              "observedAt": "2026-09-27T01:32:02.151Z",
+              "systemTotalMemoryBytes": 8589934592,
+              "systemFreeMemoryBytes": 77692928,
+              "runtimeProcessCount": 2,
+              "runtimeTreeRssBytes": 3090563072,
+              "vm": {
+                "pageSizeBytes": 16384,
+                "freeBytes": 65208320,
+                "inactiveBytes": 536395776,
+                "speculativeBytes": 22609920,
+                "wiredBytes": 5367889920,
+                "compressorBytes": 1438220288,
+                "pageouts": 1940601,
+                "swapins": 15231169,
+                "swapouts": 17331949
+              },
+              "swap": {
+                "totalBytes": 9663676416,
+                "usedBytes": 8528267837.44,
+                "freeBytes": 1135408578.56
+              },
+              "unavailable": []
+            },
+            {
+              "observedAt": "2026-09-27T01:32:03.360Z",
+              "systemTotalMemoryBytes": 8589934592,
+              "systemFreeMemoryBytes": 113360896,
+              "runtimeProcessCount": 2,
+              "runtimeTreeRssBytes": 3090399232,
+              "vm": {
+                "pageSizeBytes": 16384,
+                "freeBytes": 76496896,
+                "inactiveBytes": 474251264,
+                "speculativeBytes": 30310400,
+                "wiredBytes": 5334007808,
+                "compressorBytes": 1561460736,
+                "pageouts": 1940608,
+                "swapins": 15231997,
+                "swapouts": 17331949
+              },
+              "swap": {
+                "totalBytes": 9663676416,
+                "usedBytes": 8519879229.44,
+                "freeBytes": 1143797186.56
+              },
+              "unavailable": []
+            },
+            {
+              "observedAt": "2026-09-27T01:32:04.466Z",
+              "systemTotalMemoryBytes": 8589934592,
+              "systemFreeMemoryBytes": 89931776,
+              "runtimeProcessCount": 2,
+              "runtimeTreeRssBytes": 3091398656,
+              "vm": {
+                "pageSizeBytes": 16384,
+                "freeBytes": 60375040,
+                "inactiveBytes": 489504768,
+                "speculativeBytes": 24150016,
+                "wiredBytes": 5293473792,
+                "compressorBytes": 1609482240,
+                "pageouts": 1940624,
+                "swapins": 15236039,
+                "swapouts": 17332513
+              },
+              "swap": {
+                "totalBytes": 9663676416,
+                "usedBytes": 8470396928,
+                "freeBytes": 1193279488
+              },
+              "unavailable": []
+            },
+            {
+              "observedAt": "2026-09-27T01:32:05.654Z",
+              "systemTotalMemoryBytes": 8589934592,
+              "systemFreeMemoryBytes": 114294784,
+              "runtimeProcessCount": 2,
+              "runtimeTreeRssBytes": 3090776064,
+              "vm": {
+                "pageSizeBytes": 16384,
+                "freeBytes": 65748992,
+                "inactiveBytes": 469532672,
+                "speculativeBytes": 43286528,
+                "wiredBytes": 5265833984,
+                "compressorBytes": 1634779136,
+                "pageouts": 1940661,
+                "swapins": 15238891,
+                "swapouts": 17333553
+              },
+              "swap": {
+                "totalBytes": 9663676416,
+                "usedBytes": 8437041725.44,
+                "freeBytes": 1226634690.56
+              },
+              "unavailable": []
+            },
+            {
+              "observedAt": "2026-09-27T01:32:06.855Z",
+              "systemTotalMemoryBytes": 8589934592,
+              "systemFreeMemoryBytes": 93274112,
+              "runtimeProcessCount": 2,
+              "runtimeTreeRssBytes": 3091234816,
+              "vm": {
+                "pageSizeBytes": 16384,
+                "freeBytes": 63717376,
+                "inactiveBytes": 461832192,
+                "speculativeBytes": 34488320,
+                "wiredBytes": 5346443264,
+                "compressorBytes": 1583628288,
+                "pageouts": 1940665,
+                "swapins": 15240534,
+                "swapouts": 17338469
+              },
+              "swap": {
+                "totalBytes": 9663676416,
+                "usedBytes": 8492018565.12,
+                "freeBytes": 1171657850.88
+              },
+              "unavailable": []
+            },
+            {
+              "observedAt": "2026-09-27T01:32:07.981Z",
+              "systemTotalMemoryBytes": 8589934592,
+              "systemFreeMemoryBytes": 99876864,
+              "runtimeProcessCount": 2,
+              "runtimeTreeRssBytes": 3091087360,
+              "vm": {
+                "pageSizeBytes": 16384,
+                "freeBytes": 66404352,
+                "inactiveBytes": 485310464,
+                "speculativeBytes": 36536320,
+                "wiredBytes": 5264359424,
+                "compressorBytes": 1618837504,
+                "pageouts": 1940675,
+                "swapins": 15241538,
+                "swapouts": 17338901
+              },
+              "swap": {
+                "totalBytes": 9663676416,
+                "usedBytes": 8491169218.56,
+                "freeBytes": 1172507197.44
+              },
+              "unavailable": []
+            },
+            {
+              "observedAt": "2026-09-27T01:32:09.086Z",
+              "systemTotalMemoryBytes": 8589934592,
+              "systemFreeMemoryBytes": 118833152,
+              "runtimeProcessCount": 2,
+              "runtimeTreeRssBytes": 3090644992,
+              "vm": {
+                "pageSizeBytes": 16384,
+                "freeBytes": 68288512,
+                "inactiveBytes": 472727552,
+                "speculativeBytes": 46333952,
+                "wiredBytes": 5261836288,
+                "compressorBytes": 1622409216,
+                "pageouts": 1940679,
+                "swapins": 15242169,
+                "swapouts": 17339673
+              },
+              "swap": {
+                "totalBytes": 9663676416,
+                "usedBytes": 8487048314.88,
+                "freeBytes": 1176628101.12
+              },
+              "unavailable": []
+            },
+            {
+              "observedAt": "2026-09-27T01:32:10.165Z",
+              "systemTotalMemoryBytes": 8589934592,
+              "systemFreeMemoryBytes": 92323840,
+              "runtimeProcessCount": 2,
+              "runtimeTreeRssBytes": 3091562496,
+              "vm": {
+                "pageSizeBytes": 16384,
+                "freeBytes": 66142208,
+                "inactiveBytes": 476741632,
+                "speculativeBytes": 24248320,
+                "wiredBytes": 5359550464,
+                "compressorBytes": 1567768576,
+                "pageouts": 1940700,
+                "swapins": 15242556,
+                "swapouts": 17341673
+              },
+              "swap": {
+                "totalBytes": 9663676416,
+                "usedBytes": 8503028613.12,
+                "freeBytes": 1160647802.88
+              },
+              "unavailable": []
+            },
+            {
+              "observedAt": "2026-09-27T01:32:11.244Z",
+              "systemTotalMemoryBytes": 8589934592,
+              "systemFreeMemoryBytes": 86081536,
+              "runtimeProcessCount": 2,
+              "runtimeTreeRssBytes": 3103490048,
+              "vm": {
+                "pageSizeBytes": 16384,
+                "freeBytes": 60915712,
+                "inactiveBytes": 477413376,
+                "speculativeBytes": 21184512,
+                "wiredBytes": 5354127360,
+                "compressorBytes": 1572552704,
+                "pageouts": 1940714,
+                "swapins": 15243554,
+                "swapouts": 17342837
+              },
+              "swap": {
+                "totalBytes": 9663676416,
+                "usedBytes": 8513713602.56,
+                "freeBytes": 1149962813.44
+              },
+              "unavailable": []
+            },
+            {
+              "observedAt": "2026-09-27T01:32:11.374Z",
+              "systemTotalMemoryBytes": 8589934592,
+              "systemFreeMemoryBytes": 93716480,
+              "runtimeProcessCount": 2,
+              "runtimeTreeRssBytes": 3102261248,
+              "vm": {
+                "pageSizeBytes": 16384,
+                "freeBytes": 57065472,
+                "inactiveBytes": 469598208,
+                "speculativeBytes": 31244288,
+                "wiredBytes": 5354389504,
+                "compressorBytes": 1579876352,
+                "pageouts": 1940716,
+                "swapins": 15244012,
+                "swapouts": 17343421
+              },
+              "swap": {
+                "totalBytes": 9663676416,
+                "usedBytes": 8514898493.44,
+                "freeBytes": 1148777922.56
+              },
+              "unavailable": []
+            }
+          ],
+          "peakSampledRuntimeTreeRssBytes": 3153641472,
+          "minimumSampledSystemFreeBytes": 73334784,
+          "peakSampledSwapUsedBytes": 8535733698.56,
+          "peakUnifiedMemoryBytes": null,
+          "limitations": [
+            "RSS is sampled per-process resident memory and may double-count shared pages; it is not a unified-memory high-water mark.",
+            "Free memory is not available-for-model memory. GPU allocations, caches and memory pressure require additional instrumentation.",
+            "vm_stat and swap describe system-wide activity, not causal attribution to the model.",
+            "Sampling itself has overhead; transient peaks between samples may be missed."
+          ]
+        },
+        "syntheticCliDiagnostics": {
+          "source": "synthetic_fixture_cli",
+          "cliExitCode": 0,
+          "stderr": "WARNING: proceeding, even though we could not create PATH aliases: Refusing to create helper binaries under temporary dir \"/private/tmp/forger-local-eval/forger-local-5XGFR9\" (codex_home: AbsolutePathBuf(\"/private/tmp/forger-local-eval/forger-local-5XGFR9/.codex\"))\n2026-09-27T01:31:52.923374Z ERROR codex_core::tools::router: error=request_user_input is unavailable in Default mode\n",
+          "toolFailures": [],
+          "truncated": false,
+          "unparsedStdoutLines": 0
+        },
+        "residencyObservation": {
+          "targetModelResident": false,
+          "otherResidentModelCount": 0,
+          "source": "ollama_api_ps",
+          "sampledAt": "2026-09-27T01:31:10.468Z",
+          "memoryUsageMeasured": false,
+          "targetModels": []
+        },
+        "osFileCache": "uncontrolled",
+        "timingSemantics": {
+          "agentElapsedMs": "Existing agent timer includes resource-monitor startup/finish and post-agent residency observation; VM shutdown/startup is excluded.",
+          "evaluationElapsedMs": "Includes model unload, VM startup, revalidation and Docker evaluation.",
+          "elapsedMs": "Common runner time from attempt start; preflight/VM stop and post-failure recovery are recorded separately.",
+          "coldStart": "Runtime residency is observed; OS page cache is uncontrolled. No fully cold-machine claim."
+        }
+      }
+    }
+  ],
+  "networkPolicy": "codex-workspace",
+  "wholeCliEgressVerified": false,
+  "state": "completed_with_failures",
+  "configuration": {
+    "endpoint": "http://127.0.0.1:11445",
+    "model": "qwen3:1.7b",
+    "modelDigest": "sha256:8f68893c685c3ddff2aa3fffce2aa60a30bb2da65ca488b61fff134a4d1730e7",
+    "contextWindow": 16384,
+    "agentProfile": "single-agent-no-thinking-v1",
+    "cliPath": "/Users/kupa/Library/Application Support/forger-desktop/codex-cli/node_modules/@openai/codex-darwin-arm64/vendor/aarch64-apple-darwin/bin/codex",
+    "evaluatorImage": "sha256:de5bb77888ef8a6826ffa49ab9132d287c4e9e26a187c5a143213eeaa2e28406"
+  },
+  "ownedVm": {
+    "name": "forger-local-eval",
+    "limaCliSha256": "f19a4fca3875e1017a5285672be4a62699c1e55918fb6a7afce86a14199e10d9"
+  },
+  "finalLifecycle": [
+    {
+      "action": "vm_stop_final",
+      "startedAt": "2026-09-27T01:32:39.754Z",
+      "status": "completed",
+      "result": {
+        "commandExitCode": 0,
+        "vm": "forger-local-eval",
+        "timeoutMs": 60000
+      },
+      "finishedAt": "2026-09-27T01:32:41.443Z",
+      "elapsedMs": 1688.936333000005
+    }
+  ],
+  "summary": {
+    "selected": 1,
+    "attempted": 1,
+    "blocked": 0,
+    "failed": 1,
+    "passed": 0,
+    "autonomousPassed": 0,
+    "assistedPassed": 0,
+    "successRate": 0,
+    "autonomousSuccessRate": 0,
+    "denominator": "Every task attempt, including failures, timeouts and resource errors. Preflight blockers are reported separately.",
+    "solvedTimeMs": {
+      "n": 0,
+      "mean": null,
+      "min": null,
+      "max": null,
+      "sampleStandardDeviation": null
+    },
+    "allAttemptTimeMs": {
+      "n": 1,
+      "mean": 89217.077791,
+      "min": 89217.077791,
+      "max": 89217.077791,
+      "sampleStandardDeviation": null
+    },
+    "byTask": {
+      "bug-01": {
+        "trials": 1,
+        "attempted": 1,
+        "passed": 0,
+        "allAttemptTimeMs": {
+          "n": 1,
+          "mean": 89217.077791,
+          "min": 89217.077791,
+          "max": 89217.077791,
+          "sampleStandardDeviation": null
+        }
+      }
+    }
+  },
+  "finishedAt": "2026-09-27T01:32:41.443Z"
+}

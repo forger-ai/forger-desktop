@@ -1,0 +1,3020 @@
+{
+  "schemaVersion": 1,
+  "createdAt": "2026-09-27T12:33:09.650Z",
+  "protocol": "forger-common-local-v1",
+  "comparisonMode": "controlled",
+  "executionProfile": "m1-serial-v1",
+  "forger": {
+    "version": "0.5.17",
+    "revision": "7fa965edc9408211d8f4336bb0ed0a4f30a88102",
+    "dirty": true,
+    "sourceSha256": "4bfdf0014afbeb0706e023f7698d1588d292fbe070d6fd6f7ac4a505951e4521",
+    "compiledProviderSha256": "47f56ed66162ae7c9248d08234ec1f83acb0a27c7b54e947c833cdc94bf37e4e",
+    "harnessSha256": "2e23508defb37ca1b6ba951a4f18f25d47b6dd756830baa3cf333097f4749efb"
+  },
+  "hardware": {
+    "platform": "darwin",
+    "architecture": "arm64",
+    "cpu": "Apple M1",
+    "logicalCpuCount": 8,
+    "totalMemoryBytes": 8589934592,
+    "freeMemoryBytes": 1013891072,
+    "availableForModelBytes": null,
+    "availableForModelReason": "Free RAM does not include the runtime, KV cache, unified GPU memory, OS, Forger, browser and build headroom; no available-for-model estimate is derived.",
+    "classification": "detection only, not a calibration or performance measurement"
+  },
+  "catalogVersion": "0.1.0",
+  "results": [
+    {
+      "schemaVersion": 1,
+      "taskId": "bug-01",
+      "taskHash": "26c659f3f12554db115a3ab113090a552b7fb6a8ae222b51666489261b296443",
+      "trial": 1,
+      "partition": "development",
+      "band": "S",
+      "family": "bug",
+      "creationMode": "supported_template",
+      "startedAt": "2026-09-27T12:33:25.139Z",
+      "status": "failed",
+      "attempted": true,
+      "intervention": false,
+      "evidenceClass": "real_model",
+      "elapsedMs": 39221.2165,
+      "agentElapsedMs": 12052.259250000001,
+      "evaluationElapsedMs": 27148.686083999997,
+      "effectivePromptHash": "08309827290c145ab31d9dde4f8acf4ebe5b42b8cd6b7a5ad7a7c3640e89682c",
+      "configuration": {
+        "endpoint": "http://127.0.0.1:11445",
+        "model": "qwen3:0.6b",
+        "modelDigest": "sha256:7df6b6e09427a769808717c0a93cadc4ae99ed4eb8bf5ca557c90846becea435",
+        "contextWindow": 16384,
+        "agentProfile": "compact-v1",
+        "contextStrategy": "direct-v1",
+        "cliPath": "/Users/kupa/Library/Application Support/forger-desktop/codex-cli/node_modules/@openai/codex-darwin-arm64/vendor/aarch64-apple-darwin/bin/codex",
+        "evaluatorImage": "sha256:de5bb77888ef8a6826ffa49ab9132d287c4e9e26a187c5a143213eeaa2e28406"
+      },
+      "configurationHash": "2e22a85c28db5e66a176223f49942366cf352b379f45a07a35f14597c00fb277",
+      "budget": {
+        "timeMs": 600000,
+        "toolCalls": 60,
+        "retries": 0,
+        "evaluationTimeMs": 240000
+      },
+      "protectedFileChanges": [],
+      "metrics": {
+        "timeToFirstTokenMs": {
+          "value": null,
+          "reason": "Codex JSONL does not expose the first model token. First process output is not TTFT."
+        },
+        "generationTokensPerSecond": {
+          "value": null,
+          "reason": "No token-timed inference trace is available."
+        },
+        "peakRuntimeMemoryBytes": {
+          "value": null,
+          "reason": "Runtime and unified GPU memory are not sampled by this runner."
+        },
+        "outOfMemory": {
+          "value": null,
+          "reason": "Only explicit process/runtime resource errors are identifiable; OS memory pressure is not instrumented."
+        },
+        "promptTokens": {
+          "value": null,
+          "reason": "The model tokenizer and complete rendered tool/context messages are not observed."
+        },
+        "cloudCost": {
+          "value": null,
+          "reason": "Local execution; no cloud billing request is made."
+        },
+        "modelLoadMs": {
+          "value": null,
+          "reason": "Load timing is not separately observed; the model may already be resident."
+        },
+        "initialDownloadMs": {
+          "value": null,
+          "reason": "Downloads are outside benchmark execution and never initiated by this runner."
+        }
+      },
+      "observed": {
+        "harnessRetries": 0,
+        "internalModelRetries": {
+          "value": null,
+          "reason": "Internal CLI/runtime retries are not exposed as a reliable counter."
+        },
+        "toolCalls": 0,
+        "toolCallEvidence": "Distinct item IDs with explicit command/file/tool types in Codex JSONL; not inferred from token count.",
+        "timeouts": 0,
+        "modifiedFiles": [],
+        "fileInspection": {
+          "status": "completed",
+          "protectedFiles": {
+            "status": "completed"
+          },
+          "snapshot": {
+            "status": "completed"
+          }
+        },
+        "relevantFilesRead": {
+          "value": null,
+          "reason": "Complete file retrieval is not exposed by the CLI stream."
+        },
+        "unexpectedFiles": []
+      },
+      "loadPhase": {
+        "value": "uncontrolled",
+        "reason": "Cold start, resident model and initial download are not conflated. Load state must be independently instrumented before cold/warm comparison."
+      },
+      "privacy": {
+        "inference": "loopback only; enforced by provider preflight",
+        "evaluator": "Docker network=none, no host write mounts, no secrets injected",
+        "agentSubprocesses": "Codex safe workspace sandbox; no claim of absolute host or OS isolation"
+      },
+      "prerequisites": {
+        "ready": true,
+        "dockerVersion": "29.1.3",
+        "evaluatorImage": "sha256:de5bb77888ef8a6826ffa49ab9132d287c4e9e26a187c5a143213eeaa2e28406",
+        "evidenceClass": "real_model",
+        "cliSha256": "29915529b97697def1a957b0505e770aa6a45744435d62fc263e98d7619e167a",
+        "checkedAt": "2026-09-27T12:33:20.984Z",
+        "daemonStateAtAgentStart": "stopped_by_serial_controller",
+        "revalidationBeforeEvaluationRequired": true
+      },
+      "initialStateHash": "f11b2d55b16737dc86153ed97a259aea244ecc92cc7674e5531eb1f73939366e",
+      "fixturePreparation": {
+        "recipe": "compose-commons-and-task-overlay-v1",
+        "sourceSha256": "637afda2b28fb27c89367381ba58263d13ee36938ea2b33ccb5203708bad44e3",
+        "recipeSha256": "6036091cbf9be2115fd77aa286fdc5049a36d75fa1816ffc44a867272baa9968",
+        "fixture": "bug",
+        "commonsOverlays": [
+          {
+            "source": "commons/backend/database.py",
+            "destination": "backend/src/app/database.py",
+            "sha256": "e43ccac0a455cc85dc264236c45786f6e13796243a7dbf5efa904773581d51cc"
+          },
+          {
+            "source": "commons/backend/background_jobs.py",
+            "destination": "backend/src/app/background_jobs.py",
+            "sha256": "60a712fcf8afa2cc2b66252081c65039a4f1a10f2c4ae69465dd3623fb6e691f"
+          },
+          {
+            "source": "commons/backend/health.py",
+            "destination": "backend/src/app/health.py",
+            "sha256": "08393b2dede3315f93f68e19afc10bb5d86f1539d5f631e232cee56a2f70aecf"
+          },
+          {
+            "source": "commons/backend/cors.py",
+            "destination": "backend/src/app/cors.py",
+            "sha256": "455be5c1ee83dccea9fb39b7dcb87894bde9f8f96bd6fe224f8d5d309f815f2c"
+          },
+          {
+            "source": "commons/backend/forger_desktop.py",
+            "destination": "backend/src/app/forger_desktop.py",
+            "sha256": "86344f21fe9bed921481663bbe8b976f64b0dab2c0302c050e4be82105c42425"
+          },
+          {
+            "source": "commons/backend/forger_context.py",
+            "destination": "backend/src/app/forger_context.py",
+            "sha256": "676690142e17e5eb0473bfd0666ac74762ffafe72b411cb0e139f9c20eba548f"
+          },
+          {
+            "source": "commons/backend/desktop_events.py",
+            "destination": "backend/src/app/desktop_events.py",
+            "sha256": "59d20c634cd5fd0649b9e6f462eb58d9c4d3fdc3397eb82dfdbc65f93e80ef3f"
+          },
+          {
+            "source": "commons/backend/desktop_task_jobs.py",
+            "destination": "backend/src/app/desktop_task_jobs.py",
+            "sha256": "05e57a9f78b910cc35cc3fe226884cefa48127f598eda85ad1bc383e356ce315"
+          },
+          {
+            "source": "commons/backend/desktop_agent_jobs.py",
+            "destination": "backend/src/app/desktop_agent_jobs.py",
+            "sha256": "3ca436ee447c2429c914cb9548e52fe979e5c5d274dadbb76e964dfccf51b708"
+          },
+          {
+            "source": "commons/backend/realtime.py",
+            "destination": "backend/src/app/realtime.py",
+            "sha256": "66599ef269e60fc00960a980a25979e69c52226e55620442ebf7b2431e1c423a"
+          },
+          {
+            "source": "commons/frontend/client.ts",
+            "destination": "frontend/src/api/client.ts",
+            "sha256": "2739db9fb448942d432bc2eeef55911e9890b515fa8a6ae75275e27738da2a1c"
+          },
+          {
+            "source": "commons/frontend/locale.ts",
+            "destination": "frontend/src/api/locale.ts",
+            "sha256": "f2285f57d586cb514a936fe9eec7bc009f655f380902b02dae46a789fa0ee923"
+          },
+          {
+            "source": "commons/frontend/forgerBrand.ts",
+            "destination": "frontend/src/api/forgerBrand.ts",
+            "sha256": "b324f36b508bccd9b327a445f34cd5dde03f1d8fd10c8e6df27822a6e7412b31"
+          },
+          {
+            "source": "commons/frontend/remoteTunnel.ts",
+            "destination": "frontend/src/api/remoteTunnel.ts",
+            "sha256": "db4629225f8ca4e50ceb1c4f7f15556a53d108f6b85bde8ca17dd498386d1a4d"
+          }
+        ],
+        "preparedStateSha256": "f11b2d55b16737dc86153ed97a259aea244ecc92cc7674e5531eb1f73939366e",
+        "sha256": "73b4bfa6c7754637701431b12eed6818467f0f97505e7493ecce2c85b3b86b88"
+      },
+      "acceptanceHash": "569654b371214fc285a15f0af366304e5b1a408e306f4180c1a9606be4b5b093",
+      "promptHash": "08309827290c145ab31d9dde4f8acf4ebe5b42b8cd6b7a5ad7a7c3640e89682c",
+      "contextRequestHash": "75b32e24a788fbbe83fdf649c03fa9b67d85578835c833a1c6ba9484927f79f1",
+      "agent": {
+        "code": 0,
+        "usage": {
+          "inputTokens": 9150,
+          "cachedInputTokens": 4521,
+          "outputTokens": 178,
+          "reasoningOutputTokens": 0,
+          "turns": 1
+        },
+        "claimedCompletion": true,
+        "metadata": {
+          "runtime": "ollama",
+          "runtimeVersion": "0.34.4",
+          "model": "qwen3:0.6b",
+          "modelDigest": "7df6b6e09427a769808717c0a93cadc4ae99ed4eb8bf5ca557c90846becea435",
+          "reportedCapabilities": [
+            "completion",
+            "tools",
+            "thinking"
+          ],
+          "validatedCapabilities": [],
+          "requestedAgentContextWindow": 16384,
+          "effectiveRuntimeContext": null,
+          "effectiveRuntimeContextReason": "Agent context budget does not establish effective Ollama num_ctx.",
+          "observedToolContracts": [
+            {
+              "type": "function",
+              "name": "exec_command",
+              "namespace": ""
+            },
+            {
+              "type": "function",
+              "name": "write_stdin",
+              "namespace": ""
+            },
+            {
+              "type": "function",
+              "name": "update_plan",
+              "namespace": ""
+            },
+            {
+              "type": "function",
+              "name": "request_user_input",
+              "namespace": ""
+            },
+            {
+              "type": "function",
+              "name": "view_image",
+              "namespace": ""
+            }
+          ],
+          "agentProfile": "compact-v1",
+          "requestedReasoning": "none",
+          "appliedSettings": {
+            "features.multi_agent": false,
+            "model_reasoning_effort": "none",
+            "model_supports_reasoning_summaries": true,
+            "model_reasoning_summary": "none",
+            "include_permissions_instructions": true
+          },
+          "contractSha256": "230172f92685f3f541f74f12c2a77b6f71d729b8a7c042c1810d130f5b6cf456"
+        }
+      },
+      "evaluation": {
+        "schemaVersion": 1,
+        "evaluatorVersion": "0.2.0",
+        "taskId": "bug-01",
+        "passed": false,
+        "checks": [
+          {
+            "name": "backend_compile",
+            "passed": true,
+            "completedCheckGroups": 1,
+            "elapsedMs": 182
+          },
+          {
+            "name": "frontend_build",
+            "passed": true,
+            "completedCheckGroups": 1,
+            "elapsedMs": 6136
+          },
+          {
+            "name": "backend_regression",
+            "passed": true,
+            "completedCheckGroups": 1,
+            "elapsedMs": 3407
+          },
+          {
+            "name": "frontend_regression",
+            "passed": true,
+            "completedCheckGroups": 1,
+            "elapsedMs": 1684
+          },
+          {
+            "name": "runtime_health",
+            "passed": true,
+            "completedCheckGroups": 1,
+            "elapsedMs": 13
+          },
+          {
+            "name": "task_acceptance",
+            "passed": false,
+            "completedCheckGroups": 0,
+            "error": "Expected values to be strictly equal:\n+ actual - expected\n\n+ '  Trim me  '\n- 'Trim me'\n",
+            "elapsedMs": 1530
+          }
+        ],
+        "runtime": {
+          "node": "v24.21.0",
+          "pythonDependencies": "agent-detector==2.0.0\nannotated-doc==0.0.5\nannotated-types==0.8.0\nanyio==4.15.1\ncertifi==2026.7.22\nclick==8.5.0\ncoverage==7.16.1\ndetect-installer==0.2.1\ndnspython==2.8.0\nemail-validator==2.3.0\nfastapi==0.136.3\nfastapi-cli==0.0.32\nfastapi-cloud-cli==0.26.0\nfastar==0.12.0\ngreenlet==3.5.6\nh11==0.16.0\nhttpcore==1.0.9\nhttptools==0.8.0\nhttpx==0.28.1\nidna==3.20\niniconfig==2.3.0\nJinja2==3.1.6\nmarkdown-it-py==4.2.0\nMarkupSafe==3.0.3\nmdurl==0.1.2\npackaging==26.3\npluggy==1.6.0\npydantic==2.13.5\npydantic-extra-types==2.11.1\npydantic-settings==2.15.0\npydantic_core==2.46.5\nPygments==2.21.0\npytest==9.1.1\npytest-asyncio==1.4.0\npytest-cov==7.1.0\npython-dotenv==1.2.3\npython-multipart==0.0.32\nPyYAML==6.0.3\nrich==15.0.0\nrich-toolkit==0.20.5\nrignore==0.8.1\nruff==0.16.9\nsentry-sdk==2.70.0\nshellingham==1.5.4\nskeleton @ file:///opt/backend\nSQLAlchemy==2.0.54\nsqlmodel==0.0.47\nstarlette==1.7.0\ntyper==0.27.2\ntyping-inspection==0.4.4\ntyping_extensions==4.16.0\nurllib3==2.8.0\nuvicorn==0.54.0\nuvloop==0.22.1\nwatchfiles==1.3.0\nwebsockets==17.1\n",
+          "frontendDependencies": {
+            "version": "0.1.0",
+            "name": "skeleton-frontend",
+            "dependencies": {
+              "@eslint/js": {
+                "version": "9.39.5",
+                "resolved": "https://registry.npmjs.org/@eslint/js/-/js-9.39.5.tgz",
+                "overridden": false
+              },
+              "@radix-ui/react-dialog": {
+                "version": "1.1.23",
+                "resolved": "https://registry.npmjs.org/@radix-ui/react-dialog/-/react-dialog-1.1.23.tgz",
+                "overridden": false
+              },
+              "@radix-ui/react-dropdown-menu": {
+                "version": "2.1.24",
+                "resolved": "https://registry.npmjs.org/@radix-ui/react-dropdown-menu/-/react-dropdown-menu-2.1.24.tgz",
+                "overridden": false
+              },
+              "@radix-ui/react-label": {
+                "version": "2.1.15",
+                "resolved": "https://registry.npmjs.org/@radix-ui/react-label/-/react-label-2.1.15.tgz",
+                "overridden": false
+              },
+              "@radix-ui/react-select": {
+                "version": "2.3.7",
+                "resolved": "https://registry.npmjs.org/@radix-ui/react-select/-/react-select-2.3.7.tgz",
+                "overridden": false
+              },
+              "@radix-ui/react-separator": {
+                "version": "1.1.15",
+                "resolved": "https://registry.npmjs.org/@radix-ui/react-separator/-/react-separator-1.1.15.tgz",
+                "overridden": false
+              },
+              "@radix-ui/react-slot": {
+                "version": "1.3.3",
+                "resolved": "https://registry.npmjs.org/@radix-ui/react-slot/-/react-slot-1.3.3.tgz",
+                "overridden": false
+              },
+              "@shadcn/react": {
+                "version": "0.2.1",
+                "resolved": "https://registry.npmjs.org/@shadcn/react/-/react-0.2.1.tgz",
+                "overridden": false
+              },
+              "@tailwindcss/vite": {
+                "version": "4.3.3",
+                "resolved": "https://registry.npmjs.org/@tailwindcss/vite/-/vite-4.3.3.tgz",
+                "overridden": false
+              },
+              "@tanstack/react-query": {
+                "version": "5.104.0",
+                "resolved": "https://registry.npmjs.org/@tanstack/react-query/-/react-query-5.104.0.tgz",
+                "overridden": false
+              },
+              "@tanstack/react-router": {
+                "version": "1.170.39",
+                "resolved": "https://registry.npmjs.org/@tanstack/react-router/-/react-router-1.170.39.tgz",
+                "overridden": false
+              },
+              "@types/node": {
+                "version": "22.20.4",
+                "resolved": "https://registry.npmjs.org/@types/node/-/node-22.20.4.tgz",
+                "overridden": false
+              },
+              "@types/react-dom": {
+                "version": "19.3.0",
+                "resolved": "https://registry.npmjs.org/@types/react-dom/-/react-dom-19.3.0.tgz",
+                "overridden": false
+              },
+              "@types/react": {
+                "version": "19.3.0",
+                "resolved": "https://registry.npmjs.org/@types/react/-/react-19.3.0.tgz",
+                "overridden": false
+              },
+              "@vitejs/plugin-react": {
+                "version": "4.7.0",
+                "resolved": "https://registry.npmjs.org/@vitejs/plugin-react/-/plugin-react-4.7.0.tgz",
+                "overridden": false
+              },
+              "@vitest/coverage-v8": {
+                "version": "2.1.9",
+                "resolved": "https://registry.npmjs.org/@vitest/coverage-v8/-/coverage-v8-2.1.9.tgz",
+                "overridden": false
+              },
+              "class-variance-authority": {
+                "version": "0.7.1",
+                "resolved": "https://registry.npmjs.org/class-variance-authority/-/class-variance-authority-0.7.1.tgz",
+                "overridden": false
+              },
+              "clsx": {
+                "version": "2.1.1",
+                "resolved": "https://registry.npmjs.org/clsx/-/clsx-2.1.1.tgz",
+                "overridden": false
+              },
+              "eslint-plugin-react-hooks": {
+                "version": "5.2.0",
+                "resolved": "https://registry.npmjs.org/eslint-plugin-react-hooks/-/eslint-plugin-react-hooks-5.2.0.tgz",
+                "overridden": false
+              },
+              "eslint-plugin-react-refresh": {
+                "version": "0.4.26",
+                "resolved": "https://registry.npmjs.org/eslint-plugin-react-refresh/-/eslint-plugin-react-refresh-0.4.26.tgz",
+                "overridden": false
+              },
+              "eslint": {
+                "version": "9.39.5",
+                "resolved": "https://registry.npmjs.org/eslint/-/eslint-9.39.5.tgz",
+                "overridden": false
+              },
+              "globals": {
+                "version": "15.15.0",
+                "resolved": "https://registry.npmjs.org/globals/-/globals-15.15.0.tgz",
+                "overridden": false
+              },
+              "lucide-react": {
+                "version": "0.468.0",
+                "resolved": "https://registry.npmjs.org/lucide-react/-/lucide-react-0.468.0.tgz",
+                "overridden": false
+              },
+              "react-dom": {
+                "version": "19.3.0",
+                "resolved": "https://registry.npmjs.org/react-dom/-/react-dom-19.3.0.tgz",
+                "overridden": false
+              },
+              "react": {
+                "version": "19.3.0",
+                "resolved": "https://registry.npmjs.org/react/-/react-19.3.0.tgz",
+                "overridden": false
+              },
+              "tailwind-merge": {
+                "version": "2.6.1",
+                "resolved": "https://registry.npmjs.org/tailwind-merge/-/tailwind-merge-2.6.1.tgz",
+                "overridden": false
+              },
+              "tailwindcss": {
+                "version": "4.3.3",
+                "resolved": "https://registry.npmjs.org/tailwindcss/-/tailwindcss-4.3.3.tgz",
+                "overridden": false
+              },
+              "typescript-eslint": {
+                "version": "8.70.1",
+                "resolved": "https://registry.npmjs.org/typescript-eslint/-/typescript-eslint-8.70.1.tgz",
+                "overridden": false
+              },
+              "typescript": {
+                "version": "5.9.3",
+                "resolved": "https://registry.npmjs.org/typescript/-/typescript-5.9.3.tgz",
+                "overridden": false
+              },
+              "vite": {
+                "version": "5.4.21",
+                "resolved": "https://registry.npmjs.org/vite/-/vite-5.4.21.tgz",
+                "overridden": false
+              },
+              "vitest": {
+                "version": "2.1.9",
+                "resolved": "https://registry.npmjs.org/vitest/-/vitest-2.1.9.tgz",
+                "overridden": false
+              }
+            }
+          }
+        },
+        "externalRequests": [],
+        "error": "Expected values to be strictly equal:\n+ actual - expected\n\n+ '  Trim me  '\n- 'Trim me'\n",
+        "timedOut": false,
+        "code": 1
+      },
+      "failure": "acceptance_failed",
+      "finishedAt": "2026-09-27T12:34:04.423Z",
+      "serialExecution": {
+        "profile": "m1-serial-v1",
+        "vm": "forger-local-eval",
+        "lifecycle": [
+          {
+            "action": "vm_start_preflight",
+            "startedAt": "2026-09-27T12:33:09.721Z",
+            "status": "completed",
+            "result": {
+              "commandExitCode": 0,
+              "vm": "forger-local-eval",
+              "timeoutMs": 120000
+            },
+            "finishedAt": "2026-09-27T12:33:20.516Z",
+            "elapsedMs": 10795.036166
+          },
+          {
+            "action": "evaluator_preflight",
+            "startedAt": "2026-09-27T12:33:20.516Z",
+            "status": "completed",
+            "result": {
+              "ready": true,
+              "dockerVersion": "29.1.3",
+              "evaluatorImage": "sha256:de5bb77888ef8a6826ffa49ab9132d287c4e9e26a187c5a143213eeaa2e28406",
+              "evidenceClass": "real_model",
+              "cliSha256": "29915529b97697def1a957b0505e770aa6a45744435d62fc263e98d7619e167a"
+            },
+            "finishedAt": "2026-09-27T12:33:20.984Z",
+            "elapsedMs": 467.79433400000016
+          },
+          {
+            "action": "vm_stop_before_agent",
+            "startedAt": "2026-09-27T12:33:20.984Z",
+            "status": "completed",
+            "result": {
+              "commandExitCode": 0,
+              "vm": "forger-local-eval",
+              "timeoutMs": 60000
+            },
+            "finishedAt": "2026-09-27T12:33:25.103Z",
+            "elapsedMs": 4119.401291999999
+          },
+          {
+            "action": "observe_model_before_agent",
+            "startedAt": "2026-09-27T12:33:25.103Z",
+            "status": "completed",
+            "result": {
+              "targetModelResident": false,
+              "otherResidentModelCount": 0,
+              "source": "ollama_api_ps",
+              "sampledAt": "2026-09-27T12:33:25.139Z",
+              "memoryUsageMeasured": false,
+              "targetModels": []
+            },
+            "finishedAt": "2026-09-27T12:33:25.139Z",
+            "elapsedMs": 35.96162499999991
+          },
+          {
+            "action": "observe_model_after_agent",
+            "startedAt": "2026-09-27T12:33:37.254Z",
+            "status": "completed",
+            "result": {
+              "targetModelResident": true,
+              "otherResidentModelCount": 0,
+              "source": "ollama_api_ps",
+              "sampledAt": "2026-09-27T12:33:37.256Z",
+              "memoryUsageMeasured": false,
+              "targetModels": [
+                {
+                  "digestReported": "7df6b6e09427a769808717c0a93cadc4ae99ed4eb8bf5ca557c90846becea435",
+                  "digestMatchesRequested": true,
+                  "contextLengthReported": 16384,
+                  "sizeBytesReported": 2549140684,
+                  "sizeVramBytesReported": 2549140684
+                }
+              ]
+            },
+            "finishedAt": "2026-09-27T12:33:37.256Z",
+            "elapsedMs": 1.6694590000006428
+          },
+          {
+            "action": "unload_model_before_evaluation",
+            "startedAt": "2026-09-27T12:33:37.274Z",
+            "status": "completed",
+            "result": {
+              "acknowledged": true,
+              "targetModelResident": false,
+              "otherResidentModelCount": 0,
+              "source": "ollama_api_ps",
+              "sampledAt": "2026-09-27T12:33:37.291Z",
+              "memoryUsageMeasured": false,
+              "targetModels": [],
+              "elapsedMs": 16.509540999999444,
+              "memoryReleaseMeasured": false
+            },
+            "finishedAt": "2026-09-27T12:33:37.291Z",
+            "elapsedMs": 16.556166999998823
+          },
+          {
+            "action": "vm_start_evaluation",
+            "startedAt": "2026-09-27T12:33:37.291Z",
+            "status": "completed",
+            "result": {
+              "commandExitCode": 0,
+              "vm": "forger-local-eval",
+              "timeoutMs": 120000
+            },
+            "finishedAt": "2026-09-27T12:33:48.224Z",
+            "elapsedMs": 10933.789
+          },
+          {
+            "action": "evaluator_revalidation",
+            "startedAt": "2026-09-27T12:33:48.224Z",
+            "status": "completed",
+            "result": {
+              "ready": true,
+              "dockerVersion": "29.1.3",
+              "evaluatorImage": "sha256:de5bb77888ef8a6826ffa49ab9132d287c4e9e26a187c5a143213eeaa2e28406",
+              "evidenceClass": "real_model",
+              "cliSha256": "29915529b97697def1a957b0505e770aa6a45744435d62fc263e98d7619e167a"
+            },
+            "finishedAt": "2026-09-27T12:33:48.687Z",
+            "elapsedMs": 462.8924580000021
+          }
+        ],
+        "networkPolicy": "codex-workspace",
+        "wholeCliEgressVerified": false,
+        "networkLimitations": [
+          "The existing Codex workspace-write tool sandbox has network_access=false; the authenticated gateway rejects inference redirects.",
+          "The whole CLI process is not covered by an outer network sandbox, and its total egress is unverified."
+        ],
+        "runtimeModelResidentBeforeAgent": false,
+        "residencyAfterAgent": {
+          "targetModelResident": true,
+          "otherResidentModelCount": 0,
+          "source": "ollama_api_ps",
+          "sampledAt": "2026-09-27T12:33:37.256Z",
+          "memoryUsageMeasured": false,
+          "targetModels": [
+            {
+              "digestReported": "7df6b6e09427a769808717c0a93cadc4ae99ed4eb8bf5ca557c90846becea435",
+              "digestMatchesRequested": true,
+              "contextLengthReported": 16384,
+              "sizeBytesReported": 2549140684,
+              "sizeVramBytesReported": 2549140684
+            }
+          ]
+        },
+        "agentResources": {
+          "sampleIntervalMs": 1000,
+          "sampleCount": 13,
+          "samples": [
+            {
+              "observedAt": "2026-09-27T12:33:25.204Z",
+              "systemTotalMemoryBytes": 8589934592,
+              "systemFreeMemoryBytes": 1688961024,
+              "runtimeProcessCount": 1,
+              "runtimeTreeRssBytes": 11370496,
+              "vm": {
+                "pageSizeBytes": 16384,
+                "freeBytes": 1490665472,
+                "inactiveBytes": 1320665088,
+                "speculativeBytes": 197246976,
+                "wiredBytes": 1841414144,
+                "compressorBytes": 1625128960,
+                "pageouts": 2029366,
+                "swapins": 17479066,
+                "swapouts": 19808656
+              },
+              "swap": {
+                "totalBytes": 5368709120,
+                "usedBytes": 3839035965.44,
+                "freeBytes": 1529673154.56
+              },
+              "unavailable": []
+            },
+            {
+              "observedAt": "2026-09-27T12:33:26.218Z",
+              "systemTotalMemoryBytes": 8589934592,
+              "systemFreeMemoryBytes": 1179287552,
+              "runtimeProcessCount": 2,
+              "runtimeTreeRssBytes": 438370304,
+              "vm": {
+                "pageSizeBytes": 16384,
+                "freeBytes": 940048384,
+                "inactiveBytes": 1565982720,
+                "speculativeBytes": 235028480,
+                "wiredBytes": 1839022080,
+                "compressorBytes": 1602617344,
+                "pageouts": 2029366,
+                "swapins": 17479070,
+                "swapouts": 19808656
+              },
+              "swap": {
+                "totalBytes": 5368709120,
+                "usedBytes": 3839035965.44,
+                "freeBytes": 1529673154.56
+              },
+              "unavailable": []
+            },
+            {
+              "observedAt": "2026-09-27T12:33:27.232Z",
+              "systemTotalMemoryBytes": 8589934592,
+              "systemFreeMemoryBytes": 120569856,
+              "runtimeProcessCount": 2,
+              "runtimeTreeRssBytes": 2525855744,
+              "vm": {
+                "pageSizeBytes": 16384,
+                "freeBytes": 72384512,
+                "inactiveBytes": 673366016,
+                "speculativeBytes": 45842432,
+                "wiredBytes": 4457938944,
+                "compressorBytes": 2012692480,
+                "pageouts": 2029517,
+                "swapins": 17479078,
+                "swapouts": 19808656
+              },
+              "swap": {
+                "totalBytes": 5368709120,
+                "usedBytes": 3839035965.44,
+                "freeBytes": 1529673154.56
+              },
+              "unavailable": []
+            },
+            {
+              "observedAt": "2026-09-27T12:33:28.265Z",
+              "systemTotalMemoryBytes": 8589934592,
+              "systemFreeMemoryBytes": 149700608,
+              "runtimeProcessCount": 2,
+              "runtimeTreeRssBytes": 2489188352,
+              "vm": {
+                "pageSizeBytes": 16384,
+                "freeBytes": 95223808,
+                "inactiveBytes": 641007616,
+                "speculativeBytes": 50315264,
+                "wiredBytes": 4447633408,
+                "compressorBytes": 2052751360,
+                "pageouts": 2029520,
+                "swapins": 17479078,
+                "swapouts": 19808856
+              },
+              "swap": {
+                "totalBytes": 5368709120,
+                "usedBytes": 3842307522.56,
+                "freeBytes": 1526401597.44
+              },
+              "unavailable": []
+            },
+            {
+              "observedAt": "2026-09-27T12:33:29.285Z",
+              "systemTotalMemoryBytes": 8589934592,
+              "systemFreeMemoryBytes": 145227776,
+              "runtimeProcessCount": 2,
+              "runtimeTreeRssBytes": 2493366272,
+              "vm": {
+                "pageSizeBytes": 16384,
+                "freeBytes": 64028672,
+                "inactiveBytes": 674725888,
+                "speculativeBytes": 79544320,
+                "wiredBytes": 4406132736,
+                "compressorBytes": 2021883904,
+                "pageouts": 2029558,
+                "swapins": 17479102,
+                "swapouts": 19808856
+              },
+              "swap": {
+                "totalBytes": 5368709120,
+                "usedBytes": 3842307522.56,
+                "freeBytes": 1526401597.44
+              },
+              "unavailable": []
+            },
+            {
+              "observedAt": "2026-09-27T12:33:30.302Z",
+              "systemTotalMemoryBytes": 8589934592,
+              "systemFreeMemoryBytes": 126730240,
+              "runtimeProcessCount": 2,
+              "runtimeTreeRssBytes": 2478718976,
+              "vm": {
+                "pageSizeBytes": 16384,
+                "freeBytes": 85377024,
+                "inactiveBytes": 696188928,
+                "speculativeBytes": 38584320,
+                "wiredBytes": 4415569920,
+                "compressorBytes": 2021244928,
+                "pageouts": 2029563,
+                "swapins": 17479109,
+                "swapouts": 19808856
+              },
+              "swap": {
+                "totalBytes": 5368709120,
+                "usedBytes": 3842307522.56,
+                "freeBytes": 1526401597.44
+              },
+              "unavailable": []
+            },
+            {
+              "observedAt": "2026-09-27T12:33:31.332Z",
+              "systemTotalMemoryBytes": 8589934592,
+              "systemFreeMemoryBytes": 149422080,
+              "runtimeProcessCount": 2,
+              "runtimeTreeRssBytes": 2480701440,
+              "vm": {
+                "pageSizeBytes": 16384,
+                "freeBytes": 93323264,
+                "inactiveBytes": 680263680,
+                "speculativeBytes": 52953088,
+                "wiredBytes": 4409491456,
+                "compressorBytes": 2021228544,
+                "pageouts": 2029563,
+                "swapins": 17479109,
+                "swapouts": 19808856
+              },
+              "swap": {
+                "totalBytes": 5368709120,
+                "usedBytes": 3842307522.56,
+                "freeBytes": 1526401597.44
+              },
+              "unavailable": []
+            },
+            {
+              "observedAt": "2026-09-27T12:33:32.360Z",
+              "systemTotalMemoryBytes": 8589934592,
+              "systemFreeMemoryBytes": 161054720,
+              "runtimeProcessCount": 2,
+              "runtimeTreeRssBytes": 2481405952,
+              "vm": {
+                "pageSizeBytes": 16384,
+                "freeBytes": 90669056,
+                "inactiveBytes": 659128320,
+                "speculativeBytes": 68255744,
+                "wiredBytes": 4423942144,
+                "compressorBytes": 2020311040,
+                "pageouts": 2029563,
+                "swapins": 17479117,
+                "swapouts": 19808856
+              },
+              "swap": {
+                "totalBytes": 5368709120,
+                "usedBytes": 3842307522.56,
+                "freeBytes": 1526401597.44
+              },
+              "unavailable": []
+            },
+            {
+              "observedAt": "2026-09-27T12:33:33.378Z",
+              "systemTotalMemoryBytes": 8589934592,
+              "systemFreeMemoryBytes": 156647424,
+              "runtimeProcessCount": 2,
+              "runtimeTreeRssBytes": 2488303616,
+              "vm": {
+                "pageSizeBytes": 16384,
+                "freeBytes": 89292800,
+                "inactiveBytes": 621363200,
+                "speculativeBytes": 65257472,
+                "wiredBytes": 4426612736,
+                "compressorBytes": 2096758784,
+                "pageouts": 2029564,
+                "swapins": 17479125,
+                "swapouts": 19808856
+              },
+              "swap": {
+                "totalBytes": 5368709120,
+                "usedBytes": 3842307522.56,
+                "freeBytes": 1526401597.44
+              },
+              "unavailable": []
+            },
+            {
+              "observedAt": "2026-09-27T12:33:34.395Z",
+              "systemTotalMemoryBytes": 8589934592,
+              "systemFreeMemoryBytes": 145260544,
+              "runtimeProcessCount": 2,
+              "runtimeTreeRssBytes": 2488729600,
+              "vm": {
+                "pageSizeBytes": 16384,
+                "freeBytes": 76808192,
+                "inactiveBytes": 650346496,
+                "speculativeBytes": 65978368,
+                "wiredBytes": 4392812544,
+                "compressorBytes": 2081521664,
+                "pageouts": 2029565,
+                "swapins": 17479125,
+                "swapouts": 19808856
+              },
+              "swap": {
+                "totalBytes": 5368709120,
+                "usedBytes": 3842307522.56,
+                "freeBytes": 1526401597.44
+              },
+              "unavailable": []
+            },
+            {
+              "observedAt": "2026-09-27T12:33:35.410Z",
+              "systemTotalMemoryBytes": 8589934592,
+              "systemFreeMemoryBytes": 133382144,
+              "runtimeProcessCount": 2,
+              "runtimeTreeRssBytes": 2516484096,
+              "vm": {
+                "pageSizeBytes": 16384,
+                "freeBytes": 83574784,
+                "inactiveBytes": 707051520,
+                "speculativeBytes": 47644672,
+                "wiredBytes": 4366090240,
+                "compressorBytes": 2025668608,
+                "pageouts": 2029591,
+                "swapins": 17479129,
+                "swapouts": 19808856
+              },
+              "swap": {
+                "totalBytes": 5368709120,
+                "usedBytes": 3842307522.56,
+                "freeBytes": 1526401597.44
+              },
+              "unavailable": []
+            },
+            {
+              "observedAt": "2026-09-27T12:33:36.424Z",
+              "systemTotalMemoryBytes": 8589934592,
+              "systemFreeMemoryBytes": 143736832,
+              "runtimeProcessCount": 2,
+              "runtimeTreeRssBytes": 2493562880,
+              "vm": {
+                "pageSizeBytes": 16384,
+                "freeBytes": 87556096,
+                "inactiveBytes": 670302208,
+                "speculativeBytes": 54083584,
+                "wiredBytes": 4407345152,
+                "compressorBytes": 2040758272,
+                "pageouts": 2029591,
+                "swapins": 17479413,
+                "swapouts": 19808856
+              },
+              "swap": {
+                "totalBytes": 5368709120,
+                "usedBytes": 3825530306.56,
+                "freeBytes": 1543178813.44
+              },
+              "unavailable": []
+            },
+            {
+              "observedAt": "2026-09-27T12:33:37.243Z",
+              "systemTotalMemoryBytes": 8589934592,
+              "systemFreeMemoryBytes": 117096448,
+              "runtimeProcessCount": 2,
+              "runtimeTreeRssBytes": 2483961856,
+              "vm": {
+                "pageSizeBytes": 16384,
+                "freeBytes": 61079552,
+                "inactiveBytes": 677937152,
+                "speculativeBytes": 53870592,
+                "wiredBytes": 4426792960,
+                "compressorBytes": 2032173056,
+                "pageouts": 2029598,
+                "swapins": 17479425,
+                "swapouts": 19808856
+              },
+              "swap": {
+                "totalBytes": 5368709120,
+                "usedBytes": 3825530306.56,
+                "freeBytes": 1543178813.44
+              },
+              "unavailable": []
+            }
+          ],
+          "peakSampledRuntimeTreeRssBytes": 2525855744,
+          "minimumSampledSystemFreeBytes": 117096448,
+          "peakSampledSwapUsedBytes": 3842307522.56,
+          "peakUnifiedMemoryBytes": null,
+          "limitations": [
+            "RSS is sampled per-process resident memory and may double-count shared pages; it is not a unified-memory high-water mark.",
+            "Free memory is not available-for-model memory. GPU allocations, caches and memory pressure require additional instrumentation.",
+            "vm_stat and swap describe system-wide activity, not causal attribution to the model.",
+            "Sampling itself has overhead; transient peaks between samples may be missed."
+          ]
+        },
+        "syntheticCliDiagnostics": {
+          "source": "synthetic_fixture_cli",
+          "cliExitCode": 0,
+          "stderr": "WARNING: proceeding, even though we could not create PATH aliases: Refusing to create helper binaries under temporary dir \"/private/tmp/forger-local-eval/forger-local-pg3CJa\" (codex_home: AbsolutePathBuf(\"/private/tmp/forger-local-eval/forger-local-pg3CJa/.codex\"))\n2026-09-27T12:33:34.779894Z ERROR codex_core::tools::router: error=failed to parse function arguments: missing field `session_id` at line 1 column 196\n",
+          "toolFailures": [],
+          "truncated": false,
+          "unparsedStdoutLines": 0
+        },
+        "residencyObservation": {
+          "targetModelResident": false,
+          "otherResidentModelCount": 0,
+          "source": "ollama_api_ps",
+          "sampledAt": "2026-09-27T12:33:25.139Z",
+          "memoryUsageMeasured": false,
+          "targetModels": []
+        },
+        "osFileCache": "uncontrolled",
+        "timingSemantics": {
+          "agentElapsedMs": "Existing agent timer includes resource-monitor startup/finish and post-agent residency observation; VM shutdown/startup is excluded.",
+          "evaluationElapsedMs": "Includes model unload, VM startup, revalidation and Docker evaluation.",
+          "elapsedMs": "Common runner time from attempt start; preflight/VM stop and post-failure recovery are recorded separately.",
+          "coldStart": "Runtime residency is observed; OS page cache is uncontrolled. No fully cold-machine claim."
+        }
+      }
+    },
+    {
+      "schemaVersion": 1,
+      "taskId": "bug-01",
+      "taskHash": "26c659f3f12554db115a3ab113090a552b7fb6a8ae222b51666489261b296443",
+      "trial": 2,
+      "partition": "development",
+      "band": "S",
+      "family": "bug",
+      "creationMode": "supported_template",
+      "startedAt": "2026-09-27T12:35:50.207Z",
+      "status": "failed",
+      "attempted": true,
+      "intervention": false,
+      "evidenceClass": "real_model",
+      "elapsedMs": 38021.84520899999,
+      "agentElapsedMs": 10742.81370899998,
+      "evaluationElapsedMs": 27253.44783400002,
+      "effectivePromptHash": "08309827290c145ab31d9dde4f8acf4ebe5b42b8cd6b7a5ad7a7c3640e89682c",
+      "configuration": {
+        "endpoint": "http://127.0.0.1:11445",
+        "model": "qwen3:0.6b",
+        "modelDigest": "sha256:7df6b6e09427a769808717c0a93cadc4ae99ed4eb8bf5ca557c90846becea435",
+        "contextWindow": 16384,
+        "agentProfile": "compact-v1",
+        "contextStrategy": "direct-v1",
+        "cliPath": "/Users/kupa/Library/Application Support/forger-desktop/codex-cli/node_modules/@openai/codex-darwin-arm64/vendor/aarch64-apple-darwin/bin/codex",
+        "evaluatorImage": "sha256:de5bb77888ef8a6826ffa49ab9132d287c4e9e26a187c5a143213eeaa2e28406"
+      },
+      "configurationHash": "2e22a85c28db5e66a176223f49942366cf352b379f45a07a35f14597c00fb277",
+      "budget": {
+        "timeMs": 600000,
+        "toolCalls": 60,
+        "retries": 0,
+        "evaluationTimeMs": 240000
+      },
+      "protectedFileChanges": [],
+      "metrics": {
+        "timeToFirstTokenMs": {
+          "value": null,
+          "reason": "Codex JSONL does not expose the first model token. First process output is not TTFT."
+        },
+        "generationTokensPerSecond": {
+          "value": null,
+          "reason": "No token-timed inference trace is available."
+        },
+        "peakRuntimeMemoryBytes": {
+          "value": null,
+          "reason": "Runtime and unified GPU memory are not sampled by this runner."
+        },
+        "outOfMemory": {
+          "value": null,
+          "reason": "Only explicit process/runtime resource errors are identifiable; OS memory pressure is not instrumented."
+        },
+        "promptTokens": {
+          "value": null,
+          "reason": "The model tokenizer and complete rendered tool/context messages are not observed."
+        },
+        "cloudCost": {
+          "value": null,
+          "reason": "Local execution; no cloud billing request is made."
+        },
+        "modelLoadMs": {
+          "value": null,
+          "reason": "Load timing is not separately observed; the model may already be resident."
+        },
+        "initialDownloadMs": {
+          "value": null,
+          "reason": "Downloads are outside benchmark execution and never initiated by this runner."
+        }
+      },
+      "observed": {
+        "harnessRetries": 0,
+        "internalModelRetries": {
+          "value": null,
+          "reason": "Internal CLI/runtime retries are not exposed as a reliable counter."
+        },
+        "toolCalls": 0,
+        "toolCallEvidence": "Distinct item IDs with explicit command/file/tool types in Codex JSONL; not inferred from token count.",
+        "timeouts": 0,
+        "modifiedFiles": [],
+        "fileInspection": {
+          "status": "completed",
+          "protectedFiles": {
+            "status": "completed"
+          },
+          "snapshot": {
+            "status": "completed"
+          }
+        },
+        "relevantFilesRead": {
+          "value": null,
+          "reason": "Complete file retrieval is not exposed by the CLI stream."
+        },
+        "unexpectedFiles": []
+      },
+      "loadPhase": {
+        "value": "uncontrolled",
+        "reason": "Cold start, resident model and initial download are not conflated. Load state must be independently instrumented before cold/warm comparison."
+      },
+      "privacy": {
+        "inference": "loopback only; enforced by provider preflight",
+        "evaluator": "Docker network=none, no host write mounts, no secrets injected",
+        "agentSubprocesses": "Codex safe workspace sandbox; no claim of absolute host or OS isolation"
+      },
+      "prerequisites": {
+        "ready": true,
+        "dockerVersion": "29.1.3",
+        "evaluatorImage": "sha256:de5bb77888ef8a6826ffa49ab9132d287c4e9e26a187c5a143213eeaa2e28406",
+        "evidenceClass": "real_model",
+        "cliSha256": "29915529b97697def1a957b0505e770aa6a45744435d62fc263e98d7619e167a",
+        "checkedAt": "2026-09-27T12:35:48.602Z",
+        "daemonStateAtAgentStart": "stopped_by_serial_controller",
+        "revalidationBeforeEvaluationRequired": true
+      },
+      "initialStateHash": "f11b2d55b16737dc86153ed97a259aea244ecc92cc7674e5531eb1f73939366e",
+      "fixturePreparation": {
+        "recipe": "compose-commons-and-task-overlay-v1",
+        "sourceSha256": "637afda2b28fb27c89367381ba58263d13ee36938ea2b33ccb5203708bad44e3",
+        "recipeSha256": "6036091cbf9be2115fd77aa286fdc5049a36d75fa1816ffc44a867272baa9968",
+        "fixture": "bug",
+        "commonsOverlays": [
+          {
+            "source": "commons/backend/database.py",
+            "destination": "backend/src/app/database.py",
+            "sha256": "e43ccac0a455cc85dc264236c45786f6e13796243a7dbf5efa904773581d51cc"
+          },
+          {
+            "source": "commons/backend/background_jobs.py",
+            "destination": "backend/src/app/background_jobs.py",
+            "sha256": "60a712fcf8afa2cc2b66252081c65039a4f1a10f2c4ae69465dd3623fb6e691f"
+          },
+          {
+            "source": "commons/backend/health.py",
+            "destination": "backend/src/app/health.py",
+            "sha256": "08393b2dede3315f93f68e19afc10bb5d86f1539d5f631e232cee56a2f70aecf"
+          },
+          {
+            "source": "commons/backend/cors.py",
+            "destination": "backend/src/app/cors.py",
+            "sha256": "455be5c1ee83dccea9fb39b7dcb87894bde9f8f96bd6fe224f8d5d309f815f2c"
+          },
+          {
+            "source": "commons/backend/forger_desktop.py",
+            "destination": "backend/src/app/forger_desktop.py",
+            "sha256": "86344f21fe9bed921481663bbe8b976f64b0dab2c0302c050e4be82105c42425"
+          },
+          {
+            "source": "commons/backend/forger_context.py",
+            "destination": "backend/src/app/forger_context.py",
+            "sha256": "676690142e17e5eb0473bfd0666ac74762ffafe72b411cb0e139f9c20eba548f"
+          },
+          {
+            "source": "commons/backend/desktop_events.py",
+            "destination": "backend/src/app/desktop_events.py",
+            "sha256": "59d20c634cd5fd0649b9e6f462eb58d9c4d3fdc3397eb82dfdbc65f93e80ef3f"
+          },
+          {
+            "source": "commons/backend/desktop_task_jobs.py",
+            "destination": "backend/src/app/desktop_task_jobs.py",
+            "sha256": "05e57a9f78b910cc35cc3fe226884cefa48127f598eda85ad1bc383e356ce315"
+          },
+          {
+            "source": "commons/backend/desktop_agent_jobs.py",
+            "destination": "backend/src/app/desktop_agent_jobs.py",
+            "sha256": "3ca436ee447c2429c914cb9548e52fe979e5c5d274dadbb76e964dfccf51b708"
+          },
+          {
+            "source": "commons/backend/realtime.py",
+            "destination": "backend/src/app/realtime.py",
+            "sha256": "66599ef269e60fc00960a980a25979e69c52226e55620442ebf7b2431e1c423a"
+          },
+          {
+            "source": "commons/frontend/client.ts",
+            "destination": "frontend/src/api/client.ts",
+            "sha256": "2739db9fb448942d432bc2eeef55911e9890b515fa8a6ae75275e27738da2a1c"
+          },
+          {
+            "source": "commons/frontend/locale.ts",
+            "destination": "frontend/src/api/locale.ts",
+            "sha256": "f2285f57d586cb514a936fe9eec7bc009f655f380902b02dae46a789fa0ee923"
+          },
+          {
+            "source": "commons/frontend/forgerBrand.ts",
+            "destination": "frontend/src/api/forgerBrand.ts",
+            "sha256": "b324f36b508bccd9b327a445f34cd5dde03f1d8fd10c8e6df27822a6e7412b31"
+          },
+          {
+            "source": "commons/frontend/remoteTunnel.ts",
+            "destination": "frontend/src/api/remoteTunnel.ts",
+            "sha256": "db4629225f8ca4e50ceb1c4f7f15556a53d108f6b85bde8ca17dd498386d1a4d"
+          }
+        ],
+        "preparedStateSha256": "f11b2d55b16737dc86153ed97a259aea244ecc92cc7674e5531eb1f73939366e",
+        "sha256": "73b4bfa6c7754637701431b12eed6818467f0f97505e7493ecce2c85b3b86b88"
+      },
+      "acceptanceHash": "569654b371214fc285a15f0af366304e5b1a408e306f4180c1a9606be4b5b093",
+      "promptHash": "08309827290c145ab31d9dde4f8acf4ebe5b42b8cd6b7a5ad7a7c3640e89682c",
+      "contextRequestHash": "75b32e24a788fbbe83fdf649c03fa9b67d85578835c833a1c6ba9484927f79f1",
+      "agent": {
+        "code": 0,
+        "usage": {
+          "inputTokens": 4525,
+          "cachedInputTokens": 0,
+          "outputTokens": 121,
+          "reasoningOutputTokens": 0,
+          "turns": 1
+        },
+        "claimedCompletion": true,
+        "metadata": {
+          "runtime": "ollama",
+          "runtimeVersion": "0.34.4",
+          "model": "qwen3:0.6b",
+          "modelDigest": "7df6b6e09427a769808717c0a93cadc4ae99ed4eb8bf5ca557c90846becea435",
+          "reportedCapabilities": [
+            "completion",
+            "tools",
+            "thinking"
+          ],
+          "validatedCapabilities": [],
+          "requestedAgentContextWindow": 16384,
+          "effectiveRuntimeContext": null,
+          "effectiveRuntimeContextReason": "Agent context budget does not establish effective Ollama num_ctx.",
+          "observedToolContracts": [
+            {
+              "type": "function",
+              "name": "exec_command",
+              "namespace": ""
+            },
+            {
+              "type": "function",
+              "name": "write_stdin",
+              "namespace": ""
+            },
+            {
+              "type": "function",
+              "name": "update_plan",
+              "namespace": ""
+            },
+            {
+              "type": "function",
+              "name": "request_user_input",
+              "namespace": ""
+            },
+            {
+              "type": "function",
+              "name": "view_image",
+              "namespace": ""
+            }
+          ],
+          "agentProfile": "compact-v1",
+          "requestedReasoning": "none",
+          "appliedSettings": {
+            "features.multi_agent": false,
+            "model_reasoning_effort": "none",
+            "model_supports_reasoning_summaries": true,
+            "model_reasoning_summary": "none",
+            "include_permissions_instructions": true
+          },
+          "contractSha256": "230172f92685f3f541f74f12c2a77b6f71d729b8a7c042c1810d130f5b6cf456"
+        }
+      },
+      "evaluation": {
+        "schemaVersion": 1,
+        "evaluatorVersion": "0.2.0",
+        "taskId": "bug-01",
+        "passed": false,
+        "checks": [
+          {
+            "name": "backend_compile",
+            "passed": true,
+            "completedCheckGroups": 1,
+            "elapsedMs": 168
+          },
+          {
+            "name": "frontend_build",
+            "passed": true,
+            "completedCheckGroups": 1,
+            "elapsedMs": 5956
+          },
+          {
+            "name": "backend_regression",
+            "passed": true,
+            "completedCheckGroups": 1,
+            "elapsedMs": 3239
+          },
+          {
+            "name": "frontend_regression",
+            "passed": true,
+            "completedCheckGroups": 1,
+            "elapsedMs": 2039
+          },
+          {
+            "name": "runtime_health",
+            "passed": true,
+            "completedCheckGroups": 1,
+            "elapsedMs": 11
+          },
+          {
+            "name": "task_acceptance",
+            "passed": false,
+            "completedCheckGroups": 0,
+            "error": "Expected values to be strictly equal:\n+ actual - expected\n\n+ '  Trim me  '\n- 'Trim me'\n",
+            "elapsedMs": 1569
+          }
+        ],
+        "runtime": {
+          "node": "v24.21.0",
+          "pythonDependencies": "agent-detector==2.0.0\nannotated-doc==0.0.5\nannotated-types==0.8.0\nanyio==4.15.1\ncertifi==2026.7.22\nclick==8.5.0\ncoverage==7.16.1\ndetect-installer==0.2.1\ndnspython==2.8.0\nemail-validator==2.3.0\nfastapi==0.136.3\nfastapi-cli==0.0.32\nfastapi-cloud-cli==0.26.0\nfastar==0.12.0\ngreenlet==3.5.6\nh11==0.16.0\nhttpcore==1.0.9\nhttptools==0.8.0\nhttpx==0.28.1\nidna==3.20\niniconfig==2.3.0\nJinja2==3.1.6\nmarkdown-it-py==4.2.0\nMarkupSafe==3.0.3\nmdurl==0.1.2\npackaging==26.3\npluggy==1.6.0\npydantic==2.13.5\npydantic-extra-types==2.11.1\npydantic-settings==2.15.0\npydantic_core==2.46.5\nPygments==2.21.0\npytest==9.1.1\npytest-asyncio==1.4.0\npytest-cov==7.1.0\npython-dotenv==1.2.3\npython-multipart==0.0.32\nPyYAML==6.0.3\nrich==15.0.0\nrich-toolkit==0.20.5\nrignore==0.8.1\nruff==0.16.9\nsentry-sdk==2.70.0\nshellingham==1.5.4\nskeleton @ file:///opt/backend\nSQLAlchemy==2.0.54\nsqlmodel==0.0.47\nstarlette==1.7.0\ntyper==0.27.2\ntyping-inspection==0.4.4\ntyping_extensions==4.16.0\nurllib3==2.8.0\nuvicorn==0.54.0\nuvloop==0.22.1\nwatchfiles==1.3.0\nwebsockets==17.1\n",
+          "frontendDependencies": {
+            "version": "0.1.0",
+            "name": "skeleton-frontend",
+            "dependencies": {
+              "@eslint/js": {
+                "version": "9.39.5",
+                "resolved": "https://registry.npmjs.org/@eslint/js/-/js-9.39.5.tgz",
+                "overridden": false
+              },
+              "@radix-ui/react-dialog": {
+                "version": "1.1.23",
+                "resolved": "https://registry.npmjs.org/@radix-ui/react-dialog/-/react-dialog-1.1.23.tgz",
+                "overridden": false
+              },
+              "@radix-ui/react-dropdown-menu": {
+                "version": "2.1.24",
+                "resolved": "https://registry.npmjs.org/@radix-ui/react-dropdown-menu/-/react-dropdown-menu-2.1.24.tgz",
+                "overridden": false
+              },
+              "@radix-ui/react-label": {
+                "version": "2.1.15",
+                "resolved": "https://registry.npmjs.org/@radix-ui/react-label/-/react-label-2.1.15.tgz",
+                "overridden": false
+              },
+              "@radix-ui/react-select": {
+                "version": "2.3.7",
+                "resolved": "https://registry.npmjs.org/@radix-ui/react-select/-/react-select-2.3.7.tgz",
+                "overridden": false
+              },
+              "@radix-ui/react-separator": {
+                "version": "1.1.15",
+                "resolved": "https://registry.npmjs.org/@radix-ui/react-separator/-/react-separator-1.1.15.tgz",
+                "overridden": false
+              },
+              "@radix-ui/react-slot": {
+                "version": "1.3.3",
+                "resolved": "https://registry.npmjs.org/@radix-ui/react-slot/-/react-slot-1.3.3.tgz",
+                "overridden": false
+              },
+              "@shadcn/react": {
+                "version": "0.2.1",
+                "resolved": "https://registry.npmjs.org/@shadcn/react/-/react-0.2.1.tgz",
+                "overridden": false
+              },
+              "@tailwindcss/vite": {
+                "version": "4.3.3",
+                "resolved": "https://registry.npmjs.org/@tailwindcss/vite/-/vite-4.3.3.tgz",
+                "overridden": false
+              },
+              "@tanstack/react-query": {
+                "version": "5.104.0",
+                "resolved": "https://registry.npmjs.org/@tanstack/react-query/-/react-query-5.104.0.tgz",
+                "overridden": false
+              },
+              "@tanstack/react-router": {
+                "version": "1.170.39",
+                "resolved": "https://registry.npmjs.org/@tanstack/react-router/-/react-router-1.170.39.tgz",
+                "overridden": false
+              },
+              "@types/node": {
+                "version": "22.20.4",
+                "resolved": "https://registry.npmjs.org/@types/node/-/node-22.20.4.tgz",
+                "overridden": false
+              },
+              "@types/react-dom": {
+                "version": "19.3.0",
+                "resolved": "https://registry.npmjs.org/@types/react-dom/-/react-dom-19.3.0.tgz",
+                "overridden": false
+              },
+              "@types/react": {
+                "version": "19.3.0",
+                "resolved": "https://registry.npmjs.org/@types/react/-/react-19.3.0.tgz",
+                "overridden": false
+              },
+              "@vitejs/plugin-react": {
+                "version": "4.7.0",
+                "resolved": "https://registry.npmjs.org/@vitejs/plugin-react/-/plugin-react-4.7.0.tgz",
+                "overridden": false
+              },
+              "@vitest/coverage-v8": {
+                "version": "2.1.9",
+                "resolved": "https://registry.npmjs.org/@vitest/coverage-v8/-/coverage-v8-2.1.9.tgz",
+                "overridden": false
+              },
+              "class-variance-authority": {
+                "version": "0.7.1",
+                "resolved": "https://registry.npmjs.org/class-variance-authority/-/class-variance-authority-0.7.1.tgz",
+                "overridden": false
+              },
+              "clsx": {
+                "version": "2.1.1",
+                "resolved": "https://registry.npmjs.org/clsx/-/clsx-2.1.1.tgz",
+                "overridden": false
+              },
+              "eslint-plugin-react-hooks": {
+                "version": "5.2.0",
+                "resolved": "https://registry.npmjs.org/eslint-plugin-react-hooks/-/eslint-plugin-react-hooks-5.2.0.tgz",
+                "overridden": false
+              },
+              "eslint-plugin-react-refresh": {
+                "version": "0.4.26",
+                "resolved": "https://registry.npmjs.org/eslint-plugin-react-refresh/-/eslint-plugin-react-refresh-0.4.26.tgz",
+                "overridden": false
+              },
+              "eslint": {
+                "version": "9.39.5",
+                "resolved": "https://registry.npmjs.org/eslint/-/eslint-9.39.5.tgz",
+                "overridden": false
+              },
+              "globals": {
+                "version": "15.15.0",
+                "resolved": "https://registry.npmjs.org/globals/-/globals-15.15.0.tgz",
+                "overridden": false
+              },
+              "lucide-react": {
+                "version": "0.468.0",
+                "resolved": "https://registry.npmjs.org/lucide-react/-/lucide-react-0.468.0.tgz",
+                "overridden": false
+              },
+              "react-dom": {
+                "version": "19.3.0",
+                "resolved": "https://registry.npmjs.org/react-dom/-/react-dom-19.3.0.tgz",
+                "overridden": false
+              },
+              "react": {
+                "version": "19.3.0",
+                "resolved": "https://registry.npmjs.org/react/-/react-19.3.0.tgz",
+                "overridden": false
+              },
+              "tailwind-merge": {
+                "version": "2.6.1",
+                "resolved": "https://registry.npmjs.org/tailwind-merge/-/tailwind-merge-2.6.1.tgz",
+                "overridden": false
+              },
+              "tailwindcss": {
+                "version": "4.3.3",
+                "resolved": "https://registry.npmjs.org/tailwindcss/-/tailwindcss-4.3.3.tgz",
+                "overridden": false
+              },
+              "typescript-eslint": {
+                "version": "8.70.1",
+                "resolved": "https://registry.npmjs.org/typescript-eslint/-/typescript-eslint-8.70.1.tgz",
+                "overridden": false
+              },
+              "typescript": {
+                "version": "5.9.3",
+                "resolved": "https://registry.npmjs.org/typescript/-/typescript-5.9.3.tgz",
+                "overridden": false
+              },
+              "vite": {
+                "version": "5.4.21",
+                "resolved": "https://registry.npmjs.org/vite/-/vite-5.4.21.tgz",
+                "overridden": false
+              },
+              "vitest": {
+                "version": "2.1.9",
+                "resolved": "https://registry.npmjs.org/vitest/-/vitest-2.1.9.tgz",
+                "overridden": false
+              }
+            }
+          }
+        },
+        "externalRequests": [],
+        "error": "Expected values to be strictly equal:\n+ actual - expected\n\n+ '  Trim me  '\n- 'Trim me'\n",
+        "timedOut": false,
+        "code": 1
+      },
+      "failure": "acceptance_failed",
+      "finishedAt": "2026-09-27T12:36:28.299Z",
+      "serialExecution": {
+        "profile": "m1-serial-v1",
+        "vm": "forger-local-eval",
+        "lifecycle": [
+          {
+            "action": "vm_start_preflight",
+            "startedAt": "2026-09-27T12:35:48.135Z",
+            "status": "completed",
+            "result": {
+              "commandExitCode": 0,
+              "vm": "forger-local-eval",
+              "timeoutMs": 120000
+            },
+            "finishedAt": "2026-09-27T12:35:48.176Z",
+            "elapsedMs": 41.327000000019325
+          },
+          {
+            "action": "evaluator_preflight",
+            "startedAt": "2026-09-27T12:35:48.176Z",
+            "status": "completed",
+            "result": {
+              "ready": true,
+              "dockerVersion": "29.1.3",
+              "evaluatorImage": "sha256:de5bb77888ef8a6826ffa49ab9132d287c4e9e26a187c5a143213eeaa2e28406",
+              "evidenceClass": "real_model",
+              "cliSha256": "29915529b97697def1a957b0505e770aa6a45744435d62fc263e98d7619e167a"
+            },
+            "finishedAt": "2026-09-27T12:35:48.602Z",
+            "elapsedMs": 426.4985839999863
+          },
+          {
+            "action": "vm_stop_before_agent",
+            "startedAt": "2026-09-27T12:35:48.602Z",
+            "status": "completed",
+            "result": {
+              "commandExitCode": 0,
+              "vm": "forger-local-eval",
+              "timeoutMs": 60000
+            },
+            "finishedAt": "2026-09-27T12:35:50.204Z",
+            "elapsedMs": 1601.8336249999993
+          },
+          {
+            "action": "observe_model_before_agent",
+            "startedAt": "2026-09-27T12:35:50.204Z",
+            "status": "completed",
+            "result": {
+              "targetModelResident": false,
+              "otherResidentModelCount": 0,
+              "source": "ollama_api_ps",
+              "sampledAt": "2026-09-27T12:35:50.207Z",
+              "memoryUsageMeasured": false,
+              "targetModels": []
+            },
+            "finishedAt": "2026-09-27T12:35:50.207Z",
+            "elapsedMs": 2.610833000013372
+          },
+          {
+            "action": "observe_model_after_agent",
+            "startedAt": "2026-09-27T12:36:01.008Z",
+            "status": "completed",
+            "result": {
+              "targetModelResident": true,
+              "otherResidentModelCount": 0,
+              "source": "ollama_api_ps",
+              "sampledAt": "2026-09-27T12:36:01.022Z",
+              "memoryUsageMeasured": false,
+              "targetModels": [
+                {
+                  "digestReported": "7df6b6e09427a769808717c0a93cadc4ae99ed4eb8bf5ca557c90846becea435",
+                  "digestMatchesRequested": true,
+                  "contextLengthReported": 16384,
+                  "sizeBytesReported": 2549140684,
+                  "sizeVramBytesReported": 2549140684
+                }
+              ]
+            },
+            "finishedAt": "2026-09-27T12:36:01.022Z",
+            "elapsedMs": 13.918000000005122
+          },
+          {
+            "action": "unload_model_before_evaluation",
+            "startedAt": "2026-09-27T12:36:01.046Z",
+            "status": "completed",
+            "result": {
+              "acknowledged": true,
+              "targetModelResident": false,
+              "otherResidentModelCount": 0,
+              "source": "ollama_api_ps",
+              "sampledAt": "2026-09-27T12:36:01.082Z",
+              "memoryUsageMeasured": false,
+              "targetModels": [],
+              "elapsedMs": 36.042084000015166,
+              "memoryReleaseMeasured": false
+            },
+            "finishedAt": "2026-09-27T12:36:01.082Z",
+            "elapsedMs": 36.046249999984866
+          },
+          {
+            "action": "vm_start_evaluation",
+            "startedAt": "2026-09-27T12:36:01.082Z",
+            "status": "completed",
+            "result": {
+              "commandExitCode": 0,
+              "vm": "forger-local-eval",
+              "timeoutMs": 120000
+            },
+            "finishedAt": "2026-09-27T12:36:11.972Z",
+            "elapsedMs": 10890.983042000007
+          },
+          {
+            "action": "evaluator_revalidation",
+            "startedAt": "2026-09-27T12:36:11.972Z",
+            "status": "completed",
+            "result": {
+              "ready": true,
+              "dockerVersion": "29.1.3",
+              "evaluatorImage": "sha256:de5bb77888ef8a6826ffa49ab9132d287c4e9e26a187c5a143213eeaa2e28406",
+              "evidenceClass": "real_model",
+              "cliSha256": "29915529b97697def1a957b0505e770aa6a45744435d62fc263e98d7619e167a"
+            },
+            "finishedAt": "2026-09-27T12:36:12.509Z",
+            "elapsedMs": 536.4352079999808
+          }
+        ],
+        "networkPolicy": "codex-workspace",
+        "wholeCliEgressVerified": false,
+        "networkLimitations": [
+          "The existing Codex workspace-write tool sandbox has network_access=false; the authenticated gateway rejects inference redirects.",
+          "The whole CLI process is not covered by an outer network sandbox, and its total egress is unverified."
+        ],
+        "runtimeModelResidentBeforeAgent": false,
+        "residencyAfterAgent": {
+          "targetModelResident": true,
+          "otherResidentModelCount": 0,
+          "source": "ollama_api_ps",
+          "sampledAt": "2026-09-27T12:36:01.022Z",
+          "memoryUsageMeasured": false,
+          "targetModels": [
+            {
+              "digestReported": "7df6b6e09427a769808717c0a93cadc4ae99ed4eb8bf5ca557c90846becea435",
+              "digestMatchesRequested": true,
+              "contextLengthReported": 16384,
+              "sizeBytesReported": 2549140684,
+              "sizeVramBytesReported": 2549140684
+            }
+          ]
+        },
+        "agentResources": {
+          "sampleIntervalMs": 1000,
+          "sampleCount": 12,
+          "samples": [
+            {
+              "observedAt": "2026-09-27T12:35:50.280Z",
+              "systemTotalMemoryBytes": 8589934592,
+              "systemFreeMemoryBytes": 1884897280,
+              "runtimeProcessCount": 1,
+              "runtimeTreeRssBytes": 14417920,
+              "vm": {
+                "pageSizeBytes": 16384,
+                "freeBytes": 1839579136,
+                "inactiveBytes": 1523597312,
+                "speculativeBytes": 44105728,
+                "wiredBytes": 1762967552,
+                "compressorBytes": 1593475072,
+                "pageouts": 2030558,
+                "swapins": 17483219,
+                "swapouts": 19826864
+              },
+              "swap": {
+                "totalBytes": 5368709120,
+                "usedBytes": 4061858365.44,
+                "freeBytes": 1306850754.56
+              },
+              "unavailable": []
+            },
+            {
+              "observedAt": "2026-09-27T12:35:51.292Z",
+              "systemTotalMemoryBytes": 8589934592,
+              "systemFreeMemoryBytes": 1604403200,
+              "runtimeProcessCount": 2,
+              "runtimeTreeRssBytes": 156925952,
+              "vm": {
+                "pageSizeBytes": 16384,
+                "freeBytes": 1403912192,
+                "inactiveBytes": 1545043968,
+                "speculativeBytes": 197345280,
+                "wiredBytes": 1779875840,
+                "compressorBytes": 1558020096,
+                "pageouts": 2030558,
+                "swapins": 17483223,
+                "swapouts": 19826864
+              },
+              "swap": {
+                "totalBytes": 5368709120,
+                "usedBytes": 4061858365.44,
+                "freeBytes": 1306850754.56
+              },
+              "unavailable": []
+            },
+            {
+              "observedAt": "2026-09-27T12:35:52.305Z",
+              "systemTotalMemoryBytes": 8589934592,
+              "systemFreeMemoryBytes": 135872512,
+              "runtimeProcessCount": 2,
+              "runtimeTreeRssBytes": 2517368832,
+              "vm": {
+                "pageSizeBytes": 16384,
+                "freeBytes": 62078976,
+                "inactiveBytes": 772571136,
+                "speculativeBytes": 75104256,
+                "wiredBytes": 4422533120,
+                "compressorBytes": 1809940480,
+                "pageouts": 2030692,
+                "swapins": 17483271,
+                "swapouts": 19826864
+              },
+              "swap": {
+                "totalBytes": 5368709120,
+                "usedBytes": 4061858365.44,
+                "freeBytes": 1306850754.56
+              },
+              "unavailable": []
+            },
+            {
+              "observedAt": "2026-09-27T12:35:53.327Z",
+              "systemTotalMemoryBytes": 8589934592,
+              "systemFreeMemoryBytes": 140001280,
+              "runtimeProcessCount": 2,
+              "runtimeTreeRssBytes": 2510766080,
+              "vm": {
+                "pageSizeBytes": 16384,
+                "freeBytes": 62226432,
+                "inactiveBytes": 788660224,
+                "speculativeBytes": 73449472,
+                "wiredBytes": 4391206912,
+                "compressorBytes": 1804845056,
+                "pageouts": 2030733,
+                "swapins": 17483307,
+                "swapouts": 19826864
+              },
+              "swap": {
+                "totalBytes": 5368709120,
+                "usedBytes": 4061858365.44,
+                "freeBytes": 1306850754.56
+              },
+              "unavailable": []
+            },
+            {
+              "observedAt": "2026-09-27T12:35:54.343Z",
+              "systemTotalMemoryBytes": 8589934592,
+              "systemFreeMemoryBytes": 140410880,
+              "runtimeProcessCount": 2,
+              "runtimeTreeRssBytes": 2512486400,
+              "vm": {
+                "pageSizeBytes": 16384,
+                "freeBytes": 60489728,
+                "inactiveBytes": 795574272,
+                "speculativeBytes": 78462976,
+                "wiredBytes": 4385521664,
+                "compressorBytes": 1794621440,
+                "pageouts": 2030758,
+                "swapins": 17483345,
+                "swapouts": 19826864
+              },
+              "swap": {
+                "totalBytes": 5368709120,
+                "usedBytes": 4061858365.44,
+                "freeBytes": 1306850754.56
+              },
+              "unavailable": []
+            },
+            {
+              "observedAt": "2026-09-27T12:35:55.358Z",
+              "systemTotalMemoryBytes": 8589934592,
+              "systemFreeMemoryBytes": 121700352,
+              "runtimeProcessCount": 2,
+              "runtimeTreeRssBytes": 2511306752,
+              "vm": {
+                "pageSizeBytes": 16384,
+                "freeBytes": 60162048,
+                "inactiveBytes": 820445184,
+                "speculativeBytes": 59260928,
+                "wiredBytes": 4446158848,
+                "compressorBytes": 1727545344,
+                "pageouts": 2030760,
+                "swapins": 17483349,
+                "swapouts": 19826864
+              },
+              "swap": {
+                "totalBytes": 5368709120,
+                "usedBytes": 4061858365.44,
+                "freeBytes": 1306850754.56
+              },
+              "unavailable": []
+            },
+            {
+              "observedAt": "2026-09-27T12:35:56.390Z",
+              "systemTotalMemoryBytes": 8589934592,
+              "systemFreeMemoryBytes": 124403712,
+              "runtimeProcessCount": 2,
+              "runtimeTreeRssBytes": 2492596224,
+              "vm": {
+                "pageSizeBytes": 16384,
+                "freeBytes": 62210048,
+                "inactiveBytes": 871727104,
+                "speculativeBytes": 59768832,
+                "wiredBytes": 4374986752,
+                "compressorBytes": 1688944640,
+                "pageouts": 2030764,
+                "swapins": 17483365,
+                "swapouts": 19826864
+              },
+              "swap": {
+                "totalBytes": 5368709120,
+                "usedBytes": 4061858365.44,
+                "freeBytes": 1306850754.56
+              },
+              "unavailable": []
+            },
+            {
+              "observedAt": "2026-09-27T12:35:57.421Z",
+              "systemTotalMemoryBytes": 8589934592,
+              "systemFreeMemoryBytes": 113803264,
+              "runtimeProcessCount": 2,
+              "runtimeTreeRssBytes": 2452996096,
+              "vm": {
+                "pageSizeBytes": 16384,
+                "freeBytes": 71876608,
+                "inactiveBytes": 856850432,
+                "speculativeBytes": 54312960,
+                "wiredBytes": 4407410688,
+                "compressorBytes": 1688682496,
+                "pageouts": 2030830,
+                "swapins": 17483369,
+                "swapouts": 19826864
+              },
+              "swap": {
+                "totalBytes": 5368709120,
+                "usedBytes": 4061858365.44,
+                "freeBytes": 1306850754.56
+              },
+              "unavailable": []
+            },
+            {
+              "observedAt": "2026-09-27T12:35:58.443Z",
+              "systemTotalMemoryBytes": 8589934592,
+              "systemFreeMemoryBytes": 187318272,
+              "runtimeProcessCount": 2,
+              "runtimeTreeRssBytes": 2454503424,
+              "vm": {
+                "pageSizeBytes": 16384,
+                "freeBytes": 104349696,
+                "inactiveBytes": 808435712,
+                "speculativeBytes": 81051648,
+                "wiredBytes": 4379983872,
+                "compressorBytes": 1710653440,
+                "pageouts": 2030833,
+                "swapins": 17483393,
+                "swapouts": 19826864
+              },
+              "swap": {
+                "totalBytes": 5368709120,
+                "usedBytes": 4061858365.44,
+                "freeBytes": 1306850754.56
+              },
+              "unavailable": []
+            },
+            {
+              "observedAt": "2026-09-27T12:35:59.459Z",
+              "systemTotalMemoryBytes": 8589934592,
+              "systemFreeMemoryBytes": 162856960,
+              "runtimeProcessCount": 2,
+              "runtimeTreeRssBytes": 2451505152,
+              "vm": {
+                "pageSizeBytes": 16384,
+                "freeBytes": 58949632,
+                "inactiveBytes": 809828352,
+                "speculativeBytes": 86016000,
+                "wiredBytes": 4401922048,
+                "compressorBytes": 1730904064,
+                "pageouts": 2030833,
+                "swapins": 17483401,
+                "swapouts": 19826864
+              },
+              "swap": {
+                "totalBytes": 5368709120,
+                "usedBytes": 4061858365.44,
+                "freeBytes": 1306850754.56
+              },
+              "unavailable": []
+            },
+            {
+              "observedAt": "2026-09-27T12:36:00.475Z",
+              "systemTotalMemoryBytes": 8589934592,
+              "systemFreeMemoryBytes": 125534208,
+              "runtimeProcessCount": 2,
+              "runtimeTreeRssBytes": 2450391040,
+              "vm": {
+                "pageSizeBytes": 16384,
+                "freeBytes": 64143360,
+                "inactiveBytes": 810926080,
+                "speculativeBytes": 59129856,
+                "wiredBytes": 4427923456,
+                "compressorBytes": 1754120192,
+                "pageouts": 2030839,
+                "swapins": 17483405,
+                "swapouts": 19826864
+              },
+              "swap": {
+                "totalBytes": 5368709120,
+                "usedBytes": 4061858365.44,
+                "freeBytes": 1306850754.56
+              },
+              "unavailable": []
+            },
+            {
+              "observedAt": "2026-09-27T12:36:00.996Z",
+              "systemTotalMemoryBytes": 8589934592,
+              "systemFreeMemoryBytes": 113836032,
+              "runtimeProcessCount": 2,
+              "runtimeTreeRssBytes": 2452799488,
+              "vm": {
+                "pageSizeBytes": 16384,
+                "freeBytes": 74760192,
+                "inactiveBytes": 835338240,
+                "speculativeBytes": 36044800,
+                "wiredBytes": 4392124416,
+                "compressorBytes": 1773666304,
+                "pageouts": 2030844,
+                "swapins": 17483405,
+                "swapouts": 19826864
+              },
+              "swap": {
+                "totalBytes": 5368709120,
+                "usedBytes": 4061858365.44,
+                "freeBytes": 1306850754.56
+              },
+              "unavailable": []
+            }
+          ],
+          "peakSampledRuntimeTreeRssBytes": 2517368832,
+          "minimumSampledSystemFreeBytes": 113803264,
+          "peakSampledSwapUsedBytes": 4061858365.44,
+          "peakUnifiedMemoryBytes": null,
+          "limitations": [
+            "RSS is sampled per-process resident memory and may double-count shared pages; it is not a unified-memory high-water mark.",
+            "Free memory is not available-for-model memory. GPU allocations, caches and memory pressure require additional instrumentation.",
+            "vm_stat and swap describe system-wide activity, not causal attribution to the model.",
+            "Sampling itself has overhead; transient peaks between samples may be missed."
+          ]
+        },
+        "syntheticCliDiagnostics": {
+          "source": "synthetic_fixture_cli",
+          "cliExitCode": 0,
+          "stderr": "WARNING: proceeding, even though we could not create PATH aliases: Refusing to create helper binaries under temporary dir \"/private/tmp/forger-local-eval/forger-local-MatRyl\" (codex_home: AbsolutePathBuf(\"/private/tmp/forger-local-eval/forger-local-MatRyl/.codex\"))\n",
+          "toolFailures": [],
+          "truncated": false,
+          "unparsedStdoutLines": 0
+        },
+        "residencyObservation": {
+          "targetModelResident": false,
+          "otherResidentModelCount": 0,
+          "source": "ollama_api_ps",
+          "sampledAt": "2026-09-27T12:35:50.207Z",
+          "memoryUsageMeasured": false,
+          "targetModels": []
+        },
+        "osFileCache": "uncontrolled",
+        "timingSemantics": {
+          "agentElapsedMs": "Existing agent timer includes resource-monitor startup/finish and post-agent residency observation; VM shutdown/startup is excluded.",
+          "evaluationElapsedMs": "Includes model unload, VM startup, revalidation and Docker evaluation.",
+          "elapsedMs": "Common runner time from attempt start; preflight/VM stop and post-failure recovery are recorded separately.",
+          "coldStart": "Runtime residency is observed; OS page cache is uncontrolled. No fully cold-machine claim."
+        }
+      }
+    },
+    {
+      "schemaVersion": 1,
+      "taskId": "bug-01",
+      "taskHash": "26c659f3f12554db115a3ab113090a552b7fb6a8ae222b51666489261b296443",
+      "trial": 3,
+      "partition": "development",
+      "band": "S",
+      "family": "bug",
+      "creationMode": "supported_template",
+      "startedAt": "2026-09-27T12:36:30.338Z",
+      "status": "failed",
+      "attempted": true,
+      "intervention": false,
+      "evidenceClass": "real_model",
+      "elapsedMs": 37962.293166999996,
+      "agentElapsedMs": 10252.909207999997,
+      "evaluationElapsedMs": 27686.493125000008,
+      "effectivePromptHash": "08309827290c145ab31d9dde4f8acf4ebe5b42b8cd6b7a5ad7a7c3640e89682c",
+      "configuration": {
+        "endpoint": "http://127.0.0.1:11445",
+        "model": "qwen3:0.6b",
+        "modelDigest": "sha256:7df6b6e09427a769808717c0a93cadc4ae99ed4eb8bf5ca557c90846becea435",
+        "contextWindow": 16384,
+        "agentProfile": "compact-v1",
+        "contextStrategy": "direct-v1",
+        "cliPath": "/Users/kupa/Library/Application Support/forger-desktop/codex-cli/node_modules/@openai/codex-darwin-arm64/vendor/aarch64-apple-darwin/bin/codex",
+        "evaluatorImage": "sha256:de5bb77888ef8a6826ffa49ab9132d287c4e9e26a187c5a143213eeaa2e28406"
+      },
+      "configurationHash": "2e22a85c28db5e66a176223f49942366cf352b379f45a07a35f14597c00fb277",
+      "budget": {
+        "timeMs": 600000,
+        "toolCalls": 60,
+        "retries": 0,
+        "evaluationTimeMs": 240000
+      },
+      "protectedFileChanges": [],
+      "metrics": {
+        "timeToFirstTokenMs": {
+          "value": null,
+          "reason": "Codex JSONL does not expose the first model token. First process output is not TTFT."
+        },
+        "generationTokensPerSecond": {
+          "value": null,
+          "reason": "No token-timed inference trace is available."
+        },
+        "peakRuntimeMemoryBytes": {
+          "value": null,
+          "reason": "Runtime and unified GPU memory are not sampled by this runner."
+        },
+        "outOfMemory": {
+          "value": null,
+          "reason": "Only explicit process/runtime resource errors are identifiable; OS memory pressure is not instrumented."
+        },
+        "promptTokens": {
+          "value": null,
+          "reason": "The model tokenizer and complete rendered tool/context messages are not observed."
+        },
+        "cloudCost": {
+          "value": null,
+          "reason": "Local execution; no cloud billing request is made."
+        },
+        "modelLoadMs": {
+          "value": null,
+          "reason": "Load timing is not separately observed; the model may already be resident."
+        },
+        "initialDownloadMs": {
+          "value": null,
+          "reason": "Downloads are outside benchmark execution and never initiated by this runner."
+        }
+      },
+      "observed": {
+        "harnessRetries": 0,
+        "internalModelRetries": {
+          "value": null,
+          "reason": "Internal CLI/runtime retries are not exposed as a reliable counter."
+        },
+        "toolCalls": 0,
+        "toolCallEvidence": "Distinct item IDs with explicit command/file/tool types in Codex JSONL; not inferred from token count.",
+        "timeouts": 0,
+        "modifiedFiles": [],
+        "fileInspection": {
+          "status": "completed",
+          "protectedFiles": {
+            "status": "completed"
+          },
+          "snapshot": {
+            "status": "completed"
+          }
+        },
+        "relevantFilesRead": {
+          "value": null,
+          "reason": "Complete file retrieval is not exposed by the CLI stream."
+        },
+        "unexpectedFiles": []
+      },
+      "loadPhase": {
+        "value": "uncontrolled",
+        "reason": "Cold start, resident model and initial download are not conflated. Load state must be independently instrumented before cold/warm comparison."
+      },
+      "privacy": {
+        "inference": "loopback only; enforced by provider preflight",
+        "evaluator": "Docker network=none, no host write mounts, no secrets injected",
+        "agentSubprocesses": "Codex safe workspace sandbox; no claim of absolute host or OS isolation"
+      },
+      "prerequisites": {
+        "ready": true,
+        "dockerVersion": "29.1.3",
+        "evaluatorImage": "sha256:de5bb77888ef8a6826ffa49ab9132d287c4e9e26a187c5a143213eeaa2e28406",
+        "evidenceClass": "real_model",
+        "cliSha256": "29915529b97697def1a957b0505e770aa6a45744435d62fc263e98d7619e167a",
+        "checkedAt": "2026-09-27T12:36:28.734Z",
+        "daemonStateAtAgentStart": "stopped_by_serial_controller",
+        "revalidationBeforeEvaluationRequired": true
+      },
+      "initialStateHash": "f11b2d55b16737dc86153ed97a259aea244ecc92cc7674e5531eb1f73939366e",
+      "fixturePreparation": {
+        "recipe": "compose-commons-and-task-overlay-v1",
+        "sourceSha256": "637afda2b28fb27c89367381ba58263d13ee36938ea2b33ccb5203708bad44e3",
+        "recipeSha256": "6036091cbf9be2115fd77aa286fdc5049a36d75fa1816ffc44a867272baa9968",
+        "fixture": "bug",
+        "commonsOverlays": [
+          {
+            "source": "commons/backend/database.py",
+            "destination": "backend/src/app/database.py",
+            "sha256": "e43ccac0a455cc85dc264236c45786f6e13796243a7dbf5efa904773581d51cc"
+          },
+          {
+            "source": "commons/backend/background_jobs.py",
+            "destination": "backend/src/app/background_jobs.py",
+            "sha256": "60a712fcf8afa2cc2b66252081c65039a4f1a10f2c4ae69465dd3623fb6e691f"
+          },
+          {
+            "source": "commons/backend/health.py",
+            "destination": "backend/src/app/health.py",
+            "sha256": "08393b2dede3315f93f68e19afc10bb5d86f1539d5f631e232cee56a2f70aecf"
+          },
+          {
+            "source": "commons/backend/cors.py",
+            "destination": "backend/src/app/cors.py",
+            "sha256": "455be5c1ee83dccea9fb39b7dcb87894bde9f8f96bd6fe224f8d5d309f815f2c"
+          },
+          {
+            "source": "commons/backend/forger_desktop.py",
+            "destination": "backend/src/app/forger_desktop.py",
+            "sha256": "86344f21fe9bed921481663bbe8b976f64b0dab2c0302c050e4be82105c42425"
+          },
+          {
+            "source": "commons/backend/forger_context.py",
+            "destination": "backend/src/app/forger_context.py",
+            "sha256": "676690142e17e5eb0473bfd0666ac74762ffafe72b411cb0e139f9c20eba548f"
+          },
+          {
+            "source": "commons/backend/desktop_events.py",
+            "destination": "backend/src/app/desktop_events.py",
+            "sha256": "59d20c634cd5fd0649b9e6f462eb58d9c4d3fdc3397eb82dfdbc65f93e80ef3f"
+          },
+          {
+            "source": "commons/backend/desktop_task_jobs.py",
+            "destination": "backend/src/app/desktop_task_jobs.py",
+            "sha256": "05e57a9f78b910cc35cc3fe226884cefa48127f598eda85ad1bc383e356ce315"
+          },
+          {
+            "source": "commons/backend/desktop_agent_jobs.py",
+            "destination": "backend/src/app/desktop_agent_jobs.py",
+            "sha256": "3ca436ee447c2429c914cb9548e52fe979e5c5d274dadbb76e964dfccf51b708"
+          },
+          {
+            "source": "commons/backend/realtime.py",
+            "destination": "backend/src/app/realtime.py",
+            "sha256": "66599ef269e60fc00960a980a25979e69c52226e55620442ebf7b2431e1c423a"
+          },
+          {
+            "source": "commons/frontend/client.ts",
+            "destination": "frontend/src/api/client.ts",
+            "sha256": "2739db9fb448942d432bc2eeef55911e9890b515fa8a6ae75275e27738da2a1c"
+          },
+          {
+            "source": "commons/frontend/locale.ts",
+            "destination": "frontend/src/api/locale.ts",
+            "sha256": "f2285f57d586cb514a936fe9eec7bc009f655f380902b02dae46a789fa0ee923"
+          },
+          {
+            "source": "commons/frontend/forgerBrand.ts",
+            "destination": "frontend/src/api/forgerBrand.ts",
+            "sha256": "b324f36b508bccd9b327a445f34cd5dde03f1d8fd10c8e6df27822a6e7412b31"
+          },
+          {
+            "source": "commons/frontend/remoteTunnel.ts",
+            "destination": "frontend/src/api/remoteTunnel.ts",
+            "sha256": "db4629225f8ca4e50ceb1c4f7f15556a53d108f6b85bde8ca17dd498386d1a4d"
+          }
+        ],
+        "preparedStateSha256": "f11b2d55b16737dc86153ed97a259aea244ecc92cc7674e5531eb1f73939366e",
+        "sha256": "73b4bfa6c7754637701431b12eed6818467f0f97505e7493ecce2c85b3b86b88"
+      },
+      "acceptanceHash": "569654b371214fc285a15f0af366304e5b1a408e306f4180c1a9606be4b5b093",
+      "promptHash": "08309827290c145ab31d9dde4f8acf4ebe5b42b8cd6b7a5ad7a7c3640e89682c",
+      "contextRequestHash": "75b32e24a788fbbe83fdf649c03fa9b67d85578835c833a1c6ba9484927f79f1",
+      "agent": {
+        "code": 0,
+        "usage": {
+          "inputTokens": 4539,
+          "cachedInputTokens": 0,
+          "outputTokens": 97,
+          "reasoningOutputTokens": 0,
+          "turns": 1
+        },
+        "claimedCompletion": true,
+        "metadata": {
+          "runtime": "ollama",
+          "runtimeVersion": "0.34.4",
+          "model": "qwen3:0.6b",
+          "modelDigest": "7df6b6e09427a769808717c0a93cadc4ae99ed4eb8bf5ca557c90846becea435",
+          "reportedCapabilities": [
+            "completion",
+            "tools",
+            "thinking"
+          ],
+          "validatedCapabilities": [],
+          "requestedAgentContextWindow": 16384,
+          "effectiveRuntimeContext": null,
+          "effectiveRuntimeContextReason": "Agent context budget does not establish effective Ollama num_ctx.",
+          "observedToolContracts": [
+            {
+              "type": "function",
+              "name": "exec_command",
+              "namespace": ""
+            },
+            {
+              "type": "function",
+              "name": "write_stdin",
+              "namespace": ""
+            },
+            {
+              "type": "function",
+              "name": "update_plan",
+              "namespace": ""
+            },
+            {
+              "type": "function",
+              "name": "request_user_input",
+              "namespace": ""
+            },
+            {
+              "type": "function",
+              "name": "view_image",
+              "namespace": ""
+            }
+          ],
+          "agentProfile": "compact-v1",
+          "requestedReasoning": "none",
+          "appliedSettings": {
+            "features.multi_agent": false,
+            "model_reasoning_effort": "none",
+            "model_supports_reasoning_summaries": true,
+            "model_reasoning_summary": "none",
+            "include_permissions_instructions": true
+          },
+          "contractSha256": "230172f92685f3f541f74f12c2a77b6f71d729b8a7c042c1810d130f5b6cf456"
+        }
+      },
+      "evaluation": {
+        "schemaVersion": 1,
+        "evaluatorVersion": "0.2.0",
+        "taskId": "bug-01",
+        "passed": false,
+        "checks": [
+          {
+            "name": "backend_compile",
+            "passed": true,
+            "completedCheckGroups": 1,
+            "elapsedMs": 191
+          },
+          {
+            "name": "frontend_build",
+            "passed": true,
+            "completedCheckGroups": 1,
+            "elapsedMs": 6828
+          },
+          {
+            "name": "backend_regression",
+            "passed": true,
+            "completedCheckGroups": 1,
+            "elapsedMs": 3400
+          },
+          {
+            "name": "frontend_regression",
+            "passed": true,
+            "completedCheckGroups": 1,
+            "elapsedMs": 2073
+          },
+          {
+            "name": "runtime_health",
+            "passed": true,
+            "completedCheckGroups": 1,
+            "elapsedMs": 12
+          },
+          {
+            "name": "task_acceptance",
+            "passed": false,
+            "completedCheckGroups": 0,
+            "error": "Expected values to be strictly equal:\n+ actual - expected\n\n+ '  Trim me  '\n- 'Trim me'\n",
+            "elapsedMs": 1194
+          }
+        ],
+        "runtime": {
+          "node": "v24.21.0",
+          "pythonDependencies": "agent-detector==2.0.0\nannotated-doc==0.0.5\nannotated-types==0.8.0\nanyio==4.15.1\ncertifi==2026.7.22\nclick==8.5.0\ncoverage==7.16.1\ndetect-installer==0.2.1\ndnspython==2.8.0\nemail-validator==2.3.0\nfastapi==0.136.3\nfastapi-cli==0.0.32\nfastapi-cloud-cli==0.26.0\nfastar==0.12.0\ngreenlet==3.5.6\nh11==0.16.0\nhttpcore==1.0.9\nhttptools==0.8.0\nhttpx==0.28.1\nidna==3.20\niniconfig==2.3.0\nJinja2==3.1.6\nmarkdown-it-py==4.2.0\nMarkupSafe==3.0.3\nmdurl==0.1.2\npackaging==26.3\npluggy==1.6.0\npydantic==2.13.5\npydantic-extra-types==2.11.1\npydantic-settings==2.15.0\npydantic_core==2.46.5\nPygments==2.21.0\npytest==9.1.1\npytest-asyncio==1.4.0\npytest-cov==7.1.0\npython-dotenv==1.2.3\npython-multipart==0.0.32\nPyYAML==6.0.3\nrich==15.0.0\nrich-toolkit==0.20.5\nrignore==0.8.1\nruff==0.16.9\nsentry-sdk==2.70.0\nshellingham==1.5.4\nskeleton @ file:///opt/backend\nSQLAlchemy==2.0.54\nsqlmodel==0.0.47\nstarlette==1.7.0\ntyper==0.27.2\ntyping-inspection==0.4.4\ntyping_extensions==4.16.0\nurllib3==2.8.0\nuvicorn==0.54.0\nuvloop==0.22.1\nwatchfiles==1.3.0\nwebsockets==17.1\n",
+          "frontendDependencies": {
+            "version": "0.1.0",
+            "name": "skeleton-frontend",
+            "dependencies": {
+              "@eslint/js": {
+                "version": "9.39.5",
+                "resolved": "https://registry.npmjs.org/@eslint/js/-/js-9.39.5.tgz",
+                "overridden": false
+              },
+              "@radix-ui/react-dialog": {
+                "version": "1.1.23",
+                "resolved": "https://registry.npmjs.org/@radix-ui/react-dialog/-/react-dialog-1.1.23.tgz",
+                "overridden": false
+              },
+              "@radix-ui/react-dropdown-menu": {
+                "version": "2.1.24",
+                "resolved": "https://registry.npmjs.org/@radix-ui/react-dropdown-menu/-/react-dropdown-menu-2.1.24.tgz",
+                "overridden": false
+              },
+              "@radix-ui/react-label": {
+                "version": "2.1.15",
+                "resolved": "https://registry.npmjs.org/@radix-ui/react-label/-/react-label-2.1.15.tgz",
+                "overridden": false
+              },
+              "@radix-ui/react-select": {
+                "version": "2.3.7",
+                "resolved": "https://registry.npmjs.org/@radix-ui/react-select/-/react-select-2.3.7.tgz",
+                "overridden": false
+              },
+              "@radix-ui/react-separator": {
+                "version": "1.1.15",
+                "resolved": "https://registry.npmjs.org/@radix-ui/react-separator/-/react-separator-1.1.15.tgz",
+                "overridden": false
+              },
+              "@radix-ui/react-slot": {
+                "version": "1.3.3",
+                "resolved": "https://registry.npmjs.org/@radix-ui/react-slot/-/react-slot-1.3.3.tgz",
+                "overridden": false
+              },
+              "@shadcn/react": {
+                "version": "0.2.1",
+                "resolved": "https://registry.npmjs.org/@shadcn/react/-/react-0.2.1.tgz",
+                "overridden": false
+              },
+              "@tailwindcss/vite": {
+                "version": "4.3.3",
+                "resolved": "https://registry.npmjs.org/@tailwindcss/vite/-/vite-4.3.3.tgz",
+                "overridden": false
+              },
+              "@tanstack/react-query": {
+                "version": "5.104.0",
+                "resolved": "https://registry.npmjs.org/@tanstack/react-query/-/react-query-5.104.0.tgz",
+                "overridden": false
+              },
+              "@tanstack/react-router": {
+                "version": "1.170.39",
+                "resolved": "https://registry.npmjs.org/@tanstack/react-router/-/react-router-1.170.39.tgz",
+                "overridden": false
+              },
+              "@types/node": {
+                "version": "22.20.4",
+                "resolved": "https://registry.npmjs.org/@types/node/-/node-22.20.4.tgz",
+                "overridden": false
+              },
+              "@types/react-dom": {
+                "version": "19.3.0",
+                "resolved": "https://registry.npmjs.org/@types/react-dom/-/react-dom-19.3.0.tgz",
+                "overridden": false
+              },
+              "@types/react": {
+                "version": "19.3.0",
+                "resolved": "https://registry.npmjs.org/@types/react/-/react-19.3.0.tgz",
+                "overridden": false
+              },
+              "@vitejs/plugin-react": {
+                "version": "4.7.0",
+                "resolved": "https://registry.npmjs.org/@vitejs/plugin-react/-/plugin-react-4.7.0.tgz",
+                "overridden": false
+              },
+              "@vitest/coverage-v8": {
+                "version": "2.1.9",
+                "resolved": "https://registry.npmjs.org/@vitest/coverage-v8/-/coverage-v8-2.1.9.tgz",
+                "overridden": false
+              },
+              "class-variance-authority": {
+                "version": "0.7.1",
+                "resolved": "https://registry.npmjs.org/class-variance-authority/-/class-variance-authority-0.7.1.tgz",
+                "overridden": false
+              },
+              "clsx": {
+                "version": "2.1.1",
+                "resolved": "https://registry.npmjs.org/clsx/-/clsx-2.1.1.tgz",
+                "overridden": false
+              },
+              "eslint-plugin-react-hooks": {
+                "version": "5.2.0",
+                "resolved": "https://registry.npmjs.org/eslint-plugin-react-hooks/-/eslint-plugin-react-hooks-5.2.0.tgz",
+                "overridden": false
+              },
+              "eslint-plugin-react-refresh": {
+                "version": "0.4.26",
+                "resolved": "https://registry.npmjs.org/eslint-plugin-react-refresh/-/eslint-plugin-react-refresh-0.4.26.tgz",
+                "overridden": false
+              },
+              "eslint": {
+                "version": "9.39.5",
+                "resolved": "https://registry.npmjs.org/eslint/-/eslint-9.39.5.tgz",
+                "overridden": false
+              },
+              "globals": {
+                "version": "15.15.0",
+                "resolved": "https://registry.npmjs.org/globals/-/globals-15.15.0.tgz",
+                "overridden": false
+              },
+              "lucide-react": {
+                "version": "0.468.0",
+                "resolved": "https://registry.npmjs.org/lucide-react/-/lucide-react-0.468.0.tgz",
+                "overridden": false
+              },
+              "react-dom": {
+                "version": "19.3.0",
+                "resolved": "https://registry.npmjs.org/react-dom/-/react-dom-19.3.0.tgz",
+                "overridden": false
+              },
+              "react": {
+                "version": "19.3.0",
+                "resolved": "https://registry.npmjs.org/react/-/react-19.3.0.tgz",
+                "overridden": false
+              },
+              "tailwind-merge": {
+                "version": "2.6.1",
+                "resolved": "https://registry.npmjs.org/tailwind-merge/-/tailwind-merge-2.6.1.tgz",
+                "overridden": false
+              },
+              "tailwindcss": {
+                "version": "4.3.3",
+                "resolved": "https://registry.npmjs.org/tailwindcss/-/tailwindcss-4.3.3.tgz",
+                "overridden": false
+              },
+              "typescript-eslint": {
+                "version": "8.70.1",
+                "resolved": "https://registry.npmjs.org/typescript-eslint/-/typescript-eslint-8.70.1.tgz",
+                "overridden": false
+              },
+              "typescript": {
+                "version": "5.9.3",
+                "resolved": "https://registry.npmjs.org/typescript/-/typescript-5.9.3.tgz",
+                "overridden": false
+              },
+              "vite": {
+                "version": "5.4.21",
+                "resolved": "https://registry.npmjs.org/vite/-/vite-5.4.21.tgz",
+                "overridden": false
+              },
+              "vitest": {
+                "version": "2.1.9",
+                "resolved": "https://registry.npmjs.org/vitest/-/vitest-2.1.9.tgz",
+                "overridden": false
+              }
+            }
+          }
+        },
+        "externalRequests": [],
+        "error": "Expected values to be strictly equal:\n+ actual - expected\n\n+ '  Trim me  '\n- 'Trim me'\n",
+        "timedOut": false,
+        "code": 1
+      },
+      "failure": "acceptance_failed",
+      "finishedAt": "2026-09-27T12:37:08.375Z",
+      "serialExecution": {
+        "profile": "m1-serial-v1",
+        "vm": "forger-local-eval",
+        "lifecycle": [
+          {
+            "action": "vm_start_preflight",
+            "startedAt": "2026-09-27T12:36:28.306Z",
+            "status": "completed",
+            "result": {
+              "commandExitCode": 0,
+              "vm": "forger-local-eval",
+              "timeoutMs": 120000
+            },
+            "finishedAt": "2026-09-27T12:36:28.348Z",
+            "elapsedMs": 42.42666699999245
+          },
+          {
+            "action": "evaluator_preflight",
+            "startedAt": "2026-09-27T12:36:28.348Z",
+            "status": "completed",
+            "result": {
+              "ready": true,
+              "dockerVersion": "29.1.3",
+              "evaluatorImage": "sha256:de5bb77888ef8a6826ffa49ab9132d287c4e9e26a187c5a143213eeaa2e28406",
+              "evidenceClass": "real_model",
+              "cliSha256": "29915529b97697def1a957b0505e770aa6a45744435d62fc263e98d7619e167a"
+            },
+            "finishedAt": "2026-09-27T12:36:28.734Z",
+            "elapsedMs": 385.95395900000585
+          },
+          {
+            "action": "vm_stop_before_agent",
+            "startedAt": "2026-09-27T12:36:28.734Z",
+            "status": "completed",
+            "result": {
+              "commandExitCode": 0,
+              "vm": "forger-local-eval",
+              "timeoutMs": 60000
+            },
+            "finishedAt": "2026-09-27T12:36:30.335Z",
+            "elapsedMs": 1601.127582999994
+          },
+          {
+            "action": "observe_model_before_agent",
+            "startedAt": "2026-09-27T12:36:30.335Z",
+            "status": "completed",
+            "result": {
+              "targetModelResident": false,
+              "otherResidentModelCount": 0,
+              "source": "ollama_api_ps",
+              "sampledAt": "2026-09-27T12:36:30.338Z",
+              "memoryUsageMeasured": false,
+              "targetModels": []
+            },
+            "finishedAt": "2026-09-27T12:36:30.338Z",
+            "elapsedMs": 2.9542080000101123
+          },
+          {
+            "action": "observe_model_after_agent",
+            "startedAt": "2026-09-27T12:36:40.662Z",
+            "status": "completed",
+            "result": {
+              "targetModelResident": true,
+              "otherResidentModelCount": 0,
+              "source": "ollama_api_ps",
+              "sampledAt": "2026-09-27T12:36:40.667Z",
+              "memoryUsageMeasured": false,
+              "targetModels": [
+                {
+                  "digestReported": "7df6b6e09427a769808717c0a93cadc4ae99ed4eb8bf5ca557c90846becea435",
+                  "digestMatchesRequested": true,
+                  "contextLengthReported": 16384,
+                  "sizeBytesReported": 2549140684,
+                  "sizeVramBytesReported": 2549140684
+                }
+              ]
+            },
+            "finishedAt": "2026-09-27T12:36:40.667Z",
+            "elapsedMs": 5.42579099998693
+          },
+          {
+            "action": "unload_model_before_evaluation",
+            "startedAt": "2026-09-27T12:36:40.688Z",
+            "status": "completed",
+            "result": {
+              "acknowledged": true,
+              "targetModelResident": false,
+              "otherResidentModelCount": 0,
+              "source": "ollama_api_ps",
+              "sampledAt": "2026-09-27T12:36:40.715Z",
+              "memoryUsageMeasured": false,
+              "targetModels": [],
+              "elapsedMs": 26.572291000018595,
+              "memoryReleaseMeasured": false
+            },
+            "finishedAt": "2026-09-27T12:36:40.715Z",
+            "elapsedMs": 26.576874999998836
+          },
+          {
+            "action": "vm_start_evaluation",
+            "startedAt": "2026-09-27T12:36:40.715Z",
+            "status": "completed",
+            "result": {
+              "commandExitCode": 0,
+              "vm": "forger-local-eval",
+              "timeoutMs": 120000
+            },
+            "finishedAt": "2026-09-27T12:36:51.721Z",
+            "elapsedMs": 11007.302792000002
+          },
+          {
+            "action": "evaluator_revalidation",
+            "startedAt": "2026-09-27T12:36:51.721Z",
+            "status": "completed",
+            "result": {
+              "ready": true,
+              "dockerVersion": "29.1.3",
+              "evaluatorImage": "sha256:de5bb77888ef8a6826ffa49ab9132d287c4e9e26a187c5a143213eeaa2e28406",
+              "evidenceClass": "real_model",
+              "cliSha256": "29915529b97697def1a957b0505e770aa6a45744435d62fc263e98d7619e167a"
+            },
+            "finishedAt": "2026-09-27T12:36:52.302Z",
+            "elapsedMs": 581.210167000012
+          }
+        ],
+        "networkPolicy": "codex-workspace",
+        "wholeCliEgressVerified": false,
+        "networkLimitations": [
+          "The existing Codex workspace-write tool sandbox has network_access=false; the authenticated gateway rejects inference redirects.",
+          "The whole CLI process is not covered by an outer network sandbox, and its total egress is unverified."
+        ],
+        "runtimeModelResidentBeforeAgent": false,
+        "residencyAfterAgent": {
+          "targetModelResident": true,
+          "otherResidentModelCount": 0,
+          "source": "ollama_api_ps",
+          "sampledAt": "2026-09-27T12:36:40.667Z",
+          "memoryUsageMeasured": false,
+          "targetModels": [
+            {
+              "digestReported": "7df6b6e09427a769808717c0a93cadc4ae99ed4eb8bf5ca557c90846becea435",
+              "digestMatchesRequested": true,
+              "contextLengthReported": 16384,
+              "sizeBytesReported": 2549140684,
+              "sizeVramBytesReported": 2549140684
+            }
+          ]
+        },
+        "agentResources": {
+          "sampleIntervalMs": 1000,
+          "sampleCount": 12,
+          "samples": [
+            {
+              "observedAt": "2026-09-27T12:36:30.415Z",
+              "systemTotalMemoryBytes": 8589934592,
+              "systemFreeMemoryBytes": 1890959360,
+              "runtimeProcessCount": 1,
+              "runtimeTreeRssBytes": 13451264,
+              "vm": {
+                "pageSizeBytes": 16384,
+                "freeBytes": 1822457856,
+                "inactiveBytes": 1539014656,
+                "speculativeBytes": 65732608,
+                "wiredBytes": 1760083968,
+                "compressorBytes": 1747714048,
+                "pageouts": 2030940,
+                "swapins": 17489703,
+                "swapouts": 19826864
+              },
+              "swap": {
+                "totalBytes": 5368709120,
+                "usedBytes": 3961195069.44,
+                "freeBytes": 1407514050.56
+              },
+              "unavailable": []
+            },
+            {
+              "observedAt": "2026-09-27T12:36:31.427Z",
+              "systemTotalMemoryBytes": 8589934592,
+              "systemFreeMemoryBytes": 1595555840,
+              "runtimeProcessCount": 2,
+              "runtimeTreeRssBytes": 183222272,
+              "vm": {
+                "pageSizeBytes": 16384,
+                "freeBytes": 1373700096,
+                "inactiveBytes": 1550303232,
+                "speculativeBytes": 217972736,
+                "wiredBytes": 1724973056,
+                "compressorBytes": 1718632448,
+                "pageouts": 2030940,
+                "swapins": 17489707,
+                "swapouts": 19826864
+              },
+              "swap": {
+                "totalBytes": 5368709120,
+                "usedBytes": 3961195069.44,
+                "freeBytes": 1407514050.56
+              },
+              "unavailable": []
+            },
+            {
+              "observedAt": "2026-09-27T12:36:32.442Z",
+              "systemTotalMemoryBytes": 8589934592,
+              "systemFreeMemoryBytes": 98664448,
+              "runtimeProcessCount": 2,
+              "runtimeTreeRssBytes": 2519171072,
+              "vm": {
+                "pageSizeBytes": 16384,
+                "freeBytes": 63062016,
+                "inactiveBytes": 722714624,
+                "speculativeBytes": 45252608,
+                "wiredBytes": 4459937792,
+                "compressorBytes": 1927348224,
+                "pageouts": 2031145,
+                "swapins": 17489707,
+                "swapouts": 19826864
+              },
+              "swap": {
+                "totalBytes": 5368709120,
+                "usedBytes": 3961195069.44,
+                "freeBytes": 1407514050.56
+              },
+              "unavailable": []
+            },
+            {
+              "observedAt": "2026-09-27T12:36:33.486Z",
+              "systemTotalMemoryBytes": 8589934592,
+              "systemFreeMemoryBytes": 127270912,
+              "runtimeProcessCount": 2,
+              "runtimeTreeRssBytes": 2506227712,
+              "vm": {
+                "pageSizeBytes": 16384,
+                "freeBytes": 58130432,
+                "inactiveBytes": 715538432,
+                "speculativeBytes": 69386240,
+                "wiredBytes": 4458266624,
+                "compressorBytes": 1892450304,
+                "pageouts": 2031149,
+                "swapins": 17489707,
+                "swapouts": 19826864
+              },
+              "swap": {
+                "totalBytes": 5368709120,
+                "usedBytes": 3961195069.44,
+                "freeBytes": 1407514050.56
+              },
+              "unavailable": []
+            },
+            {
+              "observedAt": "2026-09-27T12:36:34.502Z",
+              "systemTotalMemoryBytes": 8589934592,
+              "systemFreeMemoryBytes": 78331904,
+              "runtimeProcessCount": 2,
+              "runtimeTreeRssBytes": 2482618368,
+              "vm": {
+                "pageSizeBytes": 16384,
+                "freeBytes": 56655872,
+                "inactiveBytes": 807780352,
+                "speculativeBytes": 18219008,
+                "wiredBytes": 4398202880,
+                "compressorBytes": 1877475328,
+                "pageouts": 2031202,
+                "swapins": 17489892,
+                "swapouts": 19826864
+              },
+              "swap": {
+                "totalBytes": 5368709120,
+                "usedBytes": 3944417853.44,
+                "freeBytes": 1424291266.56
+              },
+              "unavailable": []
+            },
+            {
+              "observedAt": "2026-09-27T12:36:35.521Z",
+              "systemTotalMemoryBytes": 8589934592,
+              "systemFreeMemoryBytes": 100007936,
+              "runtimeProcessCount": 2,
+              "runtimeTreeRssBytes": 2443706368,
+              "vm": {
+                "pageSizeBytes": 16384,
+                "freeBytes": 59015168,
+                "inactiveBytes": 783220736,
+                "speculativeBytes": 38010880,
+                "wiredBytes": 4446355456,
+                "compressorBytes": 1843068928,
+                "pageouts": 2031234,
+                "swapins": 17490011,
+                "swapouts": 19826864
+              },
+              "swap": {
+                "totalBytes": 5368709120,
+                "usedBytes": 3944417853.44,
+                "freeBytes": 1424291266.56
+              },
+              "unavailable": []
+            },
+            {
+              "observedAt": "2026-09-27T12:36:36.547Z",
+              "systemTotalMemoryBytes": 8589934592,
+              "systemFreeMemoryBytes": 112836608,
+              "runtimeProcessCount": 2,
+              "runtimeTreeRssBytes": 2446999552,
+              "vm": {
+                "pageSizeBytes": 16384,
+                "freeBytes": 60260352,
+                "inactiveBytes": 782254080,
+                "speculativeBytes": 50659328,
+                "wiredBytes": 4421124096,
+                "compressorBytes": 1842266112,
+                "pageouts": 2031234,
+                "swapins": 17490011,
+                "swapouts": 19826864
+              },
+              "swap": {
+                "totalBytes": 5368709120,
+                "usedBytes": 3944417853.44,
+                "freeBytes": 1424291266.56
+              },
+              "unavailable": []
+            },
+            {
+              "observedAt": "2026-09-27T12:36:37.576Z",
+              "systemTotalMemoryBytes": 8589934592,
+              "systemFreeMemoryBytes": 121552896,
+              "runtimeProcessCount": 2,
+              "runtimeTreeRssBytes": 2446737408,
+              "vm": {
+                "pageSizeBytes": 16384,
+                "freeBytes": 59506688,
+                "inactiveBytes": 783663104,
+                "speculativeBytes": 59801600,
+                "wiredBytes": 4401266688,
+                "compressorBytes": 1840152576,
+                "pageouts": 2031251,
+                "swapins": 17490107,
+                "swapouts": 19826864
+              },
+              "swap": {
+                "totalBytes": 5368709120,
+                "usedBytes": 3944417853.44,
+                "freeBytes": 1424291266.56
+              },
+              "unavailable": []
+            },
+            {
+              "observedAt": "2026-09-27T12:36:38.608Z",
+              "systemTotalMemoryBytes": 8589934592,
+              "systemFreeMemoryBytes": 131252224,
+              "runtimeProcessCount": 2,
+              "runtimeTreeRssBytes": 2454667264,
+              "vm": {
+                "pageSizeBytes": 16384,
+                "freeBytes": 61390848,
+                "inactiveBytes": 756154368,
+                "speculativeBytes": 67944448,
+                "wiredBytes": 4420681728,
+                "compressorBytes": 1857404928,
+                "pageouts": 2031251,
+                "swapins": 17490107,
+                "swapouts": 19826864
+              },
+              "swap": {
+                "totalBytes": 5368709120,
+                "usedBytes": 3944417853.44,
+                "freeBytes": 1424291266.56
+              },
+              "unavailable": []
+            },
+            {
+              "observedAt": "2026-09-27T12:36:39.622Z",
+              "systemTotalMemoryBytes": 8589934592,
+              "systemFreeMemoryBytes": 137134080,
+              "runtimeProcessCount": 2,
+              "runtimeTreeRssBytes": 2452078592,
+              "vm": {
+                "pageSizeBytes": 16384,
+                "freeBytes": 64651264,
+                "inactiveBytes": 739344384,
+                "speculativeBytes": 71352320,
+                "wiredBytes": 4438130688,
+                "compressorBytes": 1862729728,
+                "pageouts": 2031251,
+                "swapins": 17490119,
+                "swapouts": 19826864
+              },
+              "swap": {
+                "totalBytes": 5368709120,
+                "usedBytes": 3936029245.44,
+                "freeBytes": 1432679874.56
+              },
+              "unavailable": []
+            },
+            {
+              "observedAt": "2026-09-27T12:36:40.635Z",
+              "systemTotalMemoryBytes": 8589934592,
+              "systemFreeMemoryBytes": 90439680,
+              "runtimeProcessCount": 2,
+              "runtimeTreeRssBytes": 2464628736,
+              "vm": {
+                "pageSizeBytes": 16384,
+                "freeBytes": 56721408,
+                "inactiveBytes": 834076672,
+                "speculativeBytes": 30769152,
+                "wiredBytes": 4380573696,
+                "compressorBytes": 1816821760,
+                "pageouts": 2031256,
+                "swapins": 17490127,
+                "swapouts": 19826864
+              },
+              "swap": {
+                "totalBytes": 5368709120,
+                "usedBytes": 3936029245.44,
+                "freeBytes": 1432679874.56
+              },
+              "unavailable": []
+            },
+            {
+              "observedAt": "2026-09-27T12:36:40.652Z",
+              "systemTotalMemoryBytes": 8589934592,
+              "systemFreeMemoryBytes": 96845824,
+              "runtimeProcessCount": 2,
+              "runtimeTreeRssBytes": 2464628736,
+              "vm": {
+                "pageSizeBytes": 16384,
+                "freeBytes": 64028672,
+                "inactiveBytes": 828194816,
+                "speculativeBytes": 30769152,
+                "wiredBytes": 4380606464,
+                "compressorBytes": 1821638656,
+                "pageouts": 2031256,
+                "swapins": 17490127,
+                "swapouts": 19826864
+              },
+              "swap": {
+                "totalBytes": 5368709120,
+                "usedBytes": 3936029245.44,
+                "freeBytes": 1432679874.56
+              },
+              "unavailable": []
+            }
+          ],
+          "peakSampledRuntimeTreeRssBytes": 2519171072,
+          "minimumSampledSystemFreeBytes": 78331904,
+          "peakSampledSwapUsedBytes": 3961195069.44,
+          "peakUnifiedMemoryBytes": null,
+          "limitations": [
+            "RSS is sampled per-process resident memory and may double-count shared pages; it is not a unified-memory high-water mark.",
+            "Free memory is not available-for-model memory. GPU allocations, caches and memory pressure require additional instrumentation.",
+            "vm_stat and swap describe system-wide activity, not causal attribution to the model.",
+            "Sampling itself has overhead; transient peaks between samples may be missed."
+          ]
+        },
+        "syntheticCliDiagnostics": {
+          "source": "synthetic_fixture_cli",
+          "cliExitCode": 0,
+          "stderr": "WARNING: proceeding, even though we could not create PATH aliases: Refusing to create helper binaries under temporary dir \"/private/tmp/forger-local-eval/forger-local-Y1s1ya\" (codex_home: AbsolutePathBuf(\"/private/tmp/forger-local-eval/forger-local-Y1s1ya/.codex\"))\n",
+          "toolFailures": [],
+          "truncated": false,
+          "unparsedStdoutLines": 0
+        },
+        "residencyObservation": {
+          "targetModelResident": false,
+          "otherResidentModelCount": 0,
+          "source": "ollama_api_ps",
+          "sampledAt": "2026-09-27T12:36:30.338Z",
+          "memoryUsageMeasured": false,
+          "targetModels": []
+        },
+        "osFileCache": "uncontrolled",
+        "timingSemantics": {
+          "agentElapsedMs": "Existing agent timer includes resource-monitor startup/finish and post-agent residency observation; VM shutdown/startup is excluded.",
+          "evaluationElapsedMs": "Includes model unload, VM startup, revalidation and Docker evaluation.",
+          "elapsedMs": "Common runner time from attempt start; preflight/VM stop and post-failure recovery are recorded separately.",
+          "coldStart": "Runtime residency is observed; OS page cache is uncontrolled. No fully cold-machine claim."
+        }
+      }
+    }
+  ],
+  "networkPolicy": "codex-workspace",
+  "wholeCliEgressVerified": false,
+  "configuration": {
+    "endpoint": "http://127.0.0.1:11445",
+    "model": "qwen3:0.6b",
+    "modelDigest": "sha256:7df6b6e09427a769808717c0a93cadc4ae99ed4eb8bf5ca557c90846becea435",
+    "contextWindow": 16384,
+    "agentProfile": "compact-v1",
+    "contextStrategy": "direct-v1",
+    "cliPath": "/Users/kupa/Library/Application Support/forger-desktop/codex-cli/node_modules/@openai/codex-darwin-arm64/vendor/aarch64-apple-darwin/bin/codex",
+    "evaluatorImage": "sha256:de5bb77888ef8a6826ffa49ab9132d287c4e9e26a187c5a143213eeaa2e28406"
+  },
+  "ownedVm": {
+    "name": "forger-local-eval"
+  },
+  "state": "completed_with_failures",
+  "output": "/Users/kupa/Documents/Forger/desktop/docs/local-development/evidence/m1-qwen06-v2-direct-2026-09-27.json",
+  "finalLifecycle": [
+    {
+      "action": "vm_stop_final",
+      "startedAt": "2026-09-27T12:37:57.339Z",
+      "status": "completed",
+      "result": {
+        "code": 0,
+        "vm": "forger-local-eval"
+      },
+      "finishedAt": "2026-09-27T12:37:58.990Z"
+    }
+  ],
+  "summary": {
+    "selected": 3,
+    "attempted": 3,
+    "blocked": 0,
+    "failed": 3,
+    "passed": 0,
+    "autonomousPassed": 0,
+    "assistedPassed": 0,
+    "successRate": 0,
+    "autonomousSuccessRate": 0,
+    "denominator": "Every task attempt, including failures, timeouts and resource errors. Preflight blockers are reported separately.",
+    "solvedTimeMs": {
+      "n": 0,
+      "mean": null,
+      "min": null,
+      "max": null,
+      "sampleStandardDeviation": null
+    },
+    "allAttemptTimeMs": {
+      "n": 3,
+      "mean": 38401.78495866666,
+      "min": 37962.293166999996,
+      "max": 39221.2165,
+      "sampleStandardDeviation": 710.2729402318104
+    },
+    "byTask": {
+      "bug-01": {
+        "trials": 3,
+        "attempted": 3,
+        "passed": 0,
+        "allAttemptTimeMs": {
+          "n": 3,
+          "mean": 38401.78495866666,
+          "min": 37962.293166999996,
+          "max": 39221.2165,
+          "sampleStandardDeviation": 710.2729402318104
+        }
+      }
+    }
+  },
+  "contextExperiment": {
+    "protocol": "forger-context-ablation-v1",
+    "taskId": "bug-01",
+    "stagedStrategy": "staged-request-v2",
+    "repetitionsPerStrategy": 3,
+    "sharedProvenance": true,
+    "order": [
+      {
+        "trial": 1,
+        "strategies": [
+          "direct-v1",
+          "staged-request-v2"
+        ]
+      },
+      {
+        "trial": 2,
+        "strategies": [
+          "staged-request-v2",
+          "direct-v1"
+        ]
+      },
+      {
+        "trial": 3,
+        "strategies": [
+          "direct-v1",
+          "staged-request-v2"
+        ]
+      }
+    ],
+    "limits": [
+      "The three trials start direct twice and staged once; order effects are not eliminated.",
+      "The common task timer includes preprocessing; model residency and VM lifecycle are observed by the existing serial runner.",
+      "No in-loop test feedback or automatic strategy promotion is added."
+    ]
+  },
+  "finishedAt": "2026-09-27T12:37:58.990Z"
+}

@@ -1,0 +1,222 @@
+{
+  "schemaVersion": 1,
+  "mode": "context-strategy-ablation",
+  "effectivenessValidated": false,
+  "treatment": {
+    "direct": "direct-v1",
+    "staged": "staged-request-v2",
+    "allowedInputDifferences": [
+      "contextStrategy",
+      "effectivePromptHash and recorded preprocessing evidence"
+    ],
+    "unchangedOriginalPromptHash": "08309827290c145ab31d9dde4f8acf4ebe5b42b8cd6b7a5ad7a7c3640e89682c",
+    "unchangedContextRequestHash": "75b32e24a788fbbe83fdf649c03fa9b67d85578835c833a1c6ba9484927f79f1"
+  },
+  "sample": {
+    "taskIds": [
+      "bug-01"
+    ],
+    "distinctTasks": 1,
+    "repetitionsPerStrategy": 3,
+    "selectedAttempts": 6
+  },
+  "direct": {
+    "selected": 3,
+    "attempted": 3,
+    "blocked": 0,
+    "failed": 3,
+    "passed": 0,
+    "autonomousPassed": 0,
+    "assistedPassed": 0,
+    "successRate": 0,
+    "autonomousSuccessRate": 0,
+    "denominator": "Every task attempt, including failures, timeouts and resource errors. Preflight blockers are reported separately.",
+    "solvedTimeMs": {
+      "n": 0,
+      "mean": null,
+      "min": null,
+      "max": null,
+      "sampleStandardDeviation": null
+    },
+    "allAttemptTimeMs": {
+      "n": 3,
+      "mean": 38401.78495866666,
+      "min": 37962.293166999996,
+      "max": 39221.2165,
+      "sampleStandardDeviation": 710.2729402318104
+    },
+    "byTask": {
+      "bug-01": {
+        "trials": 3,
+        "attempted": 3,
+        "passed": 0,
+        "allAttemptTimeMs": {
+          "n": 3,
+          "mean": 38401.78495866666,
+          "min": 37962.293166999996,
+          "max": 39221.2165,
+          "sampleStandardDeviation": 710.2729402318104
+        }
+      }
+    }
+  },
+  "staged": {
+    "selected": 3,
+    "attempted": 3,
+    "blocked": 0,
+    "failed": 3,
+    "passed": 0,
+    "autonomousPassed": 0,
+    "assistedPassed": 0,
+    "successRate": 0,
+    "autonomousSuccessRate": 0,
+    "denominator": "Every task attempt, including failures, timeouts and resource errors. Preflight blockers are reported separately.",
+    "solvedTimeMs": {
+      "n": 0,
+      "mean": null,
+      "min": null,
+      "max": null,
+      "sampleStandardDeviation": null
+    },
+    "allAttemptTimeMs": {
+      "n": 3,
+      "mean": 48722.72074966666,
+      "min": 44200.177165999994,
+      "max": 55185.272625000005,
+      "sampleStandardDeviation": 5743.762241739924
+    },
+    "byTask": {
+      "bug-01": {
+        "trials": 3,
+        "attempted": 3,
+        "passed": 0,
+        "allAttemptTimeMs": {
+          "n": 3,
+          "mean": 48722.72074966666,
+          "min": 44200.177165999994,
+          "max": 55185.272625000005,
+          "sampleStandardDeviation": 5743.762241739924
+        }
+      }
+    }
+  },
+  "preprocessing": {
+    "completed": 3,
+    "failed": 0,
+    "unobserved": 0
+  },
+  "runtimeIdentity": {
+    "observed": {
+      "runtime": "ollama",
+      "runtimeVersion": "0.34.4"
+    },
+    "observations": 6,
+    "totalAttempts": 6,
+    "complete": true
+  },
+  "allAttemptPairs": [
+    {
+      "taskId": "bug-01",
+      "trial": 1,
+      "direct": {
+        "status": "failed",
+        "failure": "acceptance_failed",
+        "elapsedMs": 39221.2165,
+        "agentElapsedMs": 12052.259250000001,
+        "effectivePromptHash": "08309827290c145ab31d9dde4f8acf4ebe5b42b8cd6b7a5ad7a7c3640e89682c",
+        "preprocessingMs": null
+      },
+      "staged": {
+        "status": "failed",
+        "failure": "acceptance_failed",
+        "elapsedMs": 55185.272625000005,
+        "agentElapsedMs": 28228.295917000003,
+        "effectivePromptHash": "b2b6da56e3a173a9eb528a245b696636a9a1e25c44e5d214ea8fd089c0d66663",
+        "preprocessingMs": 4416.392457999995
+      }
+    },
+    {
+      "taskId": "bug-01",
+      "trial": 2,
+      "direct": {
+        "status": "failed",
+        "failure": "acceptance_failed",
+        "elapsedMs": 38021.84520899999,
+        "agentElapsedMs": 10742.81370899998,
+        "effectivePromptHash": "08309827290c145ab31d9dde4f8acf4ebe5b42b8cd6b7a5ad7a7c3640e89682c",
+        "preprocessingMs": null
+      },
+      "staged": {
+        "status": "failed",
+        "failure": "acceptance_failed",
+        "elapsedMs": 44200.177165999994,
+        "agentElapsedMs": 17035.961874999994,
+        "effectivePromptHash": "b2b6da56e3a173a9eb528a245b696636a9a1e25c44e5d214ea8fd089c0d66663",
+        "preprocessingMs": 4447.5897079999995
+      }
+    },
+    {
+      "taskId": "bug-01",
+      "trial": 3,
+      "direct": {
+        "status": "failed",
+        "failure": "acceptance_failed",
+        "elapsedMs": 37962.293166999996,
+        "agentElapsedMs": 10252.909207999997,
+        "effectivePromptHash": "08309827290c145ab31d9dde4f8acf4ebe5b42b8cd6b7a5ad7a7c3640e89682c",
+        "preprocessingMs": null
+      },
+      "staged": {
+        "status": "failed",
+        "failure": "acceptance_failed",
+        "elapsedMs": 46782.712457999995,
+        "agentElapsedMs": 19653.47995799998,
+        "effectivePromptHash": "b2b6da56e3a173a9eb528a245b696636a9a1e25c44e5d214ea8fd089c0d66663",
+        "preprocessingMs": 4383.775374999997
+      }
+    }
+  ],
+  "pairedSolved": {
+    "n": 0,
+    "pairs": [],
+    "leftMeanMs": null,
+    "rightMeanMs": null,
+    "denominator": "Only identical task/trial pairs solved by both. Global success rates above include all attempted failures.",
+    "leftStrategy": "direct-v1",
+    "rightStrategy": "staged-request-v2"
+  },
+  "excludedFromPairedTime": [
+    {
+      "taskId": "bug-01",
+      "trial": 1,
+      "reason": "not_solved_by_both",
+      "leftStatus": "failed",
+      "rightStatus": "failed"
+    },
+    {
+      "taskId": "bug-01",
+      "trial": 2,
+      "reason": "not_solved_by_both",
+      "leftStatus": "failed",
+      "rightStatus": "failed"
+    },
+    {
+      "taskId": "bug-01",
+      "trial": 3,
+      "reason": "not_solved_by_both",
+      "leftStatus": "failed",
+      "rightStatus": "failed"
+    }
+  ],
+  "denominator": "All attempted trials in each arm, including preprocessing failures, agent failures and timeouts. All-attempt elapsed times include preprocessing; solved-only paired time is a separate subset. Missing trials and preflight blockers prevent this completed-experiment comparison.",
+  "limits": [
+    "One task repeated is one distinct task; these observations do not establish general utility or statistical significance.",
+    "Preprocessing may add useful context, lose requirements, or increase time. This report does not promote a strategy automatically.",
+    "The agent receives no in-loop test feedback in this experiment; independent Docker acceptance follows the agent.",
+    "Hardware identity is checked; available memory, OS cache, temperature and other foreground work remain uncontrolled.",
+    "Runtime identity comes from observations when available; an early failure may have no runtime metadata and is retained.",
+    "Report provenance is recorded, not cryptographically attested.",
+    "Different hardware and cold/warm states must be reviewed separately; this comparison does not normalize them.",
+    "No percentage of general model quality is calculated."
+  ]
+}

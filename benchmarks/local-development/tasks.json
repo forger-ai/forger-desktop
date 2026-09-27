@@ -1,0 +1,578 @@
+{
+  "schemaVersion": 1,
+  "version": "0.1.0",
+  "date": "2026-09-26",
+  "taxonomy": {
+    "status": "provisional",
+    "S": "One narrow behavior and a small regression boundary; e.g. normalize titles.",
+    "M": "One screen/API/DB flow; e.g. persistent CRUD or search.",
+    "L": "Coordinated model/API/UI changes or data evolution; e.g. archive/restore.",
+    "XL": "Small complete app or multiple dependent workflows; executable validation pending."
+  },
+  "tasks": [
+    {
+      "id": "template-01",
+      "title": "Local desk counter",
+      "family": "template",
+      "band": "M",
+      "state": "executable",
+      "pendingReason": null,
+      "partition": "development",
+      "fixture": "template",
+      "source": {
+        "dataClassification": "synthetic",
+        "provenance": "Forger-authored benchmark; shipped GPL-3.0-only public supported skeleton.",
+        "creationMode": "supported_template"
+      },
+      "initialState": "Pinned public skeleton; no business app.",
+      "instruction": "Starting from this supported Vite/FastAPI/SQLite skeleton, create a local desk page at /. Show heading My local desk, count initially 0 and a button Add that increments it. Add GET /api/desk returning {\"name\":\"My local desk\",\"storage\":\"local\"}. Preserve existing health, context, shell route and regression contracts. Keep all dependency/config/test files unchanged. Add tests for new behavior without modifying existing tests.",
+      "acceptance": [
+        "Frontend TypeScript/Vite build passes.",
+        "Browser loads /, heading My local desk is visible, Add moves count from 0 to 1.",
+        "GET /api/desk returns exactly name/storage contract.",
+        "Backend and frontend original regression suites pass."
+      ],
+      "budget": {
+        "timeMs": 600000,
+        "toolCalls": 60,
+        "retries": 0,
+        "evaluationTimeMs": 240000
+      },
+      "estimated": {
+        "tokenCount": {
+          "value": null,
+          "tokenizer": null,
+          "reason": "Requires exact model tokenizer and measured rendered input; bytes are not token counts."
+        },
+        "relevantFiles": [
+          "backend/src/app/main.py",
+          "frontend/src/features/dashboard/DashboardView.tsx"
+        ],
+        "expectedModifiedFiles": "1–4 source files plus added tests",
+        "functionalRequirements": 4,
+        "componentDependencies": [
+          "React screen ↔ local button state",
+          "FastAPI route ↔ fixed JSON contract"
+        ],
+        "tools": [
+          "read/search files",
+          "apply code patches",
+          "run bounded commands"
+        ],
+        "expectedSteps": [
+          "inspect",
+          "implement",
+          "test",
+          "correct within original budget"
+        ],
+        "existingCodeUnderstanding": false,
+        "regressionRisk": "low: starter shell and existing API contracts; no business-data persistence requirement",
+        "securityRisk": "Untrusted generated code; evaluate only isolated synthetic fixture with no network, secrets or host writes."
+      }
+    },
+    {
+      "id": "template-02",
+      "title": "Reading list from template",
+      "family": "template",
+      "band": "M",
+      "state": "planned",
+      "partition": "development",
+      "proposedScope": "Reading list from template",
+      "pendingReason": "Independent fixture, executable acceptance and baseline validation have not been implemented; excluded from execution and success claims."
+    },
+    {
+      "id": "template-03",
+      "title": "Expense log from template",
+      "family": "template",
+      "band": "M",
+      "state": "planned",
+      "partition": "development",
+      "proposedScope": "Expense log from template",
+      "pendingReason": "Independent fixture, executable acceptance and baseline validation have not been implemented; excluded from execution and success claims."
+    },
+    {
+      "id": "template-04",
+      "title": "Habit checklist from template",
+      "family": "template",
+      "band": "M",
+      "state": "planned",
+      "partition": "development",
+      "proposedScope": "Habit checklist from template",
+      "pendingReason": "Independent fixture, executable acceptance and baseline validation have not been implemented; excluded from execution and success claims."
+    },
+    {
+      "id": "template-05",
+      "title": "Event register from template",
+      "family": "template",
+      "band": "M",
+      "state": "planned",
+      "partition": "development",
+      "proposedScope": "Event register from template",
+      "pendingReason": "Independent fixture, executable acceptance and baseline validation have not been implemented; excluded from execution and success claims."
+    },
+    {
+      "id": "template-06",
+      "title": "Inventory app from scratch",
+      "family": "template",
+      "band": "XL",
+      "state": "planned",
+      "partition": "holdout",
+      "proposedScope": "Inventory app from scratch",
+      "pendingReason": "Independent fixture, executable acceptance and baseline validation have not been implemented; excluded from execution and success claims."
+    },
+    {
+      "id": "crud-01",
+      "title": "Persistent notes CRUD",
+      "family": "crud",
+      "band": "M",
+      "state": "executable",
+      "pendingReason": null,
+      "partition": "development",
+      "fixture": "crud",
+      "source": {
+        "dataClassification": "synthetic",
+        "provenance": "Forger-authored benchmark; shipped GPL-3.0-only public supported skeleton.",
+        "creationMode": "supported_template"
+      },
+      "initialState": "Pinned skeleton plus versioned notes overlay (read only backend).",
+      "instruction": "The synthetic notes app has a screen and read endpoint but cannot save changes. Implement POST /api/notes (201), PUT /api/notes/{id} (200) and DELETE /api/notes/{id} (204) backed by the existing SQLite engine. Notes have id and title (trim whitespace, 1–120 nonblank characters), updates preserve id, missing ids return 404, invalid titles 422. The existing labeled Note title field, Save, per-note Edit and Delete buttons must work and persistence must survive a backend restart. Preserve original tests, package/config and commons files; add tests for new paths.",
+      "acceptance": [
+        "POST/GET/PUT/DELETE round trip uses expected status and preserves id.",
+        "Invalid blank/overlong titles return 422 and missing ids return 404.",
+        "Record survives actual backend stop/start.",
+        "Browser saves, edits and deletes a note through accessible controls."
+      ],
+      "budget": {
+        "timeMs": 600000,
+        "toolCalls": 60,
+        "retries": 0,
+        "evaluationTimeMs": 240000
+      },
+      "estimated": {
+        "tokenCount": {
+          "value": null,
+          "tokenizer": null,
+          "reason": "Requires exact model tokenizer and measured rendered input; bytes are not token counts."
+        },
+        "relevantFiles": [
+          "backend/src/app/main.py",
+          "backend/src/app/notes.py",
+          "frontend/src/features/dashboard/DashboardView.tsx"
+        ],
+        "expectedModifiedFiles": "1–4 source files plus added tests",
+        "functionalRequirements": 4,
+        "componentDependencies": [
+          "React screen ↔ HTTP contract",
+          "FastAPI ↔ SQLite"
+        ],
+        "tools": [
+          "read/search files",
+          "apply code patches",
+          "run bounded commands"
+        ],
+        "expectedSteps": [
+          "inspect",
+          "implement",
+          "test",
+          "correct within original budget"
+        ],
+        "existingCodeUnderstanding": true,
+        "regressionRisk": "medium: persisted data and existing app contracts",
+        "securityRisk": "Untrusted generated code; evaluate only isolated synthetic fixture with no network, secrets or host writes."
+      }
+    },
+    {
+      "id": "crud-02",
+      "title": "Unique contact email CRUD",
+      "family": "crud",
+      "band": "M",
+      "state": "planned",
+      "partition": "development",
+      "proposedScope": "Unique contact email CRUD",
+      "pendingReason": "Independent fixture, executable acceptance and baseline validation have not been implemented; excluded from execution and success claims."
+    },
+    {
+      "id": "crud-03",
+      "title": "Tasks with due dates",
+      "family": "crud",
+      "band": "M",
+      "state": "planned",
+      "partition": "development",
+      "proposedScope": "Tasks with due dates",
+      "pendingReason": "Independent fixture, executable acceptance and baseline validation have not been implemented; excluded from execution and success claims."
+    },
+    {
+      "id": "crud-04",
+      "title": "Inventory quantity validation",
+      "family": "crud",
+      "band": "M",
+      "state": "planned",
+      "partition": "development",
+      "proposedScope": "Inventory quantity validation",
+      "pendingReason": "Independent fixture, executable acceptance and baseline validation have not been implemented; excluded from execution and success claims."
+    },
+    {
+      "id": "crud-05",
+      "title": "Projects and tasks relation",
+      "family": "crud",
+      "band": "L",
+      "state": "planned",
+      "partition": "development",
+      "proposedScope": "Projects and tasks relation",
+      "pendingReason": "Independent fixture, executable acceptance and baseline validation have not been implemented; excluded from execution and success claims."
+    },
+    {
+      "id": "crud-06",
+      "title": "Transactional two-table CRUD",
+      "family": "crud",
+      "band": "L",
+      "state": "planned",
+      "partition": "holdout",
+      "proposedScope": "Transactional two-table CRUD",
+      "pendingReason": "Independent fixture, executable acceptance and baseline validation have not been implemented; excluded from execution and success claims."
+    },
+    {
+      "id": "modify-01",
+      "title": "Search existing notes",
+      "family": "modification",
+      "band": "M",
+      "state": "executable",
+      "pendingReason": null,
+      "partition": "development",
+      "fixture": "notes",
+      "source": {
+        "dataClassification": "synthetic",
+        "provenance": "Forger-authored benchmark; shipped GPL-3.0-only public supported skeleton.",
+        "creationMode": "supported_template"
+      },
+      "initialState": "Pinned skeleton plus versioned notes overlay (working persistent CRUD).",
+      "instruction": "Add case-insensitive title search to this existing persistent notes app. A field labeled Search filters notes through GET /api/notes?q=term. Empty q returns all; unmatched query returns []; original title spelling is preserved. Search and editing/deleting results must work in the UI. Preserve CRUD, persisted records, health and all existing tests/config; add regression tests.",
+      "acceptance": [
+        "q search matches mixed case as substring without mutating data.",
+        "Empty q returns all records; unmatched q returns empty list.",
+        "Browser filters visible notes and clears search.",
+        "Persisted notes and CRUD regression checks pass."
+      ],
+      "budget": {
+        "timeMs": 600000,
+        "toolCalls": 60,
+        "retries": 0,
+        "evaluationTimeMs": 240000
+      },
+      "estimated": {
+        "tokenCount": {
+          "value": null,
+          "tokenizer": null,
+          "reason": "Requires exact model tokenizer and measured rendered input; bytes are not token counts."
+        },
+        "relevantFiles": [
+          "backend/src/app/main.py",
+          "backend/src/app/notes.py",
+          "frontend/src/features/dashboard/DashboardView.tsx"
+        ],
+        "expectedModifiedFiles": "1–4 source files plus added tests",
+        "functionalRequirements": 4,
+        "componentDependencies": [
+          "React screen ↔ HTTP contract",
+          "FastAPI ↔ SQLite"
+        ],
+        "tools": [
+          "read/search files",
+          "apply code patches",
+          "run bounded commands"
+        ],
+        "expectedSteps": [
+          "inspect",
+          "implement",
+          "test",
+          "correct within original budget"
+        ],
+        "existingCodeUnderstanding": true,
+        "regressionRisk": "medium: persisted data and existing app contracts",
+        "securityRisk": "Untrusted generated code; evaluate only isolated synthetic fixture with no network, secrets or host writes."
+      }
+    },
+    {
+      "id": "modify-02",
+      "title": "Paginated contacts",
+      "family": "modification",
+      "band": "M",
+      "state": "planned",
+      "partition": "development",
+      "proposedScope": "Paginated contacts",
+      "pendingReason": "Independent fixture, executable acceptance and baseline validation have not been implemented; excluded from execution and success claims."
+    },
+    {
+      "id": "modify-03",
+      "title": "Sort inventory",
+      "family": "modification",
+      "band": "M",
+      "state": "planned",
+      "partition": "development",
+      "proposedScope": "Sort inventory",
+      "pendingReason": "Independent fixture, executable acceptance and baseline validation have not been implemented; excluded from execution and success claims."
+    },
+    {
+      "id": "modify-04",
+      "title": "Accessible empty state",
+      "family": "modification",
+      "band": "S",
+      "state": "planned",
+      "partition": "development",
+      "proposedScope": "Accessible empty state",
+      "pendingReason": "Independent fixture, executable acceptance and baseline validation have not been implemented; excluded from execution and success claims."
+    },
+    {
+      "id": "modify-05",
+      "title": "Export filtered records",
+      "family": "modification",
+      "band": "M",
+      "state": "planned",
+      "partition": "development",
+      "proposedScope": "Export filtered records",
+      "pendingReason": "Independent fixture, executable acceptance and baseline validation have not been implemented; excluded from execution and success claims."
+    },
+    {
+      "id": "modify-06",
+      "title": "Saved filters with navigation",
+      "family": "modification",
+      "band": "L",
+      "state": "planned",
+      "partition": "holdout",
+      "proposedScope": "Saved filters with navigation",
+      "pendingReason": "Independent fixture, executable acceptance and baseline validation have not been implemented; excluded from execution and success claims."
+    },
+    {
+      "id": "bug-01",
+      "title": "Trim note titles",
+      "family": "bug",
+      "band": "S",
+      "state": "executable",
+      "pendingReason": null,
+      "partition": "development",
+      "fixture": "bug",
+      "source": {
+        "dataClassification": "synthetic",
+        "provenance": "Forger-authored benchmark; shipped GPL-3.0-only public supported skeleton.",
+        "creationMode": "supported_template"
+      },
+      "initialState": "Pinned skeleton plus versioned notes overlay (known title-trimming defect).",
+      "instruction": "Reproduce and fix the note-title whitespace bug: POST and PUT accept boundary whitespace without normalizing it. A title \"  Alpha  \" must persist as \"Alpha\"; all-whitespace titles must return 422, and titles over 120 characters must return 422. Preserve CRUD statuses and ids, edits, deletion and existing records. Keep existing tests/config unchanged and add regression tests that fail before the fix.",
+      "acceptance": [
+        "POST/PUT trim leading and trailing whitespace before persistence.",
+        "Blank and >120-character titles fail 422; no invalid row persists.",
+        "Browser can save and edit valid notes.",
+        "Original tests and CRUD persistence regression checks pass."
+      ],
+      "budget": {
+        "timeMs": 600000,
+        "toolCalls": 60,
+        "retries": 0,
+        "evaluationTimeMs": 240000
+      },
+      "estimated": {
+        "tokenCount": {
+          "value": null,
+          "tokenizer": null,
+          "reason": "Requires exact model tokenizer and measured rendered input; bytes are not token counts."
+        },
+        "relevantFiles": [
+          "backend/src/app/main.py",
+          "backend/src/app/notes.py",
+          "frontend/src/features/dashboard/DashboardView.tsx"
+        ],
+        "expectedModifiedFiles": "1–4 source files plus added tests",
+        "functionalRequirements": 4,
+        "componentDependencies": [
+          "React screen ↔ HTTP contract",
+          "FastAPI ↔ SQLite"
+        ],
+        "tools": [
+          "read/search files",
+          "apply code patches",
+          "run bounded commands"
+        ],
+        "expectedSteps": [
+          "inspect",
+          "implement",
+          "test",
+          "correct within original budget"
+        ],
+        "existingCodeUnderstanding": true,
+        "regressionRisk": "medium: persisted data and existing app contracts",
+        "securityRisk": "Untrusted generated code; evaluate only isolated synthetic fixture with no network, secrets or host writes."
+      }
+    },
+    {
+      "id": "bug-02",
+      "title": "Prevent duplicate save",
+      "family": "bug",
+      "band": "M",
+      "state": "planned",
+      "partition": "development",
+      "proposedScope": "Prevent duplicate save",
+      "pendingReason": "Independent fixture, executable acceptance and baseline validation have not been implemented; excluded from execution and success claims."
+    },
+    {
+      "id": "bug-03",
+      "title": "Fix timezone date grouping",
+      "family": "bug",
+      "band": "M",
+      "state": "planned",
+      "partition": "development",
+      "proposedScope": "Fix timezone date grouping",
+      "pendingReason": "Independent fixture, executable acceptance and baseline validation have not been implemented; excluded from execution and success claims."
+    },
+    {
+      "id": "bug-04",
+      "title": "Fix stale filtered state",
+      "family": "bug",
+      "band": "M",
+      "state": "planned",
+      "partition": "development",
+      "proposedScope": "Fix stale filtered state",
+      "pendingReason": "Independent fixture, executable acceptance and baseline validation have not been implemented; excluded from execution and success claims."
+    },
+    {
+      "id": "bug-05",
+      "title": "Preserve data during update",
+      "family": "bug",
+      "band": "L",
+      "state": "planned",
+      "partition": "development",
+      "proposedScope": "Preserve data during update",
+      "pendingReason": "Independent fixture, executable acceptance and baseline validation have not been implemented; excluded from execution and success claims."
+    },
+    {
+      "id": "bug-06",
+      "title": "Fix transaction rollback",
+      "family": "bug",
+      "band": "L",
+      "state": "planned",
+      "partition": "holdout",
+      "proposedScope": "Fix transaction rollback",
+      "pendingReason": "Independent fixture, executable acceptance and baseline validation have not been implemented; excluded from execution and success claims."
+    },
+    {
+      "id": "multi-01",
+      "title": "Archive notes across UI and API",
+      "family": "multifile",
+      "band": "L",
+      "state": "executable",
+      "pendingReason": null,
+      "partition": "holdout",
+      "fixture": "notes",
+      "source": {
+        "dataClassification": "synthetic",
+        "provenance": "Forger-authored benchmark; shipped GPL-3.0-only public supported skeleton.",
+        "creationMode": "supported_template"
+      },
+      "initialState": "Pinned skeleton plus versioned notes overlay (working persistent CRUD).",
+      "instruction": "Add persistent archiving across database, API, client types and UI. Existing notes default archived=false without data loss. PATCH /api/notes/{id}/archive with {\"archived\":true|false} returns the updated note or 404. GET /api/notes returns active notes by default; GET /api/notes?include_archived=true returns all. Each active note exposes Archive; a Show archived checkbox reveals archived notes with a Restore button. Restore makes the note active. Preserve normal CRUD, validation, search-independent behavior, health and existing tests/config. Add tests for migration/defaults and archive/restore.",
+      "acceptance": [
+        "Existing rows remain readable and default archived false.",
+        "Archive/restore endpoints persist across a real backend restart.",
+        "Default listing hides archived rows and include_archived exposes them.",
+        "Browser Archive/Show archived/Restore controls complete the flow."
+      ],
+      "budget": {
+        "timeMs": 1200000,
+        "toolCalls": 100,
+        "retries": 0,
+        "evaluationTimeMs": 240000
+      },
+      "estimated": {
+        "tokenCount": {
+          "value": null,
+          "tokenizer": null,
+          "reason": "Requires exact model tokenizer and measured rendered input; bytes are not token counts."
+        },
+        "relevantFiles": [
+          "backend/src/app/main.py",
+          "backend/src/app/notes.py",
+          "frontend/src/features/dashboard/DashboardView.tsx"
+        ],
+        "expectedModifiedFiles": "3–6 source files plus added tests",
+        "functionalRequirements": 4,
+        "componentDependencies": [
+          "React screen ↔ HTTP contract",
+          "FastAPI ↔ SQLite"
+        ],
+        "tools": [
+          "read/search files",
+          "apply code patches",
+          "run bounded commands"
+        ],
+        "expectedSteps": [
+          "inspect",
+          "implement",
+          "test",
+          "correct within original budget"
+        ],
+        "existingCodeUnderstanding": true,
+        "regressionRisk": "high: schema evolution and existing records",
+        "securityRisk": "Untrusted generated code; evaluate only isolated synthetic fixture with no network, secrets or host writes."
+      }
+    },
+    {
+      "id": "multi-02",
+      "title": "Add categories with migration",
+      "family": "multifile",
+      "band": "L",
+      "state": "planned",
+      "partition": "holdout",
+      "proposedScope": "Add categories with migration",
+      "pendingReason": "Independent fixture, executable acceptance and baseline validation have not been implemented; excluded from execution and success claims."
+    },
+    {
+      "id": "multi-03",
+      "title": "Coordinate form/API validation",
+      "family": "multifile",
+      "band": "M",
+      "state": "planned",
+      "partition": "holdout",
+      "proposedScope": "Coordinate form/API validation",
+      "pendingReason": "Independent fixture, executable acceptance and baseline validation have not been implemented; excluded from execution and success claims."
+    },
+    {
+      "id": "multi-04",
+      "title": "CSV import preview and apply",
+      "family": "multifile",
+      "band": "L",
+      "state": "planned",
+      "partition": "holdout",
+      "proposedScope": "CSV import preview and apply",
+      "pendingReason": "Independent fixture, executable acceptance and baseline validation have not been implemented; excluded from execution and success claims."
+    },
+    {
+      "id": "multi-05",
+      "title": "Undo deletion with persistence",
+      "family": "multifile",
+      "band": "L",
+      "state": "planned",
+      "partition": "holdout",
+      "proposedScope": "Undo deletion with persistence",
+      "pendingReason": "Independent fixture, executable acceptance and baseline validation have not been implemented; excluded from execution and success claims."
+    },
+    {
+      "id": "multi-06",
+      "title": "Dashboard with related records",
+      "family": "multifile",
+      "band": "XL",
+      "state": "planned",
+      "partition": "holdout",
+      "proposedScope": "Dashboard with related records",
+      "pendingReason": "Independent fixture, executable acceptance and baseline validation have not been implemented; excluded from execution and success claims."
+    }
+  ],
+  "defaults": {
+    "regression": [
+      "Original backend test files and configuration are immutable and must pass.",
+      "Original frontend test files and configuration are immutable and must pass.",
+      "Health and context endpoints remain available; no test deletion or dependency/config changes."
+    ],
+    "success": "Agent returns within budget; immutable acceptance, original regressions, frontend build and real runtime/browser checks all pass without protected file changes.",
+    "failure": "Any acceptance/regression/build/runtime failure, budget exhaustion, protected-file mutation or evaluator error after invocation is a failed attempt.",
+    "humanHelp": "Any human prompt, manual patch or changed instruction/config during an attempt marks intervention=true. This runner is noninteractive and does not resume assisted attempts."
+  }
+}

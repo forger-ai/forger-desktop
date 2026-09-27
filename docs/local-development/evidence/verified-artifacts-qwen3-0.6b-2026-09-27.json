@@ -1,0 +1,153 @@
+{
+  "schemaVersion": 1,
+  "protocol": "forger-local-artifact-verification-v1",
+  "status": "verified",
+  "startedAt": "2026-09-27T12:11:06.628Z",
+  "networkUsed": false,
+  "model": {
+    "runtimeModel": "qwen3:0.6b",
+    "store": "/Users/kupa/Library/Application Support/ForgerLocalEvaluation/models",
+    "status": "verified",
+    "files": [
+      {
+        "kind": "manifest",
+        "sourceUrl": "https://registry.ollama.ai/v2/library/qwen3/manifests/0.6b",
+        "path": "/Users/kupa/Library/Application Support/ForgerLocalEvaluation/models/manifests/registry.ollama.ai/library/qwen3/0.6b",
+        "status": "verified",
+        "expected": {
+          "sha256": "7df6b6e09427a769808717c0a93cadc4ae99ed4eb8bf5ca557c90846becea435",
+          "sizeBytes": 858
+        },
+        "observed": {
+          "sizeBytes": 858,
+          "sha256": "7df6b6e09427a769808717c0a93cadc4ae99ed4eb8bf5ca557c90846becea435"
+        },
+        "hashing": "sha256_stream"
+      },
+      {
+        "kind": "config",
+        "mediaType": "application/vnd.docker.container.image.v1+json",
+        "sourceUrl": "https://registry.ollama.ai/v2/library/qwen3/blobs/sha256:b0830f4ff6a0220cfd995455206353b0ed23c0aee865218b154b7a75087b4e55",
+        "path": "/Users/kupa/Library/Application Support/ForgerLocalEvaluation/models/blobs/sha256-b0830f4ff6a0220cfd995455206353b0ed23c0aee865218b154b7a75087b4e55",
+        "status": "verified",
+        "expected": {
+          "sha256": "b0830f4ff6a0220cfd995455206353b0ed23c0aee865218b154b7a75087b4e55",
+          "sizeBytes": 490
+        },
+        "observed": {
+          "sizeBytes": 490,
+          "sha256": "b0830f4ff6a0220cfd995455206353b0ed23c0aee865218b154b7a75087b4e55"
+        },
+        "hashing": "sha256_stream"
+      },
+      {
+        "kind": "layer",
+        "layerIndex": 0,
+        "mediaType": "application/vnd.ollama.image.model",
+        "sourceUrl": "https://registry.ollama.ai/v2/library/qwen3/blobs/sha256:7f4030143c1c477224c5434f8272c662a8b042079a0a584f0a27a1684fe2e1fa",
+        "path": "/Users/kupa/Library/Application Support/ForgerLocalEvaluation/models/blobs/sha256-7f4030143c1c477224c5434f8272c662a8b042079a0a584f0a27a1684fe2e1fa",
+        "status": "verified",
+        "expected": {
+          "sha256": "7f4030143c1c477224c5434f8272c662a8b042079a0a584f0a27a1684fe2e1fa",
+          "sizeBytes": 522640096
+        },
+        "observed": {
+          "sizeBytes": 522640096,
+          "sha256": "7f4030143c1c477224c5434f8272c662a8b042079a0a584f0a27a1684fe2e1fa"
+        },
+        "hashing": "sha256_stream"
+      },
+      {
+        "kind": "layer",
+        "layerIndex": 1,
+        "mediaType": "application/vnd.ollama.image.template",
+        "sourceUrl": "https://registry.ollama.ai/v2/library/qwen3/blobs/sha256:ae370d884f108d16e7cc8fd5259ebc5773a0afa6e078b11f4ed7e39a27e0dfc4",
+        "path": "/Users/kupa/Library/Application Support/ForgerLocalEvaluation/models/blobs/sha256-ae370d884f108d16e7cc8fd5259ebc5773a0afa6e078b11f4ed7e39a27e0dfc4",
+        "status": "verified",
+        "expected": {
+          "sha256": "ae370d884f108d16e7cc8fd5259ebc5773a0afa6e078b11f4ed7e39a27e0dfc4",
+          "sizeBytes": 1723
+        },
+        "observed": {
+          "sizeBytes": 1723,
+          "sha256": "ae370d884f108d16e7cc8fd5259ebc5773a0afa6e078b11f4ed7e39a27e0dfc4"
+        },
+        "hashing": "sha256_stream"
+      },
+      {
+        "kind": "layer",
+        "layerIndex": 2,
+        "mediaType": "application/vnd.ollama.image.license",
+        "sourceUrl": "https://registry.ollama.ai/v2/library/qwen3/blobs/sha256:d18a5cc71b84bc4af394a31116bd3932b42241de70c77d2b76d69a314ec8aa12",
+        "path": "/Users/kupa/Library/Application Support/ForgerLocalEvaluation/models/blobs/sha256-d18a5cc71b84bc4af394a31116bd3932b42241de70c77d2b76d69a314ec8aa12",
+        "status": "verified",
+        "expected": {
+          "sha256": "d18a5cc71b84bc4af394a31116bd3932b42241de70c77d2b76d69a314ec8aa12",
+          "sizeBytes": 11338
+        },
+        "observed": {
+          "sizeBytes": 11338,
+          "sha256": "d18a5cc71b84bc4af394a31116bd3932b42241de70c77d2b76d69a314ec8aa12"
+        },
+        "hashing": "sha256_stream"
+      },
+      {
+        "kind": "layer",
+        "layerIndex": 3,
+        "mediaType": "application/vnd.ollama.image.params",
+        "sourceUrl": "https://registry.ollama.ai/v2/library/qwen3/blobs/sha256:cff3f395ef3756ab63e58b0ad1b32bb6f802905cae1472e6a12034e4246fbbdb",
+        "path": "/Users/kupa/Library/Application Support/ForgerLocalEvaluation/models/blobs/sha256-cff3f395ef3756ab63e58b0ad1b32bb6f802905cae1472e6a12034e4246fbbdb",
+        "status": "verified",
+        "expected": {
+          "sha256": "cff3f395ef3756ab63e58b0ad1b32bb6f802905cae1472e6a12034e4246fbbdb",
+          "sizeBytes": 120
+        },
+        "observed": {
+          "sizeBytes": 120,
+          "sha256": "cff3f395ef3756ab63e58b0ad1b32bb6f802905cae1472e6a12034e4246fbbdb"
+        },
+        "hashing": "sha256_stream"
+      }
+    ],
+    "catalogId": "qwen3-0.6b-q4_k_m",
+    "manifestUrl": "https://registry.ollama.ai/v2/library/qwen3/manifests/0.6b"
+  },
+  "runtimeArchive": {
+    "kind": "runtime_archive",
+    "sourceUrl": "https://github.com/ollama/ollama/releases/download/v0.34.4/ollama-darwin.tgz",
+    "runtimeVersion": "0.34.4",
+    "path": "/Users/kupa/Library/Application Support/ForgerLocalEvaluation/archives/ollama-darwin-0.34.4.tgz",
+    "status": "verified",
+    "expected": {
+      "sha256": "e9c8fddaab5f48f47f2c4ae3d23d0732f5182417125353faeed2188e34a22799",
+      "sizeBytes": 160042307
+    },
+    "observed": {
+      "sizeBytes": 160042307,
+      "sha256": "e9c8fddaab5f48f47f2c4ae3d23d0732f5182417125353faeed2188e34a22799"
+    },
+    "hashing": "sha256_stream",
+    "signatureVerification": {
+      "status": "not_performed",
+      "reason": "This tool verifies archive bytes only. It does not execute codesign, verify notarization or attest an extracted executable."
+    }
+  },
+  "provenance": {
+    "catalogPath": "/Users/kupa/Documents/Forger/desktop/docs/local-development/models.json",
+    "catalogSha256": "c9e84d7937ab6cf1adf08eb8ea2487887a3f0d3eaf46e8f61bad45bf438bbbff",
+    "catalogVersion": "2026-09-27.4",
+    "verifierSha256": "64a904a6875446bb19e0e4dd047e5f32dcdf8703c1f20dca716e05b01397009a",
+    "nodeVersion": "v24.18.0"
+  },
+  "bufferingPolicy": {
+    "maxStreamingChunkBytes": 1048576,
+    "maxRetainedMetadataBytes": 1048576
+  },
+  "limits": [
+    "Hash matches establish byte identity against the local catalog pins; the catalog is not independently authenticated by this tool.",
+    "Model compatibility, licenses, publisher conversion provenance and task capability require separate review.",
+    "Filesystem checks reject observed symlinks and file changes; they do not attest a compromised operating system or eliminate every concurrent directory-replacement race."
+  ],
+  "finishedAt": "2026-09-27T12:11:07.024Z",
+  "verificationElapsedMs": 395.55674999999997
+}
