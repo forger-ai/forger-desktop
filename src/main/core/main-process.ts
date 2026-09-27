@@ -1,3 +1,4 @@
+import { startRepositoryCollaborationRuntime, stopRepositoryCollaborationRuntime } from '../repository-collaboration/runtime';
 import { app, BrowserWindow, desktopCapturer, dialog, ipcMain, Notification, session, shell, type IpcMainInvokeEvent } from 'electron';
 import { createHash, createHmac, randomBytes } from 'node:crypto';
 import type { ChildProcessWithoutNullStreams } from 'node:child_process';
@@ -457,6 +458,22 @@ const anyAppAllowsAgentNetworkAccess = async (appIds: string[]): Promise<boolean
 const getSecretsStore = (): SecretsStore => getManifestSupportController().getSecretsStore();
 const getOfficialToolsService = (): OfficialToolsService => getManifestSupportController().getOfficialToolsService();
 const getConnectionsService = (): ConnectionsService => getManifestSupportController().getConnectionsService();
+const startRepositoryCollaboration = async (): Promise<void> => {
+  await startRepositoryCollaborationRuntime({
+    metadataRoot: getForgerMetadataRoot(), connections: getConnectionsService(), sourceCodexHome: getCodexHome,
+    resolveRuntime: async () => {
+      const status = await getCodexAuthStatus();
+      if (!status.authenticated) throw new Error('repository_execution_auth_required');
+      const cliPath = await resolveCodexCliPath(getCodexRoot());
+      if (!cliPath) throw new Error('repository_execution_runtime_missing');
+      const runtime = await chooseAgentRuntime({ provider: 'codex', permissionMode: 'safe' });
+      if (runtime.authProfileId && !['codex:system', 'codex:local-active'].includes(runtime.authProfileId)) throw new Error('repository_execution_auth_required');
+      const node = await ensureRuntimeInstalled('node', DEFAULT_NODE_VERSION);
+      return { cliPath, pathEntries: getRuntimePathEntries(node), model: runtime.model, effort: runtime.effort as CodexReasoningEffort, authenticated: true };
+    },
+  });
+};
+
 const getSidekickService = (): SidekickService => {
   sidekickService ??= new SidekickService({
     metadataRoot: getForgerMetadataRoot(),
@@ -1559,6 +1576,7 @@ const mainLifecycleState = {
 };
 
 registerMainLifecycle({
+  startRepositoryCollaboration, stopRepositoryCollaboration: stopRepositoryCollaborationRuntime,
   AGENT_TOOL_DEFINITIONS, AppAgentConversationManager, AppAgentTaskManager, AppMcpManager, AutomationManager, WorkflowFeatureController, WorkflowManager, WorkflowAppActionRuntime,
   BrowserWindow, ChatOrchestrator, CloudDeviceManager, CloudIdentityStore, DesktopRuntimeBridge,
   DevCatalogService, FORGER_AGENT_CONTRACT_VERSION, FileLibrary, ForgerAccountStore, ForgerBackendClient,

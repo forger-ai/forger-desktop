@@ -1,9 +1,11 @@
 import type { AppCategory } from '@shared/types';
 import { esAgentGroups } from './locales/agentGroups';
+import { esRepositoryCollaboration } from './locales/repositoryCollaboration';
 import { esBackgroundTasks } from './locales/esBackgroundTasks';
 import { esMore } from './locales/esMore';
 import { esSections } from './locales/esSections';
 export const es = { locale: 'es',
+  repositoryCollaboration: esRepositoryCollaboration,
   appName: 'Forger',
   appTagline: 'Apps locales que puedes abrir y adaptar conversando.',
   nav: {

@@ -40,7 +40,7 @@ type BaileysSocket = {
   ev?: {
     on: (event: string, handler: (payload: unknown) => void) => void;
   };
-  user?: { id?: string };
+  user?: { id?: string; lid?: string };
   requestPairingCode?: (phoneNumber: string) => Promise<string>;
   sendMessage?: (jid: string, content: unknown, options?: unknown) => Promise<unknown>;
   groupMetadata?: (jid: string) => Promise<unknown>;
@@ -59,6 +59,9 @@ export class WhatsAppConnectionManager {
   private starting: Promise<void> | null = null;
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private sessionGeneration = 0;
+  private selfIds: string[] = [];
+  private readonly sentMessageIds = new Set<string>();
+  private liveTail: Promise<void> = Promise.resolve();
 
   constructor(
     private readonly store: WhatsAppLocalStore,
@@ -156,14 +159,21 @@ export class WhatsAppConnectionManager {
       return { success: false, userMessage: 'Espera un momento antes de enviar otro mensaje de WhatsApp.', technicalCode: 'whatsapp_send_rate_limited' };
     }
     await this.ensureStarted(context);
-    const quoted = decodeStableMessageRef(input.replyToMessageRef);
+    const recentReply = input.replyToMessageId
+      ? (await this.store.readMessages({ chatId, limit: 500 })).find(message => message.stableMessageRef.id === input.replyToMessageId)?.stableMessageRef
+      : undefined;
+    const quoted = decodeStableMessageRef(input.replyToMessageRef) ?? recentReply;
+    if (quoted && quoted.remoteJid !== chatId) throw new Error('whatsapp_reply_chat_mismatch');
     const sent = await this.socket?.sendMessage?.(
       chatId,
       { text },
       quoted ? { quoted: { key: quoted } } : undefined,
     );
+    if (!sent) throw new Error('whatsapp_send_unavailable');
     const normalized = normalizeBaileysMessage(sent);
     if (normalized) {
+      this.sentMessageIds.add(`${chatId}:${normalized.stableMessageRef.id}`);
+      if(this.sentMessageIds.size > 2000) this.sentMessageIds.delete(this.sentMessageIds.values().next().value!);
       await this.store.upsertMessages([normalized]);
     }
     await this.store.rememberSend();
@@ -187,6 +197,7 @@ export class WhatsAppConnectionManager {
         chat,
         type: 'group',
         metadata: normalizeGroupMetadata(metadata),
+        selfIds: this.selfIds,
       };
     }
     if (chat.chatType === 'channel') {
@@ -270,6 +281,8 @@ export class WhatsAppConnectionManager {
 
   async stopListening(): Promise<void> {
     this.sessionGeneration += 1;
+    this.selfIds = [];
+    this.sentMessageIds.clear();
     this.socket?.end?.(new Error('forger_whatsapp_stopped'));
     this.clearReconnectTimer();
     this.socket = null;
@@ -279,6 +292,8 @@ export class WhatsAppConnectionManager {
 
   async resetLocalSession(context?: InternalToolContext): Promise<void> {
     this.sessionGeneration += 1;
+    this.selfIds = [];
+    this.sentMessageIds.clear();
     this.socket?.end?.(new Error('forger_whatsapp_deactivated'));
     this.clearReconnectTimer();
     this.socket = null;
@@ -374,9 +389,15 @@ export class WhatsAppConnectionManager {
       markOnlineOnConnect: false,
     });
     this.socket = socket;
+    const creds = isRecord(state) && isRecord(state.creds) ? state.creds : {};
+    const me = isRecord(creds.me) ? creds.me : {};
+    this.selfIds = [...new Set([socket.user?.id, socket.user?.lid, me.id, me.lid].map(normalizeParticipantIdentity).filter(Boolean))];
     this.needsReconnect = false;
     this.emitRuntimeEvent(context, 'connecting');
     socket.ev?.on('creds.update', (payload) => {
+      if(generation !== this.sessionGeneration) return;
+      const updateMe = isRecord(payload) && isRecord(payload.me) ? payload.me : {};
+      this.selfIds = [...new Set([...this.selfIds, socket.user?.id, socket.user?.lid, updateMe.id, updateMe.lid].map(normalizeParticipantIdentity).filter(Boolean))];
       if (isPairedAuthState(payload) || isPairedAuthState(state)) {
         this.authenticated = true;
       }
@@ -385,11 +406,34 @@ export class WhatsAppConnectionManager {
       });
     });
     socket.ev?.on('connection.update', (payload) => {
+      if(generation === this.sessionGeneration) this.selfIds = [...new Set([...this.selfIds, socket.user?.id, socket.user?.lid].map(normalizeParticipantIdentity).filter(Boolean))];
       this.handleConnectionUpdate(payload, context, generation);
     });
     socket.ev?.on('messages.upsert', (payload) => {
+      if (generation !== this.sessionGeneration) return;
       const messages = isRecord(payload) && Array.isArray(payload.messages) ? payload.messages : [];
-      void this.ingestMessages(messages, context).catch((error) => {
+      this.liveTail = this.liveTail.catch(() => undefined).then(async () => {
+        if (generation !== this.sessionGeneration) return;
+        await this.ingestMessages(messages, context);
+        if (generation !== this.sessionGeneration || !isRecord(payload) || payload.type !== 'notify') return;
+        for (const raw of messages) {
+          if (generation !== this.sessionGeneration) return;
+          const message = normalizeBaileysMessage(raw);
+          if (!message?.isGroup || !message.text || !message.timestamp) continue;
+          const claimed = normalizeParticipantIdentity(message.senderId);
+          const senderId = message.fromMe ? (claimed && this.selfIds.includes(claimed) ? claimed : !claimed ? this.selfIds[0] : '') : claimed;
+          if (!senderId) continue;
+          const body = isRecord(raw) && isRecord(raw.message) ? raw.message : {};
+          const extended = isRecord(body.extendedTextMessage) ? body.extendedTextMessage : {};
+          const quote = isRecord(extended.contextInfo) ? extended.contextInfo : {};
+          await context.onWhatsAppMessage?.({ chatId: message.chatId, messageId: message.stableMessageRef.id,
+            senderId, senderName: message.senderDisplayName, text: message.text, timestamp: message.timestamp * 1000,
+            live: true, identityVerified: true, fromMe: message.fromMe,
+            automated: this.sentMessageIds.has(`${message.chatId}:${message.stableMessageRef.id}`) || message.text.startsWith('🤖 Forger'),
+            ...(typeof quote.stanzaId === 'string' ? { replyToMessageId: quote.stanzaId } : {}),
+          }).catch(() => { void context.appendLog?.('repository_collaboration:delivery_failed', { code: 'delivery_failed' }); });
+        }
+      }).catch((error) => {
         void context.appendLog?.('official_tool:whatsapp_message_ingest_failed', sanitizeErrorPayload(error));
       });
     });
@@ -813,3 +857,9 @@ const normalizeGroupMetadata = (metadata: unknown): Record<string, unknown> | nu
 
 export const createWhatsAppConnectionManager = (context: InternalToolContext): WhatsAppConnectionManager =>
   new WhatsAppConnectionManager(new WhatsAppLocalStore(context.metadataRoot));
+
+const normalizeParticipantIdentity = (value: unknown): string => {
+  if (typeof value !== 'string') return '';
+  const match = /^([^:@\s]+)(?::\d+)?@(s\.whatsapp\.net|lid)$/.exec(value);
+  return match ? `${match[1]}@${match[2]}` : '';
+};

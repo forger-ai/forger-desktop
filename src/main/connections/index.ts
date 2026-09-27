@@ -196,6 +196,7 @@ const createConnectionToolContext = (
   ...(context.selfOAuthCallbackService ? { selfOAuthCallbackService: context.selfOAuthCallbackService } : {}),
   appendLog: context.appendLog,
   emitEvent: context.emitEvent,
+  onWhatsAppMessage: (message) => context.onWhatsAppMessage?.({ ...message, connectionId }) ?? Promise.resolve(),
 });
 
 const createToolBackedConnectionModule = (

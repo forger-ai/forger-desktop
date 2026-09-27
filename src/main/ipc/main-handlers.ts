@@ -43,6 +43,8 @@ import { registerAppCloudMessagingIpcHandlers } from './app-cloud-messaging-hand
 import { registerAppRuntimeIpcHandlers } from './app-runtime-handlers';
 import { registerChatIpcHandlers } from './chat-handlers';
 import { registerConnectionIpcHandlers } from './connection-handlers';
+import { registerRepositoryCollaborationIpcHandlers } from './repository-collaboration-handlers';
+import { getRepositoryCollaborationService } from '../repository-collaboration/runtime';
 import { registerExternalUrlIpcHandlers } from './external-url-handler';
 import { registerFileLibraryIpcHandlers } from './file-library-handlers';
 import { registerLiveVoiceInputIpcHandlers } from './live-voice-input-handlers';
@@ -1490,6 +1492,7 @@ export const registerMainIpcHandlers = (deps: MainProcessIpcDeps): void => {
     return await getOfficialToolsService().deactivate(toolId, { locale });
   });
   registerConnectionIpcHandlers({ IPC_CHANNELS, ipcMain, getConnectionsService });
+  registerRepositoryCollaborationIpcHandlers({ IPC_CHANNELS, ipcMain, dialog, getService: getRepositoryCollaborationService });
   registerSidekickIpcHandlers({ IPC_CHANNELS, ipcMain, getSidekickService, getPersonalAgentStore, getTextToSpeechService });
   ipcMain.handle(IPC_CHANNELS.getAppToolsInstallGate, async (_event, appId: string, locale?: string, options?: GetAppToolsInstallGateOptions): Promise<AppToolsInstallGate | null> => {
     return await buildAppAccessInstallGate(appId, locale, options);

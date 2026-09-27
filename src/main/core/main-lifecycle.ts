@@ -164,6 +164,8 @@ export interface MainLifecycleDeps {
     delete: AsyncFn;
   };
 		  getOfficialToolsService: () => NonNullable<MainLifecycleState['officialToolsService']>;
+  startRepositoryCollaboration?: () => Promise<void>;
+  stopRepositoryCollaboration?: () => Promise<void>;
   getConnectionsService: () => NonNullable<MainLifecycleState['connectionsService']>;
   getSelfOAuthCallbackService: () => NonNullable<MainLifecycleState['selfOAuthCallbackService']>;
   getSpeechToTextService: () => NonNullable<MainLifecycleState['speechToTextService']>;
@@ -333,6 +335,8 @@ export const registerMainLifecycle = (deps: MainLifecycleDeps) => {
     getPersonalAgentRoutineManager,
     getOfficialToolsService,
     getConnectionsService,
+    startRepositoryCollaboration,
+    stopRepositoryCollaboration,
     getSelfOAuthCallbackService,
     getSidekickService,
     getSpeechToTextService,
@@ -484,6 +488,13 @@ export const registerMainLifecycle = (deps: MainLifecycleDeps) => {
   await startupLogger.step('startup:connections:load', async () => {
     await state.connectionsService?.load();
   });
+  await startupLogger.step('startup:repository_collaboration:start', async () => {
+    await startRepositoryCollaboration?.();
+  }).catch(() => { void appendInstallLog('repository_collaboration:start_failed', { code: 'unavailable' }); });
+  await startupLogger.step('startup:connections:start', async () => {
+    await state.connectionsService?.start?.();
+  });
+
   await startupLogger.step('startup:sidekick:start_if_paired', async () => {
     await startSidekickIfPaired?.();
   }).catch((error: unknown) => {
@@ -1590,5 +1601,5 @@ export const registerMainLifecycle = (deps: MainLifecycleDeps) => {
     console.error('Forger Desktop startup failed', error);
   }
 });
-registerGracefulShutdownHandlers({ app, state, runningApps, stopInstalledApp, terminateProcess, closeServer });
+registerGracefulShutdownHandlers({ app, state, runningApps, stopInstalledApp, terminateProcess, closeServer, stopRepositoryCollaboration });
 };

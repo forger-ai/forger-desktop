@@ -6,6 +6,7 @@ import type { MainLifecycleState } from './main-lifecycle-types';
 
 interface GracefulShutdownOptions {
   app: App;
+  stopRepositoryCollaboration?: () => Promise<void>;
   state: MainLifecycleState;
   runningApps: Map<string, RunningAppProcess>;
   stopInstalledApp: (appId: string) => Promise<unknown>;
@@ -20,9 +21,12 @@ export const registerGracefulShutdownHandlers = ({
   stopInstalledApp,
   terminateProcess,
   closeServer,
+  stopRepositoryCollaboration,
 }: GracefulShutdownOptions): void => {
   let gracefulShutdownStarted = false;
   const performGracefulShutdown = async (): Promise<void> => {
+    await Promise.resolve().then(() => stopRepositoryCollaboration?.()).catch(() => undefined);
+    await Promise.resolve().then(() => state.connectionsService?.stop?.()).catch(() => undefined);
     state.memoryMaintenanceManager?.dispose();
     state.personalAgentRoutineManager?.dispose?.();
     state.automationManager?.dispose();

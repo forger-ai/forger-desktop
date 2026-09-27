@@ -8,7 +8,6 @@ import type {
 } from './types';
 
 const DIRECT_SUFFIX = '@s.whatsapp.net';
-const LID_SUFFIX = '@lid';
 const GROUP_SUFFIX = '@g.us';
 const NEWSLETTER_SUFFIX = '@newsletter';
 
@@ -27,11 +26,11 @@ export const classifyWhatsAppJid = (jid: string): WhatsAppChatType => {
 };
 
 export const phoneNumberFromJid = (jid: string): string | undefined => {
-  if (!jid.endsWith(DIRECT_SUFFIX) && !jid.endsWith(LID_SUFFIX)) {
+  if (!jid.endsWith(DIRECT_SUFFIX)) {
     return undefined;
   }
   const [raw] = jid.split('@');
-  const digits = raw.replace(/\D/g, '');
+  const digits = raw.split(':')[0].replace(/\D/g, '');
   return digits || undefined;
 };
 
