@@ -1073,8 +1073,13 @@ test('SidekickService fails oversized or noncanonical microphone chunks and asks
 
 test('SidekickService cleans up active staged microphone recordings when the socket closes', async (t) => {
   const root = await tmpRoot('sidekick-service-mic-close-cleanup');
+  let service;
   t.after(async () => {
-    await fs.rm(root, { recursive: true, force: true });
+    try {
+      await service?.dispose();
+    } finally {
+      await fs.rm(root, { recursive: true, force: true });
+    }
   });
 
   await withMockedElectron({ safeStorage: createSafeStorage() }, async (require) => {
@@ -1083,7 +1088,7 @@ test('SidekickService cleans up active staged microphone recordings when the soc
     const pairingSecret = randomBytes(32).toString('base64');
     const logs = [];
     await writePairedSidekickStore(root, pairingSecret, ['display.text', 'wifi.websocket', 'microphone.record']);
-    const service = createSidekickService(SidekickService, root, {
+    service = createSidekickService(SidekickService, root, {
       appendLog: async (event, payload) => { logs.push({ event, payload }); },
       getVoicePhase: () => 'listening',
     });
@@ -1106,6 +1111,14 @@ test('SidekickService cleans up active staged microphone recordings when the soc
       recordingId: startCommand.recordingId,
       data: Buffer.from([0x00, 0x00]).toString('base64'),
     });
+    // Establish the staged-recording precondition before testing disconnect cleanup.
+    const recording = await waitForState(
+      () => service.getState(),
+      (candidate) => candidate.sidekicks[0]?.microphoneRecording?.bytes === 2,
+    );
+    assert.equal(recording.sidekicks[0].microphoneRecording.bytes, 2);
+    const stagedPath = path.join(root, 'sidekick-recordings', 'tmp', `${startCommand.recordingId}.pcm`);
+    assert.equal((await fs.stat(stagedPath)).size, 2);
     socket.close(4001, 'wifi_reset');
     await waitForSocketClose(socket);
     const state = await waitForState(
@@ -1124,9 +1137,7 @@ test('SidekickService cleans up active staged microphone recordings when the soc
       speakerStatus: 'idle',
       voicePhase: 'listening',
     });
-    await assert.rejects(fs.stat(path.join(root, 'sidekick-recordings', 'tmp', `${startCommand.recordingId}.pcm`)), { code: 'ENOENT' });
-
-    await service.dispose();
+    await assert.rejects(fs.stat(stagedPath), { code: 'ENOENT' });
   });
 });
 
