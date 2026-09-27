@@ -276,6 +276,10 @@ export class WhatsAppConnectionManager {
     if (quoted && quoted.remoteJid !== chatId) throw new Error('whatsapp_reply_chat_mismatch');
     const finishSend = this.trackPendingSend(chatId);
     try {
+      // No asynchronous preparation follows this check: revocation must win up to the socket boundary.
+      if (context.authorizeWhatsAppSend && !await context.authorizeWhatsAppSend()) {
+        return { success: false, technicalCode: 'whatsapp_send_authorization_revoked', data: { deliveryState: 'not_sent', retryable: false } };
+      }
       const sent = await socket.sendMessage(
         chatId,
         { text },
@@ -537,10 +541,11 @@ export class WhatsAppConnectionManager {
   private toLiveMessage(message: WhatsAppIndexedMessage): WhatsAppIndexedMessage {
     const selfIds = this.authenticatedSelfIds();
     const claimedSender = message.senderId ? normalizeWhatsAppUserJid(message.senderId) : undefined;
+    const verifiedSender = claimedSender && /^\d+@(s\.whatsapp\.net|lid)$/.test(claimedSender) ? claimedSender : undefined;
     const ownSender = claimedSender ? (selfIds.includes(claimedSender) ? claimedSender : undefined) : selfIds[0];
     return {
       ...message,
-      ...(message.fromMe ? { senderId: ownSender } : {}),
+      senderId: message.fromMe ? ownSender : verifiedSender,
       attachments: message.attachments.map((attachment) => ({
         attachmentId: attachment.attachmentId,
         stableMessageRef: attachment.stableMessageRef,

@@ -27,10 +27,10 @@ export const registerGracefulShutdownHandlers = ({
   let gracefulShutdownStarted = false;
   const performGracefulShutdown = async (): Promise<void> => {
     setLiveWhatsAppMessageHandler(null);
-    state.whatsappAgentChannelService?.close();
     await Promise.resolve().then(() => stopRepositoryCollaboration?.()).catch(() => undefined);
     await Promise.resolve().then(() => state.connectionsService?.stop?.()).catch(() => undefined);
     await state.connectionsService?.stopType?.('whatsapp');
+    state.whatsappAgentChannelService?.close();
     state.memoryMaintenanceManager?.dispose();
     state.personalAgentRoutineManager?.dispose?.();
     state.automationManager?.dispose();

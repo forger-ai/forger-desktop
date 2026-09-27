@@ -69,6 +69,7 @@ export interface WhatsAppAgentCancelInput {
 }
 
 export interface WhatsAppAgentReplyInput {
+  authorizeSend: () => Promise<boolean>;
   binding: WhatsAppAgentBinding;
   turnId: string;
   revision: number;

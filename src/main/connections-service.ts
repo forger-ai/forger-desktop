@@ -320,7 +320,7 @@ export class ConnectionsService {
     return module.pairingStatus(this.getContext(), instance.id);
   }
 
-  async call(input: ServiceCallConnectionActionInput): Promise<CallConnectionActionResult> {
+  async call(input: ServiceCallConnectionActionInput, hostOptions?: { authorizeWhatsAppSend?: () => Promise<boolean> }): Promise<CallConnectionActionResult> {
     await this.load();
     const type = cleanString(input.type);
     const actionId = cleanString(input.actionId);
@@ -349,7 +349,11 @@ export class ConnectionsService {
       return { success: false, userMessage: 'Connection is not configured.', technicalCode: 'connection_not_configured' };
     }
 
-    const result = await module.execute(this.getContext(), {
+    const context = this.getContext();
+    if (type === 'whatsapp' && actionId === 'whatsapp.send_message' && hostOptions?.authorizeWhatsAppSend) {
+      context.authorizeWhatsAppSend = hostOptions.authorizeWhatsAppSend;
+    }
+    const result = await module.execute(context, {
       type,
       actionId,
       ...(input.input ? { input: input.input } : {}),

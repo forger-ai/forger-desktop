@@ -126,7 +126,7 @@ export class WhatsAppAgentChannelService {
           connectionId: input.binding.connectionId,
           actionId: 'whatsapp.send_message',
           input: { chatId: input.binding.chatId, text },
-        });
+        }, { authorizeWhatsAppSend: input.authorizeSend });
         const data = isRecord(result.data) ? result.data : {};
         const transientCode = [
           'whatsapp_send_rate_limited',

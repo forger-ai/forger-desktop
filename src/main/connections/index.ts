@@ -178,6 +178,7 @@ const createConnectionToolContext = (
   metadataRoot: path.join(context.metadataRoot, 'connections', toolId, connectionId),
   connectionId,
   locale: context.locale,
+  authorizeWhatsAppSend: context.authorizeWhatsAppSend,
   secretsStore: {
     setToolSecret: async (_toolId: string, secretName: string, value: string) =>
       context.secretsStore.setConnectionSecret(connectionId, secretName, value),

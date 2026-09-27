@@ -644,3 +644,25 @@ test('transport distinguishes proven pre-send failures from an uncertain socket 
   assert.deepEqual((await manager.sendMessage(context, { chatId, text: 'reply' })).data, { deliveryState: 'not_sent', retryable: true });
   await store.close?.();
 });
+
+test('combined live routing contains one failed callback and keeps subsequent messages available', async (t) => {
+  const root = await mkdtemp(join(tmpdir(), 'forger-whatsapp-combined-'));
+  const originalFactory = whatsappManagerModule.createWhatsAppConnectionManager;
+  let onLiveMessage; let fail = true; const delivered = []; const logs = [];
+  whatsappManagerModule.createWhatsAppConnectionManager = (_context, options) => {
+    onLiveMessage = options.onLiveMessage;
+    return { status: async () => ({ configured: true }) };
+  };
+  t.after(async () => { setLiveWhatsAppMessageHandler(null); __resetWhatsAppToolForTests(); whatsappManagerModule.createWhatsAppConnectionManager = originalFactory; await rm(root, { recursive: true, force: true }); });
+  const context = { ...createContext(root), connectionId: 'account', appendLog: async (name) => logs.push(name), onWhatsAppMessage: async () => { if (fail) throw Error('private exception'); return true; } };
+  await whatsappToolModule.start(context);
+  setLiveWhatsAppMessageHandler(async () => assert.fail('claimed or failed repository task cannot reach another agent'));
+  const message = { isGroup: true, senderId: '123@lid', text: 'Forger, work', timestamp: 10, stableMessageRef: { id: 'a' } };
+  await onLiveMessage(message, { newlyStored: true });
+  assert.deepEqual(logs, ['whatsapp:live_routing_failed']);
+  fail = false;
+  await onLiveMessage(message, { newlyStored: true });
+  setLiveWhatsAppMessageHandler(async (event) => delivered.push(event));
+  await onLiveMessage({ ...message, isGroup: false }, { newlyStored: true });
+  assert.equal(delivered.length, 1);
+});

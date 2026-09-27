@@ -349,7 +349,7 @@ export class RepositoryCollaborationService {
   }
   /** Configured repository conversations reserve explicit Forger commands, even when paused or unauthorized. */
   async routeMessage(message: RepositoryCollaborationMessage): Promise<boolean> {
-    if (!this.started || !parseCollaborationCommand(message.text) || !this.store.findGroup(message.connectionId, message.chatId)) return false;
+    if (!message.live || !this.started || !parseCollaborationCommand(message.text) || !this.store.findGroup(message.connectionId, message.chatId)) return false;
     await this.handleMessage(message);
     return true;
   }

@@ -72,8 +72,9 @@ test('composition resolves only an authenticated supported runtime lazily and st
     const events = [];
     const logger = { step: async (name, fn) => { events.push(name); await fn(); } };
     const base = { state: {}, startupLogger: logger, appendInstallLog: async (name) => events.push(name), getConnectionsService: () => ({ load: async () => events.push('load'), start: async () => events.push('listen') }) };
-    await startRepositoryConnections({ ...base, startRepositoryCollaboration: async () => { events.push('intake'); } });
-    assert.ok(events.indexOf('intake') < events.indexOf('listen'));
+    await startRepositoryConnections({ ...base, startRepositoryCollaboration: async () => { events.push('intake'); }, initializeChannels: async () => { events.push('channels'); } });
+    assert.ok(events.indexOf('intake') < events.indexOf('channels'));
+    assert.ok(events.indexOf('channels') < events.indexOf('listen'));
     await startRepositoryConnections({ ...base, startRepositoryCollaboration: async () => { throw Error('unavailable'); } });
     assert.ok(events.includes('repository_collaboration:start_failed'));
     await startRepositoryConnections({ ...base, getConnectionsService: () => undefined });

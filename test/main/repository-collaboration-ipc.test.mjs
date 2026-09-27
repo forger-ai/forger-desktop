@@ -189,3 +189,9 @@ test('The main composition registers the protected native folder choice, includi
     );
   }
 });
+
+test('group participant selection passes only validated connection and chat identities', async () => {
+  const h = harness();
+  await h.run('repositoryCollaborationListParticipants', { connectionId: 'account', chatId: 'group@g.us' });
+  assert.deepEqual(h.calls, [['listParticipants', 'account']]);
+});

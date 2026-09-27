@@ -8,6 +8,12 @@ Implementation proceeds through shared DTOs and normalized SQLite persistence, d
 
 Behavior checks precede implementation: unauthorized names and unknown LIDs do not execute; from-account verified messages work; history and automated messages do not execute; duplicate incoming messages execute once; ambiguous aliases prompt clarification; all roots in a multi-repository task need grants; overlapping roots serialize; revocation cancels queued work and aborts running work; continuation checks all permissions again; restart marks interrupted work for owner attention without replay; failed outgoing delivery retries independently of execution.
 
+## Message routing with personal agents
+
+Repository collaboration and personal agents share one verified live WhatsApp ingestion path. History, stale socket sessions, and known outgoing echoes do not create work. A configured repository group reserves explicit `Forger` commands, including while paused or when the sender lacks repository access. Those commands do not fall through to a personal agent with the same alias or an inline mention in the request. Other explicitly addressed personal-agent messages retain their channel permissions. A routing failure does not send the request to another operator. Reply identifiers stay inside the same chat.
+
+Both operators register before WhatsApp listening starts. Shutdown removes live handlers, stops repository work and connections, and closes personal-agent channels before completing application cleanup.
+
 ## Operating contract
 
 The owner selects existing normal Git checkouts from the native Desktop folder chooser. Each checkout keeps its own real `.git` directory. Symbolic repository roots, worktrees or submodules with external Git metadata, the filesystem root, and the home directory are rejected during configuration. Public DTOs omit their paths. Repository aliases are unique within a group and cannot contain command separators. Group members never gain access merely by being present in the conversation. Participant identities originate in the live transport roster and are compared exactly, including their identity namespace.

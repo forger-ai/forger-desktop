@@ -27,3 +27,21 @@ test('direct, incomplete and automated messages cannot become repository work; o
 test('repository routing errors fail closed instead of sending the same request to a different agent', async () => {
   await assert.rejects(dispatchLiveWhatsAppMessage({ connectionId: 'account', message: base, newlyStored: true, onRepositoryMessage: async () => { throw Error('routing unavailable'); }, onAgentMessage: async () => assert.fail('must not fall through') }), /routing unavailable/);
 });
+
+test('configured groups reserve explicit repository commands while ordinary, unknown and offline routing remains unclaimed', async () => {
+  const { RepositoryCollaborationService } = require('../../dist-electron/main/repository-collaboration/service.js');
+  const service = Object.create(RepositoryCollaborationService.prototype);
+  let calls = 0; let configured = false;
+  service.started = false;
+  service.store = { findGroup: () => configured ? { enabled: false } : undefined };
+  service.handleMessage = async () => { calls++; };
+  const message = { live: true, connectionId: 'account', chatId: 'group', text: 'Forger, Repo: request for @Forger' };
+  assert.equal(await service.routeMessage(message), false);
+  service.started = true;
+  assert.equal(await service.routeMessage(message), false);
+  configured = true;
+  assert.equal(await service.routeMessage({ ...message, text: '@helper hello' }), false);
+  assert.equal(await service.routeMessage({ ...message, live: false }), false);
+  assert.equal(await service.routeMessage(message), true);
+  assert.equal(calls, 1);
+});

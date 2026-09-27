@@ -19,6 +19,8 @@ export interface InternalOAuthTokenResponse {
 }
 
 export interface InternalToolContext {
+  /** Main-process callback, checked after transport preparation immediately before sending. */
+  authorizeWhatsAppSend?: () => Promise<boolean>;
   metadataRoot: string;
   /** Present for a configured Connection instance, never for a general tool. */
   connectionId?: string;

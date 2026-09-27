@@ -141,3 +141,11 @@ test('version comparison reaches lexical tie-breaking only with normalized strin
   assert.equal(controller.isVersionNewer('v1.0', '1.0'), true);
   assert.equal(controller.isVersionNewer('1.0', 'v1.0'), false);
 });
+
+test('connection events publish only to a live desktop window', () => {
+  const sent = [];
+  createController().emitOfficialToolEvent({ toolId: 'whatsapp', event: 'connected' });
+  createController({ getMainWindow: () => ({ isDestroyed: () => true }) }).emitOfficialToolEvent({ toolId: 'whatsapp' });
+  createController({ getMainWindow: () => ({ isDestroyed: () => false, webContents: { send: (...args) => sent.push(args) } }) }).emitOfficialToolEvent({ toolId: 'whatsapp', event: 'connected' });
+  assert.deepEqual(sent, [[IPC_CHANNELS.officialToolEvent, { toolId: 'whatsapp', event: 'connected' }]]);
+});

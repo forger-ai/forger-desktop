@@ -32,6 +32,8 @@ export interface CreateConnectionInstanceInput {
 }
 
 export interface ConnectionContext {
+  /** Host-only final delivery authority; never populated from serialized action input. */
+  authorizeWhatsAppSend?: () => Promise<boolean>;
   metadataRoot: string;
   secretsStore: ConnectionSecretsStore;
   locale?: string;

@@ -126,7 +126,7 @@ export class WhatsAppRepositoryTransport
                 ? { replyToMessageId: input.replyToMessageId }
                 : {}),
             },
-          });
+          }, { authorizeWhatsAppSend: input.canSend });
           if (
             !result.success &&
             result.technicalCode === 'whatsapp_send_rate_limited'

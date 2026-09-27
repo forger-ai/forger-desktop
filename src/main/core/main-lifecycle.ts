@@ -8,8 +8,7 @@ import { reportSanitizerRoots } from '../conversation-diagnostics';
 import type { StoredForgerAccount } from '../forger-account-store';
 import { createAppMcpSecretsFingerprint, type AppMcpManager as AppMcpManagerService } from '../app-mcp-manager';
 import { AppFolderGrantStore } from '../app-folder-grants';
-import type {
-  AgentProvider, AgentRuntime, AgentRuntimeRequest,
+import type { AgentProvider, AgentRuntime, AgentRuntimeRequest,
   AgentToolDefinition, AppSecretDeclaration, AppSummary,
   AntigravityAuthStatus, AudioRuntimeDevices, AutomationFrequency,
   BasicActionResult, CallConnectionActionInput, CallOfficialToolInput,
