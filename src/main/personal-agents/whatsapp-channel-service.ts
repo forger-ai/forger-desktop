@@ -1,3 +1,5 @@
+import { formatWhatsAppAgentReply } from './whatsapp-channel/reply-format';
+import { validateParticipantAccess } from './whatsapp-channel/participant-access';
 import { effectiveAgentForWhatsAppChannel } from './whatsapp-channel-policy';
 import fs from 'node:fs/promises';
 import { randomUUID } from 'node:crypto';
@@ -108,6 +110,8 @@ export class WhatsAppAgentChannelService {
       store.finishTurn(binding, binding.activeTurnId, binding.revision);
     }
     const coordinator = new WhatsAppAgentChannelCoordinator(store, {
+      resolveIdentityIds: async (connectionId, id) =>
+        await this.options.getConnectionsService().resolveWhatsAppIdentityIds?.(connectionId, id) ?? [id],
       readContext: async (binding, limit) => await this.readContext(binding, limit),
       startRun: async (input) => await this.startRun(input),
       cancelRun: async (input) => {
@@ -115,10 +119,7 @@ export class WhatsAppAgentChannelService {
         if (turn) await this.options.getConversationManager().cancelRun(turn.runId);
       },
       sendReply: async (input) => {
-        const text =
-          input.text.length > 4000
-            ? `${input.text.slice(0, 3900).trimEnd()}\n\n[Respuesta abreviada; versión completa en Forger]`
-            : input.text;
+        const text = formatWhatsAppAgentReply(input.binding.alias, input.text);
         const result = await this.options.getConnectionsService().call({
           type: 'whatsapp',
           connectionId: input.binding.connectionId,
@@ -336,8 +337,15 @@ export class WhatsAppAgentChannelService {
     };
   }
 
+  private assertNoDuplicateActiveBinding(key: WhatsAppAgentBindingKey, identities: string[]): void {
+    if (this.requireStore().listBindings(key.connectionId).some((binding) =>
+      binding.agentId === key.agentId && binding.chatId !== key.chatId && binding.enabled && identities.includes(binding.chatId)))
+      throw new Error('whatsapp_agent_chat_already_active');
+  }
+
   async putBinding(input: Omit<WhatsAppAgentBindingInput, 'ownerId'>): Promise<WhatsAppAgentBinding> {
     const store = this.requireStore();
+    validateParticipantAccess(input.participantAccess, input.chatId, input.participantsAllowed);
     await this.options.getAgentStore().requireAgent(input.agentId);
     const connections = await this.options.getConnectionsService().listInstances('whatsapp');
     const connection = connections.find((item) => item.id === input.connectionId);
@@ -349,6 +357,8 @@ export class WhatsAppAgentChannelService {
       input: { chatId: input.chatId },
     });
     if (!observed.success) throw new Error('whatsapp_agent_chat_not_observed');
+    const identities = await this.options.getConnectionsService().resolveWhatsAppIdentityIds?.(input.connectionId, input.chatId) ?? [input.chatId];
+    if (input.enabled) this.assertNoDuplicateActiveBinding(input, identities);
     const previous = store.getBinding(input.connectionId, input.chatId, input.agentId);
     const affected = store
       .listBindings(input.connectionId)
@@ -377,6 +387,8 @@ export class WhatsAppAgentChannelService {
           title: `WhatsApp · ${boundedText(input.chatId, 80)}`,
         })
       ).id;
+    // No await between this final check and the write: concurrent counterpart saves cannot both activate.
+    if (input.enabled) this.assertNoDuplicateActiveBinding(input, identities);
     const saved = store.putBinding({
       ...input,
       conversationId,
@@ -420,6 +432,8 @@ export class WhatsAppAgentChannelService {
     const result = await coordinator.handleInbound({
       connectionId: input.connectionId,
       chatId: message.chatId,
+      chatIdentityIds: message.chatIdentityIds,
+      equivalentStableMessageRefs: message.equivalentStableMessageRefs,
       stableMessageRef: encodeStableMessageRef(message.stableMessageRef),
       authorId: message.senderId,
       text: message.text,

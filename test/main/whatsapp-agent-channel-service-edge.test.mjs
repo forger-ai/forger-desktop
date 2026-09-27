@@ -345,7 +345,7 @@ test('unrelated completion events cannot displace channel completions and malfor
   const runId = f.starts[0].runId;
   f.emit({ type: 'run.completed', run: { id: runId }, conversation: { messages: [{ runId, role: 'assistant', kind: 'message', content: 'Still delivered' }] } });
   await waitFor(() => f.sends.length === 1);
-  assert.equal(f.sends[0].input.text, 'Still delivered');
+  assert.equal(f.sends[0].input.text, '🤖 Casa: \nStill delivered');
 });
 
 test('channel initialization fails closed when SQLite is unavailable', async (t) => {
@@ -456,4 +456,46 @@ test('restart safely retires an orphan whose legacy binding has no conversation 
   assert.equal(resumed.listActivity(f.key)[0].status, 'interrupted');
   assert.equal(resumed.listUnsettledMessages('connection-1')[0].chatId, 'other-chat');
   assert.equal(f.starts.length, 1);
+});
+
+test('configuration prevents duplicate active bindings across trusted phone and linked identities', async (t) => {
+  const f = await fixture(t);
+  f.connection.resolveWhatsAppIdentityIds = async (_connection, id) =>
+    ['self@lid', 'self@s.whatsapp.net'].includes(id) ? ['self@lid', 'self@s.whatsapp.net'] : [id];
+  const first = await f.service.putBinding({ ...f.baseBinding, chatId: 'self@s.whatsapp.net' });
+  await assert.rejects(() => f.service.putBinding({ ...f.baseBinding, chatId: 'self@lid' }), /chat_already_active/);
+  const paused = await f.service.putBinding({ ...f.baseBinding, chatId: 'self@lid', enabled: false });
+  await assert.rejects(() => f.service.setEnabled(paused, true), /chat_already_active/);
+  await f.service.setEnabled(first, false);
+  await f.service.setEnabled(paused, true);
+  await f.service.handleLiveMessage(f.inbound('identity-live', '@casa hola', {
+    chatId: 'self@s.whatsapp.net', chatIdentityIds: ['self@s.whatsapp.net', 'self@lid'],
+  }));
+  assert.equal(f.starts.length, 1);
+  assert.equal(f.service.listActivity(paused).length, 1);
+});
+
+test('reply signature preserves emoji at the abbreviation boundary and is applied once', async (t) => {
+  const f = await fixture(t, { onStart: ({ runId, emit }) => emit({
+    type: 'run.completed', run: { id: runId },
+    conversation: { messages: [{ runId, role: 'assistant', kind: 'message', content: '🤖 Casa: \n🤖 Casa: \n' + '🤖'.repeat(2200) }] },
+  }) });
+  await f.service.putBinding(f.baseBinding);
+  await f.service.handleLiveMessage(f.inbound('emoji-reply'));
+  await waitFor(() => f.sends.length === 1);
+  const reply = f.sends[0].input.text;
+  assert.equal(reply.split('🤖 Casa: \n').length, 2);
+  assert.ok(reply.length <= 4000);
+  assert.equal(reply.isWellFormed(), true);
+  assert.match(reply, /versión completa en Forger/);
+});
+
+test('concurrent counterpart configuration saves allow only one active chat', async (t) => {
+  const f = await fixture(t);
+  f.connection.resolveWhatsAppIdentityIds = async () => ['self@lid', 'self@s.whatsapp.net'];
+  const results = await Promise.allSettled(['self@lid', 'self@s.whatsapp.net'].map(chatId =>
+    f.service.putBinding({ ...f.baseBinding, chatId })));
+  assert.equal(results.filter(r => r.status === 'fulfilled').length, 1);
+  assert.equal(results.filter(r => r.status === 'rejected').length, 1);
+  assert.equal(f.service.listBindings().filter(b => b.enabled).length, 1);
 });

@@ -4,7 +4,19 @@ Desktop binds one personal agent to an observed chat on a configured WhatsApp ac
 
 ## Requests and recovery
 
-A task starts with the configured activation word. Independent tasks enter a durable FIFO queue for that binding; another participant's task does not cancel the current task. ON and OFF are owner commands. Desktop can pause the binding without a network connection. Canceling a request or pausing a chat does not undo completed external actions.
+A task starts with the configured activation word, optionally preceded by `@`. Matching ignores letter case: `Kupita resume esto` and `@kupita resume esto` invoke the same agent. The alias must be followed by whitespace, a colon, or a comma; a longer name containing the alias does not match. This is a typed prefix and does not require a native WhatsApp contact mention. Independent tasks enter a durable FIFO queue for that binding; another participant's task does not cancel the current task. ON and OFF are owner commands, including with the `@` prefix. Desktop can pause the binding without a network connection. Canceling a request or pausing a chat does not undo completed external actions.
+
+Replies have a transport-owned header: `🤖 <activation word>: ` followed by a newline and the response. This wrapper does not depend on the language model following formatting instructions. Activity keeps the complete original answer; the delivery formatter includes the header when applying the message length limit and on delivery retries.
+
+## Conversation selection and people
+
+The owner selects available conversations in the agent's WhatsApp settings. Each conversation has its own paused/active state, purpose, shared information, and access mode:
+
+- **Only me:** only the linked account can assign tasks. This is the default for new conversations.
+- **Selected people:** the linked account and at least one explicitly selected person can assign tasks.
+- **All group members:** any sender in that configured group can assign tasks, including people who join afterward. This option is restricted to group conversations.
+
+The linked account always retains control of ON/OFF. Being allowed to assign tasks does not grant access to another conversation or to the agent's private files and memories. Everyone in the group can see replies. The editor shows the access mode and reply preview before applying changes and preserves drafts during configuration conflicts. Existing bindings retain owner-only access when their participant list is empty and selected-person access otherwise.
 
 A correction explicitly identifies its request and requires its author or the account owner. `Ana CORREGIR MI ULTIMA <text>` corrects only that sender's latest active or queued task; it never targets another participant's task. `ÚLTIMA` is also accepted. The owner can identify another request explicitly with `Ana CORREGIR <requestId> <text>`. Activity shows the request identifier, full request and response, creation/update times, execution state, delivery state and recovery actions. WhatsApp conversations also appear in the agent's history. The alias belongs to the account/agent pair; editing it shows all affected chats and preserves active work.
 

@@ -24,12 +24,15 @@ export interface WhatsAppAgentBindingKey {
   agentId: string;
 }
 
+export type WhatsAppParticipantAccess = 'owner' | 'selected' | 'all';
+
 export interface WhatsAppAgentBinding extends WhatsAppAgentBindingKey {
   alias: string;
   ownerId: string;
   enabled: boolean;
   purpose: string;
   scope: string;
+  participantAccess?: WhatsAppParticipantAccess;
   participantsAllowed: string[];
   allowAgentCapabilities: boolean;
   conversationId: string | null;
@@ -42,6 +45,7 @@ export interface WhatsAppAgentBinding extends WhatsAppAgentBindingKey {
 
 export type WhatsAppAgentBindingPutInput = WhatsAppAgentBindingKey & Pick<WhatsAppAgentBinding,
   'alias' | 'enabled' | 'purpose' | 'scope' | 'participantsAllowed' | 'allowAgentCapabilities'> & {
+    participantAccess?: WhatsAppParticipantAccess;
     expectedRevision?: number;
     expectedConfigurationVersion?: number;
     policy?: PersonalAgentWhatsAppChannelPolicy;

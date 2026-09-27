@@ -263,6 +263,14 @@ export class ConnectionsService {
     };
   }
 
+  /** Main-process only: resolves authenticated WhatsApp identities for channel authorization. */
+  async resolveWhatsAppIdentityIds(connectionId: string, id: string): Promise<string[]> {
+    await this.load();
+    const instance = this.registry.instances[cleanString(connectionId)];
+    const module = instance?.type === 'whatsapp' ? this.modulesByType.get('whatsapp') : undefined;
+    return module?.resolveIdentityIds ? module.resolveIdentityIds(this.getContext(), instance.id, id) : [id];
+  }
+
   async pairingStatus(connectionId: string): Promise<CallConnectionActionResult> {
     await this.load();
     const instance = this.registry.instances[cleanString(connectionId)];

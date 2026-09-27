@@ -7,8 +7,6 @@ import type {
   WhatsAppStableMessageRef,
 } from './types';
 
-const DIRECT_SUFFIX = '@s.whatsapp.net';
-const LID_SUFFIX = '@lid';
 const GROUP_SUFFIX = '@g.us';
 const NEWSLETTER_SUFFIX = '@newsletter';
 
@@ -26,13 +24,15 @@ export const classifyWhatsAppJid = (jid: string): WhatsAppChatType => {
   return 'direct';
 };
 
+/** User identities omit only the authenticated transport's device suffix. */
+export const normalizeWhatsAppUserJid = (jid: string): string => {
+  const match = /^(\d+)(?::\d+)?@(s\.whatsapp\.net|lid)$/.exec(jid);
+  return match ? `${match[1]}@${match[2]}` : jid;
+};
+
 export const phoneNumberFromJid = (jid: string): string | undefined => {
-  if (!jid.endsWith(DIRECT_SUFFIX) && !jid.endsWith(LID_SUFFIX)) {
-    return undefined;
-  }
-  const [raw] = jid.split('@');
-  const digits = raw.replace(/\D/g, '');
-  return digits || undefined;
+  const normalized = normalizeWhatsAppUserJid(jid);
+  return /^(\d+)@s\.whatsapp\.net$/.exec(normalized)?.[1];
 };
 
 export const encodeStableMessageRef = (ref: WhatsAppStableMessageRef): string =>

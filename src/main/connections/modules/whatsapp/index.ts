@@ -180,6 +180,10 @@ const getManager = (context: InternalToolContext): WhatsAppConnectionManager => 
   return manager;
 };
 
+/** Internal channel authorization lookup; not an agent connection action. */
+export const getWhatsAppIdentityIds = async (context: InternalToolContext, id: string): Promise<string[]> =>
+  getManager(context).resolveIdentityIds(id);
+
 /** Only the trusted Desktop setup IPC calls this; it is not a connection action. */
 export const getWhatsAppPairingStatus = async (context: InternalToolContext): Promise<CallOfficialToolResult> => ({
   success: true, data: await getManager(context).pairingStatus(),

@@ -66,6 +66,7 @@ export interface InternalConnectionModule {
   disconnect(context: ConnectionContext, input: DisconnectConnectionInput): Promise<ConnectionMutationResult>;
   status(context: ConnectionContext, input: ConnectionStatusInput): Promise<ConnectionStatusResult>;
   execute(context: ConnectionContext, input: CallConnectionActionInput): Promise<CallConnectionActionResult>;
+  resolveIdentityIds?(context: ConnectionContext, connectionId: string, id: string): Promise<string[]>;
   pairingStatus?(context: ConnectionContext, connectionId: string): Promise<CallConnectionActionResult>;
   start?(context: ConnectionContext): Promise<void>;
   stop?(context: ConnectionContext): Promise<void>;

@@ -20,7 +20,7 @@ import type {
   OfficialToolDefinition,
 } from '../../shared/types';
 import { gmailToolModule } from './modules/gmail';
-import { getWhatsAppPairingStatus, whatsappToolModule } from './modules/whatsapp';
+import { getWhatsAppIdentityIds, getWhatsAppPairingStatus, whatsappToolModule } from './modules/whatsapp';
 import { slackToolModule } from './modules/slack';
 import { trelloToolModule } from './modules/trello';
 import { calendarToolModule, docsToolModule, driveToolModule, sheetsToolModule } from './modules/google-workspace';
@@ -254,6 +254,8 @@ const createToolBackedConnectionModule = (
   return {
     definition,
     ...(type === 'whatsapp' ? {
+      resolveIdentityIds: (context: ConnectionContext, connectionId: string, id: string) =>
+        getWhatsAppIdentityIds(createConnectionToolContext(context, type, connectionId), id),
       pairingStatus: (context: ConnectionContext, connectionId: string) =>
         getWhatsAppPairingStatus(createConnectionToolContext(context, type, connectionId)),
     } : {}),

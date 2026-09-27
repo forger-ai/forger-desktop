@@ -2,7 +2,7 @@ import type { PersonalAgentWhatsAppChannelPolicy, WhatsAppAgentBinding } from '@
 import { ActivityDialog } from './whatsapp-agent-channel/ActivityDialog';
 import { PolicyEditor } from './whatsapp-agent-channel/PolicyEditor';
 import { useState } from 'react';
-import { blankDraft, emptyPolicy } from './whatsapp-agent-channel/model';
+import { blankDraft, emptyPolicy, participantAccess } from './whatsapp-agent-channel/model';
 import { copy } from './whatsapp-agent-channel/copy';
 import { useChannelEditor } from './whatsapp-agent-channel/useChannelEditor';
 import DeleteOutlineRounded from '@mui/icons-material/DeleteOutlineRounded';
@@ -43,7 +43,7 @@ function ChannelSwitch({ checked, disabled, label, onCheckedChange }: { checked:
 
 export function AgentWhatsAppPanel({ agentId, agentName, t, onOpenConversation, onOpenConnections }: AgentWhatsAppPanelProps) {
   const c = (t.locale as string) === 'en' ? copy.en : copy.es;
-  const { refreshConnections, pause, conflicting, setConflicting, participantsLoading, participantsError, setParticipantsRefresh, connections, bindings, unsettled, deliveries, draft, editing, chats, participants, search, loading, loadingChats, busy, error, chatError, notice, updateDraft, setSearch, beginEdit, save, remove, connectedAccounts, editedAccountAvailable, availableConnections, selectedChat, chatChoices, setEditing, setDraft, setNotice } = useChannelEditor(agentId, agentName, c);
+  const { refreshConnections, pause, conflicting, setConflicting, participantsLoading, participantsError, setParticipantsRefresh, connections, bindings, unsettled, deliveries, draft, editing, chats, chatTitle, participants, search, loading, loadingChats, busy, error, chatError, notice, updateDraft, setSearch, beginEdit, save, remove, connectedAccounts, editedAccountAvailable, availableConnections, selectedChat, chatChoices, setEditing, setDraft, setNotice } = useChannelEditor(agentId, agentName, c);
 
   const updatePolicy = (policy: PersonalAgentWhatsAppChannelPolicy) => updateDraft((current) => ({ ...current, policy }));
   const [activity, setActivity] = useState<WhatsAppAgentBinding | null>(null);
@@ -51,6 +51,7 @@ export function AgentWhatsAppPanel({ agentId, agentName, t, onOpenConversation, 
   const [removeOpen, setRemoveOpen] = useState(false);
   const aliasAffected = bindings.filter((item) => item.connectionId === draft.connectionId && item.alias !== draft.alias.trim());
   const requestSave = () => {
+    if (draft.participantAccess === 'selected' && !draft.participantsAllowed.length) { void save(); return; }
     if (draft.connectionId && draft.chatId && draft.alias.trim() && (!draft.enabled || draft.purpose.trim()) && (draft.enabled || aliasAffected.length)) setReviewOpen(true);
     else void save();
   };
@@ -69,7 +70,7 @@ export function AgentWhatsAppPanel({ agentId, agentName, t, onOpenConversation, 
         <Typography>{c.enabled}: {conflicting.enabled ? c.active : c.inactive}</Typography>
         <Typography>{c.purpose}: {conflicting.purpose}</Typography>
         <Typography>{c.scope}: {conflicting.scope}</Typography>
-        <Typography>{c.participants}: {conflicting.participantsAllowed.join(', ')}</Typography>
+        <Typography>{c.access}: {c[participantAccess(conflicting)]} {participantAccess(conflicting) === 'selected' ? conflicting.participantsAllowed.join(', ') : ''}</Typography>
         <PolicyEditor agentId={agentId} value={conflicting.policy ?? emptyPolicy()} onChange={updatePolicy} disabled english={(t.locale as string) === 'en'} />
       </Alert> : null}
       {notice ? <Alert severity="success">{notice}</Alert> : null}
@@ -85,8 +86,9 @@ export function AgentWhatsAppPanel({ agentId, agentName, t, onOpenConversation, 
               <Paper key={`${binding.connectionId}:${binding.chatId}`} variant="outlined" sx={{ p: 1.5, borderRadius: 1 }}>
                 <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1} alignItems={{ sm: 'center' }}>
                   <Box sx={{ flex: 1, minWidth: 0 }}>
-                    <Typography variant="subtitle2" sx={{ overflowWrap: 'anywhere' }}>{binding.alias} · {chats.find((chat) => chat.chatId === binding.chatId)?.title ?? binding.chatId}</Typography>
+                    <Typography variant="subtitle2" sx={{ overflowWrap: 'anywhere' }}>{binding.alias} · {chatTitle(binding.connectionId, binding.chatId)}</Typography>
                     <Typography variant="caption" color="text.secondary">{account?.label ?? c.connectionMissing}</Typography>
+                    <Typography variant="caption" display="block" color="text.secondary">{c[participantAccess(binding)]}</Typography>
                   </Box>
                   <Chip size="small" color={binding.enabled && account?.status === 'connected' ? 'success' : 'default'} label={!binding.enabled ? c.inactive : account?.status === 'connected' ? c.active : c.disconnected} />
                   {binding.activeTurnId ? <Chip size="small" color="info" label={c.working} /> : null}
@@ -139,7 +141,7 @@ export function AgentWhatsAppPanel({ agentId, agentName, t, onOpenConversation, 
         label={c.chat}
         value={draft.chatId}
         disabled={!draft.connectionId || busy || Boolean(editing)}
-        onChange={(event) => updateDraft((current) => ({ ...current, chatId: event.target.value, participantsAllowed: [], policy: emptyPolicy(), enabled: false, purpose: '', scope: '' }))}
+        onChange={(event) => updateDraft((current) => ({ ...current, chatId: event.target.value, participantAccess: 'owner', participantsAllowed: [], policy: emptyPolicy(), enabled: false, purpose: '', scope: '' }))}
       >
         {chatChoices.map((chat) => <MenuItem key={chat.chatId} value={chat.chatId}>{chat.title || chat.phoneNumber || chat.chatId}</MenuItem>)}
       </TextField>
@@ -173,7 +175,14 @@ export function AgentWhatsAppPanel({ agentId, agentName, t, onOpenConversation, 
         disabled={busy}
         onChange={(event) => updateDraft((current) => ({ ...current, scope: event.target.value }))}
       />
-      {(selectedChat?.chatType === 'group' || participants.length > 0 || draft.participantsAllowed.length > 0) ? (
+      <TextField select fullWidth label={c.access} value={draft.participantAccess} disabled={busy || !draft.chatId}
+        helperText={draft.participantAccess === 'all' ? `${c.allHelp} ${c.accessHelp}` : c.accessHelp}
+        onChange={(event) => updateDraft((current) => ({ ...current, participantAccess: event.target.value as typeof current.participantAccess }))}>
+        <MenuItem value="owner">{c.owner}</MenuItem>
+        <MenuItem value="selected">{c.selected}</MenuItem>
+        {(selectedChat?.chatType === 'group' || draft.chatId.endsWith('@g.us') || draft.participantAccess === 'all') ? <MenuItem value="all">{c.all}</MenuItem> : null}
+      </TextField>
+      {draft.participantAccess === 'selected' ? (
         <Autocomplete
           multiple
           options={[...new Set([...participants.map((person) => person.id), ...draft.participantsAllowed])]}
@@ -194,6 +203,10 @@ export function AgentWhatsAppPanel({ agentId, agentName, t, onOpenConversation, 
         label={c.enabled}
         onCheckedChange={(checked) => updateDraft((current) => ({ ...current, enabled: checked }))}
       />
+      <Paper variant="outlined" sx={{ p: 1.5 }}>
+        <Typography variant="subtitle2">{c.replyPreview}</Typography>
+        <Typography sx={{ whiteSpace: 'pre-line' }}>{`🤖 ${draft.alias.trim() || agentName}: \n${c.exampleReply}`}</Typography>
+      </Paper>
       <Alert severity="info">{c.commands(draft.alias.trim() || c.alias)}</Alert>
       <Stack direction="row" spacing={1}>
         <Button variant="contained" disabled={busy || (Boolean(editing) && !editedAccountAvailable)} onClick={requestSave}>{c.save}</Button>
@@ -208,10 +221,12 @@ export function AgentWhatsAppPanel({ agentId, agentName, t, onOpenConversation, 
         <DialogTitle>{c.reviewSave}</DialogTitle><DialogContent><Stack spacing={1}>
           <Typography>{connections.find((item) => item.id === draft.connectionId)?.label} · {selectedChat?.title ?? draft.chatId}</Typography>
           <Typography>{draft.purpose}</Typography><Typography>{c.enableSummary}</Typography>
-          <Typography>{c.participants}: {draft.participantsAllowed.map((id) => participants.find((person) => person.id === id)?.name ?? id).join(', ') || '—'}</Typography>
+          <Typography>{c.access}: {c[draft.participantAccess]}{draft.participantAccess === 'selected' ? `: ${draft.participantsAllowed.map((id) => participants.find((person) => person.id === id)?.name ?? id).join(', ')}` : ''}</Typography>
           <PolicyEditor key={`${draft.connectionId}:${draft.chatId}`} agentId={agentId} value={draft.policy} onChange={updatePolicy} disabled english={(t.locale as string) === 'en'} />
+          {draft.participantAccess === 'all' ? <Typography>{c.allHelp}</Typography> : null}
+          <Typography>{c.accessHelp}</Typography>
           <Alert severity="info">{c.audience}</Alert>
-          {aliasAffected.length ? <Alert severity="warning">{c.aliasWarning}<ul>{aliasAffected.map((item) => <li key={item.chatId}>{chats.find((chat) => chat.chatId === item.chatId)?.title ?? item.chatId}</li>)}</ul></Alert> : null}
+          {aliasAffected.length ? <Alert severity="warning">{c.aliasWarning}<ul>{aliasAffected.map((item) => <li key={item.chatId}>{chatTitle(item.connectionId, item.chatId)}</li>)}</ul></Alert> : null}
         </Stack></DialogContent>
         <DialogActions><Button onClick={() => setReviewOpen(false)}>{c.cancel}</Button><Button variant="contained" onClick={() => { setReviewOpen(false); void save(); }}>{c.confirmSave}</Button></DialogActions>
       </Dialog>

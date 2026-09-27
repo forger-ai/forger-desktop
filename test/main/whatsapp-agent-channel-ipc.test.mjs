@@ -140,3 +140,15 @@ test('WhatsApp binding IPC rejects foreign windows and child frames before reach
   assert.equal(calls.length, 1);
   assert.equal(calls[0][0], 'put');
 });
+
+test('participant mode IPC validates explicit selections and restricts everyone to group chats', async () => {
+  const { handlers } = setup();
+  const put = handlers.get(IPC_CHANNELS.personalAgentWhatsAppBindingPut);
+  const base = { connectionId: 'wa', chatId: 'group@g.us', agentId: 'agent', alias: 'Kupita', enabled: true,
+    purpose: 'Help', scope: '', allowAgentCapabilities: false, participantsAllowed: [] };
+  assert.equal((await put(null, { ...base, participantAccess: 'all' })).participantAccess, 'all');
+  assert.equal((await put(null, { ...base, participantAccess: 'owner' })).participantAccess, 'owner');
+  assert.equal((await put(null, { ...base, participantAccess: 'selected', participantsAllowed: ['member'] })).participantAccess, 'selected');
+  for (const input of [{ ...base, participantAccess: 'invalid' }, { ...base, participantAccess: 'all', chatId: 'direct@s.whatsapp.net' },
+    { ...base, participantAccess: 'selected' }]) await assert.rejects(() => put(null, input), /whatsapp_agent_/);
+});

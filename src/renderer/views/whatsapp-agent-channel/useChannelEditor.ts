@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import type { ConnectionInstance, WhatsAppAgentBinding, WhatsAppAgentDeliveryStatus, WhatsAppAgentUnsettledMessage } from '@shared/types';
-import { blankDraft, emptyPolicy, observedChats, observedParticipants, type BindingDraft, type ObservedChat } from './model';
+import { blankDraft, emptyPolicy, participantAccess, observedChats, observedParticipants, uniqueChatChoices, type BindingDraft, type ObservedChat } from './model';
 import type { ChannelCopy } from './copy';
 
 export function useChannelEditor(agentId: string, agentName: string, c: ChannelCopy) {
@@ -11,6 +11,7 @@ export function useChannelEditor(agentId: string, agentName: string, c: ChannelC
   const [draft, setDraft] = useState<BindingDraft>(() => blankDraft(agentName));
   const [editing, setEditing] = useState<WhatsAppAgentBinding | null>(null);
   const [chats, setChats] = useState<ObservedChat[]>([]);
+  const [knownChats, setKnownChats] = useState<Record<string, ObservedChat>>({});
   const [participants, setParticipants] = useState<{ id: string; name: string }[]>([]);
   const [search, setSearch] = useState('');
   const [chatRefresh, setChatRefresh] = useState(0);
@@ -115,7 +116,11 @@ export function useChannelEditor(agentId: string, agentName: string, c: ChannelC
       }).then((result) => {
         if (!current) return;
         if (!result.success) throw new Error('whatsapp_chat_list_failed');
-        setChats(observedChats(result.data));
+        const available = observedChats(result.data);
+        setChats(available);
+        setKnownChats((known) => ({ ...known, ...Object.fromEntries(available.flatMap((chat) =>
+          chat.identityIds!.map((id) => [`${draft.connectionId}:${id}`, { ...chat, chatId: id }]),
+        )) }));
         setChatError('');
       }).catch(() => {
         if (current) setChatError(c.chatsFailed);
@@ -126,11 +131,12 @@ export function useChannelEditor(agentId: string, agentName: string, c: ChannelC
     return () => { current = false; window.clearTimeout(timeout); };
   }, [draft.connectionId, search, chatRefresh, c.chatsFailed]);
 
-  const selectedChat = chats.find((chat) => chat.chatId === draft.chatId);
+  const selectedChat = knownChats[`${draft.connectionId}:${draft.chatId}`];
+  const chatTitle = (connectionId: string, chatId: string) => knownChats[`${connectionId}:${chatId}`]?.title ?? chatId;
   const chatChoices = useMemo(() => {
-    if (!draft.chatId || chats.some((chat) => chat.chatId === draft.chatId)) return chats;
-    return [{ chatId: draft.chatId, title: draft.chatId, chatType: 'direct' as const }, ...chats];
-  }, [chats, draft.chatId]);
+    if (!draft.chatId) return uniqueChatChoices(chats);
+    return uniqueChatChoices([selectedChat ?? { chatId: draft.chatId, title: draft.chatId, chatType: draft.chatId.endsWith('@g.us') ? 'group' as const : 'direct' as const }, ...chats]);
+  }, [chats, draft.chatId, selectedChat]);
 
   useEffect(() => {
     let current = true;
@@ -152,6 +158,14 @@ export function useChannelEditor(agentId: string, agentName: string, c: ChannelC
       if (!current) return;
       if (!result.success) throw new Error('participants_unavailable');
       setParticipants(observedParticipants(result.data));
+      const detail = result.data as { type?: string; chat?: { title?: string }; metadata?: { subject?: string } } | undefined;
+      if (detail?.type === 'group' || detail?.type === 'direct') {
+        const chatType = detail.type;
+        setKnownChats((known) => ({ ...known, [`${draft.connectionId}:${draft.chatId}`]: {
+          ...known[`${draft.connectionId}:${draft.chatId}`], chatId: draft.chatId, chatType,
+          ...(detail.metadata?.subject ? { title: detail.metadata.subject } : detail.chat?.title ? { title: detail.chat.title } : {}),
+        } }));
+      }
     }).catch(() => {
       if (current) setParticipantsError(c.participantsFailed);
     }).finally(() => { if (current) setParticipantsLoading(false); });
@@ -167,6 +181,7 @@ export function useChannelEditor(agentId: string, agentName: string, c: ChannelC
       alias: binding.alias,
       purpose: binding.purpose,
       scope: binding.scope,
+      participantAccess: participantAccess(binding),
       participantsAllowed: binding.participantsAllowed,
       enabled: binding.enabled,
       policy: { ...(binding.policy ?? emptyPolicy()), networkAccess: false },
@@ -179,6 +194,8 @@ export function useChannelEditor(agentId: string, agentName: string, c: ChannelC
     if (!draft.connectionId || !draft.chatId) { setError(c.chooseChat); return; }
     if (!draft.alias.trim()) { setError(c.aliasRequired); return; }
     if (draft.enabled && !draft.purpose.trim()) { setError(c.purposeRequired); return; }
+    if (draft.participantAccess === 'selected' && !draft.participantsAllowed.length) { setError(c.chooseParticipants); return; }
+    if (draft.participantAccess === 'all' && selectedChat?.chatType !== 'group' && !draft.chatId.endsWith('@g.us')) { setError(c.groupOnly); return; }
     setBusy(true);
     setError('');
     setNotice('');
@@ -198,7 +215,8 @@ export function useChannelEditor(agentId: string, agentName: string, c: ChannelC
         alias: draft.alias.trim(),
         purpose: draft.purpose.trim(),
         scope: draft.scope.trim(),
-        participantsAllowed: draft.participantsAllowed,
+        participantAccess: draft.participantAccess,
+        participantsAllowed: draft.participantAccess === 'selected' ? draft.participantsAllowed : [],
         allowAgentCapabilities: true,
         policy: { ...draft.policy, networkAccess: false },
         enabled: draft.enabled,
@@ -277,5 +295,5 @@ export function useChannelEditor(agentId: string, agentName: string, c: ChannelC
     catch { setError(c.loadFailed); }
     setChatRefresh((value) => value + 1);
   };
-  return { refreshConnections, pause, conflicting, setConflicting, participantsLoading, participantsError, setParticipantsRefresh, connections, bindings, unsettled, deliveries, draft, editing, chats, participants, search, loading, loadingChats, busy, error, chatError, notice, updateDraft, setChatRefresh, setSearch, beginEdit, save, remove, connectedAccounts, editedAccountAvailable, availableConnections, selectedChat, chatChoices, setEditing, setDraft, setNotice };
+  return { refreshConnections, pause, conflicting, setConflicting, participantsLoading, participantsError, setParticipantsRefresh, connections, bindings, unsettled, deliveries, draft, editing, chats, chatTitle, participants, search, loading, loadingChats, busy, error, chatError, notice, updateDraft, setChatRefresh, setSearch, beginEdit, save, remove, connectedAccounts, editedAccountAvailable, availableConnections, selectedChat, chatChoices, setEditing, setDraft, setNotice };
 }

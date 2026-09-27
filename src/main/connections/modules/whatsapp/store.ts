@@ -12,7 +12,7 @@ import type {
   WhatsAppStableMessageRef,
   WhatsAppStorageStatus,
 } from './types';
-import { decodeStableMessageRef, encodeStableMessageRef } from './normalizer';
+import { decodeStableMessageRef, encodeStableMessageRef, phoneNumberFromJid } from './normalizer';
 
 interface ChatRow {
   chat_id: string;
@@ -126,17 +126,20 @@ export class WhatsAppLocalStore {
     };
   }
 
-  async readMessages(input: { chatId: string; limit?: number; beforeMessageRef?: string }): Promise<WhatsAppIndexedMessage[]> {
+  async readMessages(input: { chatId: string; identityIds?: string[]; limit?: number; beforeMessageRef?: string }): Promise<WhatsAppIndexedMessage[]> {
     await this.load();
+    const ids = [...new Set([input.chatId, ...(input.identityIds ?? [])])];
+    const identityParams = Object.fromEntries(ids.map((id, index) => [`chat${index}`, id]));
+    const chatScope = `chat_id IN (${ids.map((_, index) => `@chat${index}`).join(', ')})`;
     const limit = clampLimit(input.limit, 25, 500);
     const before = decodeStableMessageRef(input.beforeMessageRef);
     const beforeRow = before
-      ? this.requireDb().prepare('SELECT timestamp, stable_ref FROM messages WHERE stable_ref = ? AND chat_id = ?')
-        .get(encodeStableMessageRef(before), input.chatId) as { timestamp: number | null; stable_ref: string } | undefined
+      ? this.requireDb().prepare(`SELECT timestamp, stable_ref FROM messages WHERE stable_ref = @ref AND ${chatScope}`)
+        .get({ ...identityParams, ref: encodeStableMessageRef(before) }) as { timestamp: number | null; stable_ref: string } | undefined
       : undefined;
     if (before && !beforeRow) return [];
     const params: Record<string, string | number | null> = {
-      chatId: input.chatId,
+      ...identityParams,
       limit,
       beforeTimestamp: beforeRow?.timestamp ?? null,
       beforeRef: beforeRow?.stable_ref ?? null,
@@ -147,12 +150,41 @@ export class WhatsAppLocalStore {
     const rows = this.requireDb().prepare(`
       SELECT *
       FROM messages
-      WHERE chat_id = @chatId
+      WHERE ${chatScope}
       ${beforeClause}
       ORDER BY coalesce(timestamp, 0) DESC, stable_ref DESC
       LIMIT @limit
     `).all(params) as MessageRow[];
     return rows.map((row) => this.rowToMessage(row));
+  }
+
+  /** A conflicting association is permanently quarantined until local connection data is reset. */
+  async rememberIdentityPair(accountId: string, phoneId: string, lid: string): Promise<void> {
+    await this.load();
+    this.requireDb().transaction(() => {
+      const conflicts = this.requireDb().prepare(`SELECT 1 FROM identity_pairs
+        WHERE account_id = ? AND (phone_id = ? OR lid = ?)
+        AND (phone_id != ? OR lid != ? OR valid = 0)`).get(accountId, phoneId, lid, phoneId, lid);
+      this.requireDb().prepare(`INSERT OR IGNORE INTO identity_pairs (account_id, phone_id, lid, valid)
+        VALUES (?, ?, ?, ?)`).run(accountId, phoneId, lid, conflicts ? 0 : 1);
+      if (conflicts) this.requireDb().prepare(`UPDATE identity_pairs SET valid = 0
+        WHERE account_id = ? AND (phone_id = ? OR lid = ?)`).run(accountId, phoneId, lid);
+    })();
+  }
+
+  async invalidateIdentity(accountId: string, id: string): Promise<void> {
+    await this.load();
+    this.requireDb().prepare(`UPDATE identity_pairs SET valid = 0
+      WHERE account_id = ? AND (phone_id = ? OR lid = ?)`).run(accountId, id, id);
+  }
+
+  async identityIds(accountId: string, id: string): Promise<string[]> {
+    await this.load();
+    const rows = this.requireDb().prepare(`SELECT phone_id, lid, valid FROM identity_pairs
+      WHERE account_id = ? AND (phone_id = ? OR lid = ?)`)
+      .all(accountId, id, id) as Array<{ phone_id: string; lid: string; valid: number }>;
+    if (rows.length !== 1 || rows[0].valid !== 1) return [id];
+    return [...new Set([id, rows[0].phone_id, rows[0].lid])];
   }
 
   async getChat(chatId: string): Promise<WhatsAppIndexedChat | null> {
@@ -382,6 +414,15 @@ export class WhatsAppLocalStore {
 
   private migrate(): void {
     this.requireDb().exec(`
+      CREATE TABLE IF NOT EXISTS identity_pairs (
+        account_id TEXT NOT NULL,
+        phone_id TEXT NOT NULL,
+        lid TEXT NOT NULL,
+        valid INTEGER NOT NULL,
+        PRIMARY KEY (account_id, phone_id, lid)
+      );
+      CREATE INDEX IF NOT EXISTS idx_identity_pairs_phone ON identity_pairs(account_id, phone_id);
+      CREATE INDEX IF NOT EXISTS idx_identity_pairs_lid ON identity_pairs(account_id, lid);
       CREATE TABLE IF NOT EXISTS chats (
         chat_id TEXT PRIMARY KEY,
         chat_type TEXT NOT NULL,
@@ -453,7 +494,7 @@ export class WhatsAppLocalStore {
       chatType: row.chat_type,
       ...(row.title ? { title: row.title } : {}),
       ...(aliases.length > 0 ? { aliases: aliases.map((alias) => alias.alias) } : {}),
-      ...(row.phone_number ? { phoneNumber: row.phone_number } : {}),
+      ...(phoneNumberFromJid(row.chat_id) ? { phoneNumber: phoneNumberFromJid(row.chat_id) } : {}),
       ...(lastMessageRef ? { lastMessageRef } : {}),
       ...(typeof row.unread_count === 'number' ? { unreadCount: row.unread_count } : {}),
       ...(row.is_muted !== null ? { isMuted: row.is_muted === 1 } : {}),

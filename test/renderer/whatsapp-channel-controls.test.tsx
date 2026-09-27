@@ -173,6 +173,8 @@ describe('WhatsApp chat access and request recovery', () => {
     render(<AgentWhatsAppPanel agentId="agent" agentName="Ana" t={getDictionary('en')} />);
     await user.click(await screen.findByRole('combobox', { name: 'Chat' }));
     await user.click(await screen.findByRole('option', { name: 'Team' }));
+    await user.click(screen.getByRole('combobox', { name: 'Who can assign tasks' }));
+    await user.click(screen.getByRole('option', { name: 'Selected people' }));
     await user.click(await screen.findByRole('combobox', { name: 'People allowed to assign tasks' }));
     await user.click(await screen.findByRole('option', { name: 'Known colleague' }));
     await user.keyboard('{Escape}'); await user.click(screen.getByRole('button', { name: 'Save chat' }));

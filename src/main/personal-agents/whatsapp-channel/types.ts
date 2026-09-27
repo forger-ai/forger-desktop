@@ -28,6 +28,9 @@ export interface WhatsAppAgentInbound {
   chatId: string;
   stableMessageRef: string;
   authorId?: string;
+  /** Trusted transport identities, never accepted from a participant message body. */
+  chatIdentityIds?: string[];
+  equivalentStableMessageRefs?: string[];
   text?: string;
   isLive: boolean;
   isFromMe: boolean;
@@ -78,6 +81,7 @@ export type WhatsAppAgentRunAdmission =
   | { status: 'unknown'; runId: string };
 
 export interface WhatsAppAgentChannelPorts {
+  resolveIdentityIds?: (connectionId: string, id: string) => Promise<string[]>;
   readContext?: (binding: WhatsAppAgentBinding, limit: number) => Promise<WhatsAppAgentContextMessage[]>;
   // Start and steer launch the run, then return. Completion calls deliverCandidate separately.
   startRun: (input: WhatsAppAgentRunInput) => Promise<WhatsAppAgentRunAdmission>;

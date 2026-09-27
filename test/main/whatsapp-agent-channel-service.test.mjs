@@ -73,7 +73,7 @@ test('live wake runs an existing agent in an isolated channel workspace and deli
   assert.equal(seen.runs.length, 1);
   assert.equal(seen.sends.length, 1);
   assert.equal(seen.sends[0].input.chatId, 'group-1');
-  assert.equal(seen.sends[0].input.text, 'Ya quedó revisado.');
+  assert.equal(seen.sends[0].input.text, '🤖 Casa: \nYa quedó revisado.');
   assert.notEqual(seen.runs[0].workspaceRoot, await agentStore.workspaceRootForAgent(agent.id));
   assert.equal(seen.runs[0].channel.chatId, 'group-1');
   assert.match(seen.runs[0].prompt, /revisa la publicación/);

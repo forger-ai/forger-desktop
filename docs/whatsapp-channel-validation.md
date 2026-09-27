@@ -29,6 +29,18 @@ The independent final review found two additional defects: saving policy could l
 - Visual inspection covers desktop and narrow layouts with synthetic data.
 - Coverage thresholds and exclusions remain unchanged. The memory-maintenance clock test explicitly covers both sides of 03:00 to eliminate dependence on CI wall-clock time.
 
+## Personal-account follow-up (2026-09-27)
+
+The owner designated their self-chat for a controlled live test. QR renewal/expiry handling is corrected and linking succeeds. A phone/LID identity mismatch initially prevented routing; the selected self-chat was corrected without replaying earlier messages. One subsequent live task completed and delivered the exact requested answer in about seven seconds, and the owner confirmed receipt. No group was activated during this test.
+
+The next local build adds a deterministic agent reply header, optional `@` invocation, and owner/selected/all-group-member access. It preserves legacy access in a transactional relational migration, resolves authenticated phone/LID identity for routing and participant authorization, and retains original transport references. Equivalent message copies and outbound echoes do not duplicate execution. Concurrent attempts to activate equivalent bindings cannot both succeed. Configuration summaries, conflict review and available-chat selection preserve names and access modes while searching.
+
+- Complete Electron suite: 2,227 tests pass, 100% statements, branches, functions and lines.
+- Complete renderer suite: 861 tests in 94 files pass, 100% in all four metrics. Focused picker/access flows also pass after integration.
+- TypeScript, repository ESLint, renderer build and Electron build pass.
+- Packaged arm64 `0.5.19-pr163.2`: native SQLite, parser, reply formatter, access persistence, WhatsApp module import and 460 production package dependency checks pass. Ad-hoc signature verification passes.
+- Independent review identified a concurrent equivalent-chat activation race; the fix includes concurrent save and ON-command regression tests.
+
 ## Release boundary
 
-No model API or real WhatsApp recipient is contacted during these checks. A controlled real-account test of authorization, pause, reconnection and delivery still requires an explicitly designated account and chat. This change is not a release or production deployment, and the PR must not be merged on the assumption that live delivery has been tested. Codex and Claude support the isolated channel contract; Antigravity is rejected for this channel.
+Automated tests use synthetic transport/provider doubles and do not contact real recipients. The controlled self-chat test confirms delivery with the owner's connected provider account. Live group authorization, pause/reconnection and the newly formatted reply still need their own controlled account checks. The local package is ad-hoc signed, not notarized or published; this change does not merge the PR or deploy to production. Codex and Claude support the isolated channel contract; Antigravity is rejected for this channel.

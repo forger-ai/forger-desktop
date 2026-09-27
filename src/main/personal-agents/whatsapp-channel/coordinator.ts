@@ -1,3 +1,4 @@
+import { participantCanInvoke } from './participant-access';
 import { WhatsAppAgentOutbox } from './outbox';
 import { randomUUID } from 'node:crypto';
 import { parseAgentWakeMessage } from './parser';
@@ -72,31 +73,44 @@ export class WhatsAppAgentChannelCoordinator {
     const messageText = input.text?.trim();
     if (!input.isLive || input.isForwarded || input.isAgentEcho || !input.stableMessageRef?.trim() || !messageText)
       return { status: 'ignored' };
-    const matched = this.store
-      .listBindingsForChat(input.connectionId, input.chatId)
-      .find((b) => parseAgentWakeMessage(messageText, b.alias));
+    const chatIds = new Set([input.chatId, ...(input.chatIdentityIds ?? [])]);
+    const matches = [...chatIds].flatMap((id) => this.store.listBindingsForChat(input.connectionId, id))
+      .filter((b) => parseAgentWakeMessage(messageText, b.alias)).sort((a, b) => b.alias.length - a.alias.length);
+    const selected = matches.filter((b) => b.agentId === matches[0]?.agentId);
+    const enabled = selected.filter((b) => b.enabled);
+    // A phone identity and its linked identity are one conversation, never two executions.
+    if (enabled.length > 1) return { status: 'ignored' };
+    const matched = enabled[0] ?? selected.find((b) => b.chatId === input.chatId) ?? selected[0];
     if (!matched) return { status: 'ignored' };
     return this.enqueue(matched, async () => {
+      const authorIdentities = await this.resolveIdentityIds(input.connectionId, input.authorId);
       const binding = this.store.getBinding(matched.connectionId, matched.chatId, matched.agentId);
       const parsed = binding && parseAgentWakeMessage(messageText, binding.alias);
       if (!binding || !parsed) return { status: 'ignored' };
       const finish = (status: WhatsAppAgentInboundResult['status']): WhatsAppAgentInboundResult => {
-        this.store.markMessageHandled(input.connectionId, input.chatId, input.stableMessageRef);
+        this.store.markMessageHandled(input.connectionId, binding.chatId, input.stableMessageRef);
         return { status, agentId: binding.agentId };
       };
-      const claim = this.store.claimMessage(input.connectionId, input.chatId, input.stableMessageRef);
+      const equivalent = this.store.findEquivalentMessage(input.connectionId, [...chatIds],
+        [...new Set([input.stableMessageRef, ...(input.equivalentStableMessageRefs ?? [])])]);
+      const claim = equivalent === 'duplicate' || equivalent === 'admitting'
+        ? equivalent : this.store.claimMessage(input.connectionId, binding.chatId, input.stableMessageRef);
       if (claim === 'duplicate') return { status: 'duplicate', agentId: binding.agentId };
       if (claim === 'admitting') return { status: 'reconciliation_required', agentId: binding.agentId };
       if (parsed.kind === 'on' || parsed.kind === 'off') {
         if (input.isQuoted) return finish('ignored');
         if (!input.isFromMe) return finish('unauthorized');
         if (parsed.kind === 'on' && !binding.purpose.trim()) return finish('purpose_required');
-        await this.changeEnabled(binding, parsed.kind === 'on');
+        try { await this.changeEnabled(binding, parsed.kind === 'on'); }
+        catch (error) {
+          if (error instanceof Error && error.message === 'whatsapp_agent_chat_already_active') return finish('failed');
+          throw error;
+        }
         return finish(parsed.kind === 'on' ? 'enabled' : 'disabled');
       }
       if (!binding.enabled) return finish('inactive');
       if (!binding.purpose.trim()) return finish('purpose_required');
-      if (!input.isFromMe && (!input.authorId || !binding.participantsAllowed.includes(input.authorId)))
+      if (!participantCanInvoke(binding, input.isFromMe, input.authorId, authorIdentities))
         return finish('unauthorized');
       if (parsed.kind === 'correct' || parsed.kind === 'correct-own') {
         const activity = this.store.listActivity(binding);
@@ -108,11 +122,11 @@ export class WhatsAppAgentChannelCoordinator {
                   (request) =>
                     (request.status === 'active' || request.status === 'queued') &&
                     request.isFromMe === input.isFromMe &&
-                    (input.isFromMe || request.authorId === input.authorId),
+                    (input.isFromMe || (request.authorId !== null && authorIdentities.includes(request.authorId))),
                 )
             : activity.find((request) => request.requestId === parsed.requestId);
         if (!target && parsed.kind === 'correct-own') return finish('ignored');
-        if (!target || (!input.isFromMe && (target.isFromMe || target.authorId !== input.authorId)))
+        if (!target || (!input.isFromMe && (target.isFromMe || target.authorId === null || !authorIdentities.includes(target.authorId))))
           return finish('unauthorized');
         if (target.status === 'queued') {
           this.store.updateRequest(target.requestId, { requestText: parsed.text });
@@ -145,13 +159,22 @@ export class WhatsAppAgentChannelCoordinator {
     });
   }
 
+  private async resolveIdentityIds(connectionId: string, id: string | null | undefined): Promise<string[]> {
+    if (!id?.trim()) return [];
+    try { return [...new Set([id, ...(await this.ports.resolveIdentityIds?.(connectionId, id) ?? [])])]; }
+    catch { return [id]; } // Identity lookup failure never broadens the explicit allowlist.
+  }
+
   private async pump(key: WhatsAppAgentBindingKey): Promise<void> {
     if (this.closed) return;
-    const binding = this.store.getBinding(key.connectionId, key.chatId, key.agentId);
+    let binding = this.store.getBinding(key.connectionId, key.chatId, key.agentId);
     if (!binding?.enabled || binding.activeTurnId) return;
     const request = this.store.listActivity(key).find((r) => r.status === 'queued');
     if (!request) return;
-    if (!request.isFromMe && (!request.authorId || !binding.participantsAllowed.includes(request.authorId))) {
+    const identities = await this.resolveIdentityIds(key.connectionId, request.authorId);
+    binding = this.store.getBinding(key.connectionId, key.chatId, key.agentId);
+    if (this.closed || !binding?.enabled || binding.activeTurnId) return;
+    if (!participantCanInvoke(binding, request.isFromMe, request.authorId, identities)) {
       this.store.updateRequest(request.requestId, { status: 'canceled', reason: 'participant_access_removed' });
       return this.pump(key);
     }
@@ -251,6 +274,12 @@ export class WhatsAppAgentChannelCoordinator {
   }
 
   private async changeEnabled(key: WhatsAppAgentBindingKey, enabled: boolean, expected?: number) {
+    if (enabled) {
+      const identities = await this.resolveIdentityIds(key.connectionId, key.chatId);
+      if (this.store.listBindings(key.connectionId).some((binding) => binding.agentId === key.agentId &&
+        binding.chatId !== key.chatId && binding.enabled && identities.includes(binding.chatId)))
+        throw new Error('whatsapp_agent_chat_already_active');
+    }
     const previous = this.store.getBinding(key.connectionId, key.chatId, key.agentId);
     const changed = this.store.setEnabled(key, enabled, expected);
     if (previous?.activeTurnId && !enabled) await this.cancelUnlocked(previous, previous.activeTurnId, 'off');

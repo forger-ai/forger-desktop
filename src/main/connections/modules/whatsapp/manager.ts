@@ -12,6 +12,7 @@ import {
   normalizeBaileysContact,
   normalizeBaileysMessage,
   normalizeWhatsAppJid,
+  normalizeWhatsAppUserJid,
   phoneNumberFromJid,
 } from './normalizer';
 import { WhatsAppLocalStore } from './store';
@@ -24,6 +25,7 @@ import type {
   WhatsAppPairingInput,
   WhatsAppReadMessagesInput,
   WhatsAppSendMessageInput,
+  WhatsAppStableMessageRef,
 } from './types';
 
 type BaileysModule = Record<string, unknown>;
@@ -41,7 +43,11 @@ type BaileysSocket = {
   ev?: {
     on: (event: string, handler: (payload: unknown) => void) => void;
   };
-  user?: { id?: string };
+  user?: { id?: string; lid?: string };
+  signalRepository?: { lidMapping?: {
+    getLIDForPN: (id: string) => Promise<string | null>;
+    getPNForLID: (id: string) => Promise<string | null>;
+  } };
   requestPairingCode?: (phoneNumber: string) => Promise<string>;
   sendMessage?: (jid: string, content: unknown, options?: unknown) => Promise<unknown>;
   groupMetadata?: (jid: string) => Promise<unknown>;
@@ -161,8 +167,50 @@ export class WhatsAppConnectionManager {
     return { status: 'qr_ready', qrDataUrl, expiresAt: new Date(expiresAt).toISOString() };
   }
 
+  /** Equivalence is account-scoped and comes only from authenticated Baileys identities. */
+  async resolveIdentityIds(value: string): Promise<string[]> {
+    const id = normalizeWhatsAppUserJid(value);
+    const socket = this.socket;
+    const accountId = normalizeWhatsAppUserJid(socket?.user?.id ?? '');
+    if (!/^[0-9]+@(s\.whatsapp\.net|lid)$/.test(id) || !phoneNumberFromJid(accountId)) return [value];
+    const ownLid = normalizeWhatsAppUserJid(socket?.user?.lid ?? '');
+    if (/^[0-9]+@lid$/.test(ownLid) && (id === accountId || id === ownLid)) {
+      await this.store.rememberIdentityPair(accountId, accountId, ownLid);
+    } else {
+      const mapping = socket?.signalRepository?.lidMapping;
+      if (mapping) {
+        try {
+          const phoneId = id.endsWith('@lid') ? normalizeWhatsAppUserJid(await mapping.getPNForLID(id) ?? '') : id;
+          const lid = phoneId ? normalizeWhatsAppUserJid(await mapping.getLIDForPN(phoneId) ?? '') : '';
+          const reversePhone = lid ? normalizeWhatsAppUserJid(await mapping.getPNForLID(lid) ?? '') : '';
+          if (phoneNumberFromJid(phoneId) && /^[0-9]+@lid$/.test(lid)
+            && reversePhone === phoneId && (id === phoneId || id === lid)) {
+            if (socket !== this.socket) return [value];
+            await this.store.rememberIdentityPair(accountId, phoneId, lid);
+          } else if (lid) {
+            await this.store.invalidateIdentity(accountId, id);
+          }
+        } catch {
+          // Previously verified mappings survive temporary lookup failures.
+        }
+      }
+    }
+    if (socket !== this.socket) return [value];
+    return [...new Set([value, ...await this.store.identityIds(accountId, id)])];
+  }
+
+  private equivalentMessageRefs(ref: WhatsAppStableMessageRef, chats: string[], senderIds: string[]): string[] {
+    const participants = ref.participant ? senderIds : [undefined];
+    return chats.flatMap((remoteJid) => participants.map((participant) => encodeStableMessageRef({
+      ...ref, remoteJid, ...(participant ? { participant } : {}),
+    })));
+  }
+
   async listChats(input: WhatsAppListChatsInput): Promise<Record<string, unknown>> {
-    return this.store.listChats(input);
+    const result = await this.store.listChats(input);
+    return { ...result, chats: await Promise.all(result.chats.map(async (chat) => ({
+      ...chat, identityIds: await this.resolveIdentityIds(chat.chatId),
+    }))) };
   }
 
   async readMessages(context: InternalToolContext, input: WhatsAppReadMessagesInput): Promise<Record<string, unknown>> {
@@ -173,7 +221,7 @@ export class WhatsAppConnectionManager {
     if (await this.hasPairedAuthState()) {
       await this.ensureStarted(context);
     }
-    const messages = await this.store.readMessages({ ...input, chatId });
+    const messages = await this.store.readMessages({ ...input, chatId, identityIds: await this.resolveIdentityIds(chatId) });
     return {
       messages: messages.map((message) => this.serializeMessage(message)),
     };
@@ -227,17 +275,19 @@ export class WhatsAppConnectionManager {
 
   async getChatDetails(context: InternalToolContext, input: WhatsAppChatDetailsInput): Promise<Record<string, unknown>> {
     const chatId = normalizeWhatsAppJid(input.chatId);
-    const chat = chatId ? await this.store.getChat(chatId) : null;
+    const storedChat = chatId ? await this.store.getChat(chatId) : null;
+    const chat = storedChat ? { ...storedChat, identityIds: [chatId] } : null;
     if (!chatId || !chat) {
       return { success: false, userMessage: 'Primero lee o lista ese chat antes de pedir detalles.', technicalCode: 'whatsapp_chat_not_observed' };
     }
     await this.ensureStarted(context);
+    chat.identityIds = await this.resolveIdentityIds(chatId);
     if (chat.chatType === 'group') {
       const metadata = await this.socket?.groupMetadata?.(chatId);
       return {
         chat,
         type: 'group',
-        metadata: await normalizeGroupMetadata(metadata, async (id) => (await this.store.getChat(id))?.title),
+        metadata: await normalizeGroupMetadata(metadata, async (id) => (await this.store.getChat(id))?.title, (id) => this.resolveIdentityIds(id)),
       };
     }
     if (chat.chatType === 'channel') {
@@ -378,11 +428,18 @@ export class WhatsAppConnectionManager {
         const ref = encodeStableMessageRef(message.stableMessageRef);
         if (deliveredRefs.has(ref)) continue;
         deliveredRefs.add(ref);
-        if (message.fromMe) await this.waitForPendingSends(message.chatId);
+        const chatIdentityIds = await this.resolveIdentityIds(message.chatId);
+        const senderIdentityIds = message.senderId ? await this.resolveIdentityIds(message.senderId) : undefined;
+        if (message.fromMe) await Promise.all(chatIdentityIds.map((id) => this.waitForPendingSends(id)));
         if (options.sessionGeneration !== undefined && options.sessionGeneration !== this.sessionGeneration) return;
-        if (await this.store.isKnownOutboundMessageRef(ref)) continue;
+        const equivalentStableMessageRefs = this.equivalentMessageRefs(message.stableMessageRef, chatIdentityIds, senderIdentityIds ?? []);
+        const outbound = await Promise.all(equivalentStableMessageRefs.map((candidate) => this.store.isKnownOutboundMessageRef(candidate)));
+        if (outbound.some(Boolean)) continue;
         if (options.sessionGeneration !== undefined && options.sessionGeneration !== this.sessionGeneration) return;
-        await this.options.onLiveMessage(this.toLiveMessage(message), { newlyStored: insertedRefs.has(ref) });
+        await this.options.onLiveMessage({
+          ...this.toLiveMessage(message), chatIdentityIds, equivalentStableMessageRefs,
+          ...(senderIdentityIds ? { senderIdentityIds } : {}),
+        }, { newlyStored: insertedRefs.has(ref) });
       }
     }
   }
@@ -904,6 +961,7 @@ const chmodAuthFiles = async (directory: string): Promise<void> => {
 const normalizeGroupMetadata = async (
   metadata: unknown,
   contactName: (id: string) => Promise<string | undefined>,
+  identityIds: (id: string) => Promise<string[]>,
 ): Promise<Record<string, unknown> | null> => {
   if (!isRecord(metadata)) {
     return null;
@@ -927,8 +985,10 @@ const normalizeGroupMetadata = async (
         const name = typeof providedName === 'string'
           ? providedName.trim()
           : typeof participant.id === 'string' ? await contactName(participant.id) : undefined;
+        const identities = typeof participant.id === 'string' ? await identityIds(participant.id) : [];
         return {
           id: participant.id,
+          ...(identities.length > 1 ? { identityIds: identities } : {}),
           admin: participant.admin,
           ...(name ? { name } : {}),
         };

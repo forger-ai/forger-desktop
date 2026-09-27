@@ -1,3 +1,4 @@
+import { validateParticipantAccess } from './participant-access';
 import { WhatsAppAgentRequestStore } from './request-store';
 import { WhatsAppChannelPolicyStore } from './policy-store';
 import type { SqliteDatabase } from '../sqlite';
@@ -21,6 +22,7 @@ interface BindingRow {
   allow_agent_capabilities: number;
   purpose: string;
   scope: string;
+  participant_access: 'owner' | 'selected' | 'all';
   conversation_id: string | null;
   revision: number;
   configuration_version: number;
@@ -109,6 +111,21 @@ export class WhatsAppAgentChannelStore {
     );
     this.policies = new WhatsAppChannelPolicyStore(db);
     const columns = this.db.prepare('PRAGMA table_info(whatsapp_agent_bindings)').all() as Array<{ name: string }>;
+    if (!columns.some((column) => column.name === 'participant_access')) {
+      this.db.exec('BEGIN IMMEDIATE');
+      try {
+      this.db.exec(`ALTER TABLE whatsapp_agent_bindings ADD COLUMN participant_access TEXT NOT NULL DEFAULT 'owner'
+        CHECK (participant_access IN ('owner', 'selected', 'all'));
+        UPDATE whatsapp_agent_bindings SET participant_access='selected' WHERE EXISTS (
+          SELECT 1 FROM whatsapp_agent_binding_participants p WHERE p.connection_id=whatsapp_agent_bindings.connection_id
+          AND p.chat_id=whatsapp_agent_bindings.chat_id AND p.agent_id=whatsapp_agent_bindings.agent_id
+        )`);
+      this.db.exec('COMMIT');
+      } catch (error) {
+        this.db.exec('ROLLBACK');
+        throw error;
+      }
+    }
     if (!columns.some((column) => column.name === 'allow_agent_capabilities')) {
       this.db.exec(
         'ALTER TABLE whatsapp_agent_bindings ADD COLUMN allow_agent_capabilities INTEGER NOT NULL DEFAULT 0',
@@ -196,6 +213,7 @@ export class WhatsAppAgentChannelStore {
       throw new Error('whatsapp_agent_binding_revision_conflict');
     }
     const participants = [...new Set(input.participantsAllowed.map((id) => id.trim()).filter(Boolean))];
+    const participantAccess = validateParticipantAccess(input.participantAccess, chatId, participants);
     const existingAlias = this.db
       .prepare(
         `
@@ -227,10 +245,11 @@ export class WhatsAppAgentChannelStore {
         .prepare(
           `
         INSERT INTO whatsapp_agent_bindings (
-          connection_id, chat_id, agent_id, owner_id, enabled, allow_agent_capabilities, purpose, scope, conversation_id
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+          connection_id, chat_id, agent_id, owner_id, enabled, allow_agent_capabilities, purpose, scope, conversation_id, participant_access
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(connection_id, chat_id, agent_id) DO UPDATE SET
           owner_id = excluded.owner_id,
+          participant_access = excluded.participant_access,
           enabled = excluded.enabled,
           allow_agent_capabilities = excluded.allow_agent_capabilities,
           purpose = excluded.purpose,
@@ -251,6 +270,7 @@ export class WhatsAppAgentChannelStore {
           input.purpose.trim(),
           input.scope.trim(),
           input.conversationId?.trim() || null,
+          participantAccess,
         );
       if (priorAlias && priorAlias.alias !== alias) {
         // The alias is connection-wide. Changing it also invalidates runs in
@@ -377,6 +397,16 @@ export class WhatsAppAgentChannelStore {
       this.db.exec('ROLLBACK');
       throw error;
     }
+  }
+
+  findEquivalentMessage(connectionId: string, chatIds: string[], refs: string[]): 'pending' | 'admitting' | 'duplicate' | null {
+    const row = this.db.prepare(`SELECT state FROM whatsapp_agent_seen_messages
+      WHERE connection_id=? AND chat_id IN (${chatIds.map(() => '?').join(',')})
+      AND stable_message_ref IN (${refs.map(() => '?').join(',')})
+      ORDER BY CASE state WHEN 'pending' THEN 2 WHEN 'admitting' THEN 1 ELSE 0 END LIMIT 1`)
+      .get(connectionId, ...chatIds, ...refs) as { state: string } | undefined;
+    if (!row) return null;
+    return row.state === 'pending' || row.state === 'admitting' ? row.state : 'duplicate';
   }
 
   claimMessage(
@@ -722,6 +752,7 @@ export class WhatsAppAgentChannelStore {
       allowAgentCapabilities: Boolean(row.allow_agent_capabilities),
       purpose: row.purpose,
       scope: row.scope,
+      participantAccess: row.participant_access,
       participantsAllowed: participants.map((item) => item.participant_id),
       policy: this.policies.get({ connectionId: row.connection_id, chatId: row.chat_id, agentId: row.agent_id }),
       conversationId: row.conversation_id,

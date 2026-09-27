@@ -70,6 +70,93 @@ const chooseChat = async (user: ReturnType<typeof userEvent.setup>, name = 'Proj
 };
 
 describe('AgentWhatsAppPanel', () => {
+  it('offers equivalent phone and LID chats once while retaining saved identities and filtered titles', async () => {
+    const pn = '15550001111@s.whatsapp.net'; const lid = '123456@lid';
+    const pair = [pn, lid];
+    const saved = { ...binding, chatId: pn, participantsAllowed: [] };
+    const api = makeApi({ bindings: [saved], listChats: { chats: [
+      { chatId: lid, title: 'My test chat', chatType: 'direct', identityIds: [...pair, null, 7] },
+      { chatId: pn, title: 'My test chat', chatType: 'direct', identityIds: pair },
+    ] } });
+    const { result } = renderHook(() => useChannelEditor('agent-one', 'Helper', copy.en));
+    await waitFor(() => expect(result.current.chatChoices).toHaveLength(1));
+    expect(result.current.chatChoices[0].chatId).toBe(lid);
+    act(() => result.current.beginEdit(saved));
+    expect(result.current.chatChoices).toHaveLength(1);
+    expect(result.current.chatChoices[0].chatId).toBe(pn);
+    api.connectionsCall.mockResolvedValue({ success: true, data: { chats: [] } });
+    act(() => result.current.setSearch('missing'));
+    await waitFor(() => expect(result.current.chats).toEqual([]));
+    expect(result.current.chatTitle(account.id, pn)).toBe('My test chat');
+    expect(result.current.chatTitle(account.id, lid)).toBe('My test chat');
+    expect(result.current.chatTitle('another-account', pn)).toBe(pn);
+    expect(result.current.chatChoices[0].chatId).toBe(pn);
+  });
+
+  it('loads group details independently of search and rejects everyone on direct chats', async () => {
+    const api = makeApi({ listChats: { chats: [] }, details: { type: 'group', metadata: { subject: 'Recovered group', participants: [] } } });
+    const { result } = renderHook(() => useChannelEditor('agent-one', 'Helper', copy.en));
+    await waitFor(() => expect(result.current.loading).toBe(false));
+    act(() => result.current.beginEdit({ ...binding, participantAccess: 'all' }));
+    await waitFor(() => expect(result.current.selectedChat?.title).toBe('Recovered group'));
+    expect(result.current.chatChoices[0].chatType).toBe('group');
+    await act(async () => result.current.save());
+    expect(api.personalAgentWhatsAppBindingPut).toHaveBeenCalledWith(expect.objectContaining({ participantAccess: 'all', participantsAllowed: [] }));
+    api.connectionsCall.mockResolvedValue({ success: true, data: { type: 'direct', chat: { title: 'A person' } } });
+    act(() => result.current.updateDraft((value) => ({ ...value, chatId: 'a-person' })));
+    await waitFor(() => expect(result.current.selectedChat?.title).toBe('A person'));
+    await act(async () => result.current.save());
+    expect(result.current.error).toBe(copy.en.groupOnly);
+    api.connectionsCall.mockResolvedValue({ success: true, data: {} });
+    act(() => result.current.updateDraft((value) => ({ ...value, chatId: 'new@g.us' })));
+    expect(result.current.chatChoices[0].chatType).toBe('group');
+    await act(async () => result.current.save());
+    expect(api.personalAgentWhatsAppBindingPut).toHaveBeenCalledWith(expect.objectContaining({ chatId: 'new@g.us', participantAccess: 'all' }));
+
+  });
+
+  it('keeps legacy access narrow and retains everyone drafts on conflicts', async () => {
+    const api = makeApi({ bindings: [binding] });
+    const { result } = renderHook(() => useChannelEditor('agent-one', 'Helper', copy.en));
+    await waitFor(() => expect(result.current.loading).toBe(false));
+    expect(result.current.draft.participantAccess).toBe('owner');
+    act(() => result.current.beginEdit(binding));
+    expect(result.current.draft.participantAccess).toBe('selected');
+    act(() => result.current.beginEdit({ ...binding, participantsAllowed: [] }));
+    expect(result.current.draft.participantAccess).toBe('owner');
+    await waitFor(() => expect(result.current.selectedChat?.chatType).toBe('group'));
+    act(() => result.current.updateDraft((value) => ({ ...value, participantAccess: 'all' })));
+    api.personalAgentWhatsAppBindingPut.mockRejectedValueOnce(new Error('configuration_conflict'));
+    await act(async () => result.current.save());
+    expect(result.current.draft.participantAccess).toBe('all');
+    expect(result.current.conflicting?.configurationVersion).toBe(6);
+  });
+
+  it('reviews everyone access explicitly and preserves group type while searching', async () => {
+    const user = userEvent.setup(); const api = makeApi(); showPanel(); await chooseChat(user);
+    await user.click(screen.getByRole('combobox', { name: 'Who can assign tasks' }));
+    await user.click(screen.getByRole('option', { name: 'Everyone in the group' }));
+    await user.type(screen.getByRole('textbox', { name: 'Purpose in this chat' }), 'Help');
+    await user.click(screen.getByRole('switch', { name: 'Allow automatic replies in this chat' }));
+    api.connectionsCall.mockImplementation(async ({ actionId }) => actionId === 'whatsapp.list_chats' ? { success: true, data: { chats: [] } } : { success: true, data: {} });
+    await user.type(screen.getByRole('textbox', { name: 'Search conversations' }), 'missing');
+    await user.click(screen.getByRole('button', { name: 'Save chat' }));
+    expect(within(screen.getByRole('dialog')).getByText(/Everyone in the group/)).toBeVisible();
+    await user.click(screen.getByRole('button', { name: 'Apply settings' }));
+    await waitFor(() => expect(api.personalAgentWhatsAppBindingPut).toHaveBeenCalledWith(expect.objectContaining({ participantAccess: 'all', participantsAllowed: [] })));
+    expect(screen.getByText('🤖 Helper:', { exact: false })).toBeVisible();
+  });
+
+  it('requires a selected person and never offers everyone for a direct chat', async () => {
+    const user = userEvent.setup(); const api = makeApi(); showPanel(); await chooseChat(user, 'Direct chat');
+    await user.click(screen.getByRole('combobox', { name: 'Who can assign tasks' }));
+    expect(screen.queryByRole('option', { name: 'Everyone in the group' })).not.toBeInTheDocument();
+    await user.click(screen.getByRole('option', { name: 'Selected people' }));
+    await user.click(screen.getByRole('button', { name: 'Save chat' }));
+    expect(await screen.findByText('Choose at least one person, or select Only me.')).toBeVisible();
+    expect(api.personalAgentWhatsAppBindingPut).not.toHaveBeenCalled();
+  });
+
   it('pauses locally while disconnected and distinguishes enabled from available', async () => {
     const user = userEvent.setup();
     const api = makeApi({ instances: [{ ...account, status: 'disconnected' }], bindings: [binding] });
@@ -187,7 +274,7 @@ describe('AgentWhatsAppPanel', () => {
 
   it('shows updated access and paused state during a real settings conflict without discarding edits', async () => {
     const api = makeApi({ bindings: [binding] }); const user = userEvent.setup();
-    api.personalAgentWhatsAppBindingGet.mockResolvedValue({ ...binding, enabled: false, policy: { appIds: [], toolIds: [], connectionGrants: [], peerAgentIds: [], sharedMemoryIds: [], networkAccess: false }, configurationVersion: 6 });
+    api.personalAgentWhatsAppBindingGet.mockResolvedValue({ ...binding, participantAccess: 'owner', participantsAllowed: [], enabled: false, policy: { appIds: [], toolIds: [], connectionGrants: [], peerAgentIds: [], sharedMemoryIds: [], networkAccess: false }, configurationVersion: 6 });
     api.personalAgentWhatsAppBindingPut.mockRejectedValueOnce(new Error('configuration_conflict'));
     showPanel(); await user.click(await screen.findByRole('button', { name: 'Edit' }));
     await user.click(screen.getByRole('button', { name: 'Save chat' }));
@@ -211,7 +298,7 @@ describe('AgentWhatsAppPanel', () => {
     expect(screen.getByRole('switch', { name: 'Allow automatic replies in this chat' })).toHaveAttribute('aria-checked', 'false');
     expect(screen.getByText(/Only the selections below are shared/)).toBeVisible();
     fireEvent.click(screen.getByRole('button', { name: 'Save chat' }));
-    expect(screen.getByText('Choose an account and an observed chat.')).toBeVisible();
+    expect(screen.getByText('Choose an account and a conversation.')).toBeVisible();
     expect(api.personalAgentWhatsAppBindingPut).not.toHaveBeenCalled();
   });
 
@@ -245,6 +332,8 @@ describe('AgentWhatsAppPanel', () => {
     expect(screen.getByText('Enter a purpose before enabling replies.')).toBeVisible();
     await user.type(screen.getByRole('textbox', { name: 'Purpose in this chat' }), '  Help with housing  ');
     await user.type(screen.getByRole('textbox', { name: 'Work instructions for this chat' }), '  Review listings  ');
+    await user.click(screen.getByRole('combobox', { name: 'Who can assign tasks' }));
+    await user.click(screen.getByRole('option', { name: 'Selected people' }));
     await user.click(screen.getByRole('combobox', { name: 'People allowed to assign tasks' }));
     await user.click(await screen.findByRole('option', { name: 'member-two' }));
     await user.click(screen.getByRole('button', { name: 'Save chat' }));
@@ -254,7 +343,7 @@ describe('AgentWhatsAppPanel', () => {
     expect(api.personalAgentWhatsAppBindingPut).toHaveBeenCalledWith({
       agentId: 'agent-one', connectionId: account.id, chatId: 'group-one',
       alias: 'House', purpose: 'Help with housing', scope: 'Review listings',
-      participantsAllowed: ['member-two'], allowAgentCapabilities: true, enabled: true, policy: { appIds: [], toolIds: [], connectionGrants: [], peerAgentIds: [], networkAccess: false, sharedMemoryIds: [], sharedFiles: [] },
+      participantAccess: 'selected', participantsAllowed: ['member-two'], allowAgentCapabilities: true, enabled: true, policy: { appIds: [], toolIds: [], connectionGrants: [], peerAgentIds: [], networkAccess: false, sharedMemoryIds: [], sharedFiles: [] },
     });
     expect(await screen.findByText('Settings saved.')).toBeVisible();
     expect(refresh).toBeTypeOf('function');
@@ -347,13 +436,13 @@ describe('AgentWhatsAppPanel', () => {
 
     api.connectionsCall.mockResolvedValueOnce({ success: false });
     showPanel();
-    expect(await screen.findByText('Could not load observed chats.')).toBeVisible();
+    expect(await screen.findByText('Could not load conversations.')).toBeVisible();
     api.connectionsCall.mockResolvedValue({ success: true, data: { chats: [{ chatId: 'direct-one', title: 'Direct chat', chatType: 'direct' }] } });
-    await user.type(screen.getByRole('textbox', { name: 'Search observed chats' }), '  Direct  ');
+    await user.type(screen.getByRole('textbox', { name: 'Search conversations' }), '  Direct  ');
     await waitFor(() => expect(api.connectionsCall).toHaveBeenCalledWith(expect.objectContaining({
       actionId: 'whatsapp.list_chats', input: { limit: 100, query: 'Direct' },
     })));
-    expect(screen.queryByText('Could not load observed chats.')).not.toBeInTheDocument();
+    expect(screen.queryByText('Could not load conversations.')).not.toBeInTheDocument();
   });
 
   it('refreshes status in place while keeping the editor open', async () => {
@@ -394,6 +483,8 @@ describe('AgentWhatsAppPanel', () => {
       actionId: 'whatsapp.list_chats', connectionId: 'whatsapp-two',
     })));
     await chooseChat(user, '+9876543');
+    await user.click(screen.getByRole('combobox', { name: 'Who can assign tasks' }));
+    await user.click(screen.getByRole('option', { name: 'Selected people' }));
     expect(await screen.findByRole('combobox', { name: 'People allowed to assign tasks' })).toBeVisible();
     await user.click(screen.getByRole('button', { name: 'Refresh chats' }));
     await waitFor(() => expect(api.connectionsCall.mock.calls.filter(([input]) => input.actionId === 'whatsapp.list_chats' && input.connectionId === 'whatsapp-two').length).toBeGreaterThan(1));
@@ -416,7 +507,7 @@ describe('AgentWhatsAppPanel', () => {
       ? { success: true, data: null }
       : { success: true, data: { metadata: { participants: 'invalid' } } });
     await user.click(screen.getByRole('button', { name: 'Refresh chats' }));
-    expect(await screen.findByText('No observed chats yet. Open a WhatsApp conversation and refresh the list.')).toBeVisible();
+    expect(await screen.findByText('No conversations available yet. Send a message in WhatsApp and refresh the list.')).toBeVisible();
   });
 
   it('keeps a successful save even when follow-up status reads fail', async () => {
@@ -491,7 +582,7 @@ describe('AgentWhatsAppPanel', () => {
     await screen.findByText('Personal phone');
     const save = screen.getByRole('button', { name: 'Save chat' });
     fireEvent.click(save);
-    expect(screen.getByText('Choose an account and an observed chat.')).toBeVisible();
+    expect(screen.getByText('Choose an account and a conversation.')).toBeVisible();
     expect(api.personalAgentWhatsAppBindingPut).not.toHaveBeenCalled();
     await chooseChat(user);
     await user.click(screen.getByRole('button', { name: 'Save chat' }));

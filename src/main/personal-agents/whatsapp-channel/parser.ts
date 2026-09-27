@@ -11,7 +11,7 @@ export const normalizeAgentAliasKey = (alias: string): string =>
 export const parseAgentWakeMessage = (message: string, alias: string): ParsedAgentWakeMessage | null => {
   const normalizedAlias = normalizeAgentAliasKey(alias);
   if (!normalizedAlias) return null;
-  const text = message.normalize('NFKC').trim();
+  const text = message.normalize('NFKC').trim().replace(/^@/u, '');
   if (!text.toLowerCase().startsWith(normalizedAlias)) return null;
   const remainder = text.slice(normalizedAlias.length);
   if (!/^[\s:,]/u.test(remainder)) return null;

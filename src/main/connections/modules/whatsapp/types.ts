@@ -15,6 +15,10 @@ export interface WhatsAppIndexedMessage {
   stableMessageRef: WhatsAppStableMessageRef;
   chatId: string;
   chatType: WhatsAppChatType;
+  /** Authenticated equivalent identities; transport IDs and references stay unchanged. */
+  chatIdentityIds?: string[];
+  equivalentStableMessageRefs?: string[];
+  senderIdentityIds?: string[];
   senderId?: string;
   senderDisplayName?: string;
   fromMe: boolean;
@@ -55,6 +59,7 @@ export interface WhatsAppMessageAttachment {
 }
 
 export interface WhatsAppIndexedChat {
+  identityIds?: string[];
   chatId: string;
   chatType: WhatsAppChatType;
   title?: string;

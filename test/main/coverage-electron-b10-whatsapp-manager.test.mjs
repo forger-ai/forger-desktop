@@ -538,7 +538,7 @@ test('Given filesystem edge cases, auth discovery, serialization, permission fai
   manager.lastDisconnectReason = 'closed';
   manager.needsReconnect = true;
   const status = await manager.status();
-  assert.equal(status.phoneNumber, '569123456781');
+  assert.equal(status.phoneNumber, '56912345678');
   assert.equal(status.lastDisconnectReason, 'closed');
   assert.equal(status.needsReconnect, true);
 

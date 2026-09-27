@@ -1,3 +1,4 @@
+import { validateParticipantAccess } from '../personal-agents/whatsapp-channel/participant-access';
 import type { IpcMain } from 'electron';
 import type { IPC_CHANNELS as IpcChannels } from '../../shared/ipc';
 import type { WhatsAppAgentBindingKey, WhatsAppAgentBindingPutInput } from '../../shared/types';
@@ -48,6 +49,7 @@ const validateBindingInput = (input: unknown): WhatsAppAgentBindingPutInput => {
   }
   if (input.participantsAllowed.length > 64) throw new Error('whatsapp_agent_invalid_input');
   const participantsAllowed = [...new Set(input.participantsAllowed.map((id) => requiredText(id, 256)))];
+  const participantAccess = validateParticipantAccess(input.participantAccess, key.chatId, participantsAllowed);
   const alias = requiredText(input.alias, 60);
   if (/\r|\n/.test(alias)) throw new Error('whatsapp_agent_invalid_input');
   const purpose = optionalText(input.purpose, 4000);
@@ -60,6 +62,7 @@ const validateBindingInput = (input: unknown): WhatsAppAgentBindingPutInput => {
   return {
     ...key, alias, enabled: input.enabled, purpose, scope, participantsAllowed,
     allowAgentCapabilities: input.allowAgentCapabilities,
+    ...(input.participantAccess === undefined ? {} : { participantAccess }),
     ...(expectedRevision === undefined ? {} : { expectedRevision }),
     ...(input.expectedConfigurationVersion === undefined ? {} : { expectedConfigurationVersion: optionalRevision(input.expectedConfigurationVersion) }),
     ...(input.policy === undefined ? {} : { policy: validateWhatsAppChannelPolicy(input.policy) }),

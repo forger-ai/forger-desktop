@@ -1,4 +1,4 @@
-import type { PersonalAgentWhatsAppChannelPolicy } from '@shared/types';
+import type { PersonalAgentWhatsAppChannelPolicy, WhatsAppAgentBinding } from '@shared/types';
 
 export const emptyPolicy = (): PersonalAgentWhatsAppChannelPolicy => ({ appIds: [], toolIds: [], connectionGrants: [], peerAgentIds: [], networkAccess: false, sharedMemoryIds: [], sharedFiles: [] });
 
@@ -6,8 +6,11 @@ export interface ObservedChat {
   chatId: string;
   title?: string;
   phoneNumber?: string;
+  identityIds?: string[];
   chatType: 'direct' | 'group' | 'channel';
 }
+
+export const participantAccess = (binding: Pick<WhatsAppAgentBinding, 'participantsAllowed' | 'participantAccess'>): 'owner' | 'selected' | 'all' => binding.participantAccess ?? (binding.participantsAllowed.length ? 'selected' : 'owner');
 
 export interface BindingDraft {
   connectionId: string;
@@ -15,6 +18,7 @@ export interface BindingDraft {
   alias: string;
   purpose: string;
   scope: string;
+  participantAccess: 'owner' | 'selected' | 'all';
   participantsAllowed: string[];
   enabled: boolean;
   policy: PersonalAgentWhatsAppChannelPolicy;
@@ -26,6 +30,7 @@ export const blankDraft = (agentName: string, connectionId = ''): BindingDraft =
   alias: agentName,
   purpose: '',
   scope: '',
+  participantAccess: 'owner',
   participantsAllowed: [],
   enabled: false,
   policy: emptyPolicy(),
@@ -44,7 +49,19 @@ export const observedChats = (data: unknown): ObservedChat[] => {
       chatType: candidate.chatType,
       ...(typeof candidate.title === 'string' ? { title: candidate.title } : {}),
       ...(typeof candidate.phoneNumber === 'string' ? { phoneNumber: candidate.phoneNumber } : {}),
+      identityIds: [...new Set([candidate.chatId, ...(Array.isArray(candidate.identityIds) ? candidate.identityIds.filter((id): id is string => typeof id === 'string') : [])])],
     }];
+  });
+};
+
+/** Presentation deduplication only; channel authorization uses the main process. */
+export const uniqueChatChoices = (chats: ObservedChat[]): ObservedChat[] => {
+  const seen = new Set<string>();
+  return chats.filter((chat) => {
+    const identities = chat.identityIds ?? [chat.chatId];
+    if (identities.some((id) => seen.has(id))) return false;
+    identities.forEach((id) => seen.add(id));
+    return true;
   });
 };
 

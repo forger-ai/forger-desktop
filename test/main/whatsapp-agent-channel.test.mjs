@@ -17,13 +17,14 @@ const { openPersonalAgentSqliteDatabase } = require('../../dist-electron/main/pe
 let sequence = 0;
 const nextRef = () => `message-${++sequence}`;
 
-const harness = async ({ sendReply, readContext, startRun } = {}) => {
+const harness = async ({ sendReply, readContext, startRun, resolveIdentityIds } = {}) => {
   const root = await mkdtemp(path.join(tmpdir(), 'forger-whatsapp-agent-'));
   const db = openPersonalAgentSqliteDatabase(path.join(root, 'channel.sqlite'));
   assert.ok(db);
   const store = new WhatsAppAgentChannelStore(db);
   const calls = { start: [], steer: [], cancel: [], send: [], context: [], runIds: [] };
   const coordinator = new WhatsAppAgentChannelCoordinator(store, {
+    resolveIdentityIds,
     readContext:
       readContext ??
       (async (_binding, limit) => {
@@ -772,4 +773,171 @@ test('native owner proof authorizes a task without sender metadata and latest-ow
   assert.equal((await inbound('Hal CORREGIR MI ULTIMA revised', { authorId: undefined })).status, 'started');
   assert.equal(store.listActivity()[0].status, 'canceled');
   assert.equal(store.listActivity()[1].isFromMe, true);
+});
+
+test('mentions use the same exact alias and control boundaries as plain invocations', () => {
+  for (const prefix of ['Kupita', '@kupita', '@KUPITA']) {
+    assert.deepEqual(parseAgentWakeMessage(`${prefix}: hola`, 'Kupita'), { kind: 'task', text: 'hola' });
+    assert.deepEqual(parseAgentWakeMessage(`${prefix} ON`, 'Kupita'), { kind: 'on' });
+    assert.deepEqual(parseAgentWakeMessage(`${prefix} OFF.`, 'Kupita'), { kind: 'off' });
+    assert.deepEqual(parseAgentWakeMessage(`${prefix} CORREGIR MI ÚLTIMA cambio`, 'Kupita'), { kind: 'correct-own', text: 'cambio' });
+    assert.deepEqual(parseAgentWakeMessage(`${prefix} CORREGIR abc cambio`, 'Kupita'), { kind: 'correct', requestId: 'abc', text: 'cambio' });
+  }
+  for (const text of ['@kupitabot hola', '@@kupita hola', 'hola @kupita', '@kupita', '@kupita.com hola'])
+    assert.equal(parseAgentWakeMessage(text, 'Kupita'), null);
+});
+
+test('group access admits everyone explicitly while owner-only controls and author-bound corrections remain enforced', async (t) => {
+  const h = await harness();
+  t.after(() => { h.coordinator.close(); h.db.close(); });
+  const key = { chatId: 'group@g.us', participantAccess: 'all', participantsAllowed: [], enabled: true };
+  h.put(key);
+  const member = { chatId: key.chatId, isFromMe: false, authorId: 'new-member' };
+  assert.equal((await h.inbound('@HAL first', member)).status, 'started');
+  assert.equal((await h.inbound('@hal OFF', member)).status, 'unauthorized');
+  assert.equal((await h.inbound('@hal second', { ...member, authorId: 'another' })).status, 'queued');
+  const first = h.store.listActivity()[0];
+  assert.equal((await h.inbound(`@hal CORREGIR ${first.requestId} stolen`, { ...member, authorId: 'another' })).status, 'unauthorized');
+  for (const authorId of [undefined, '', '   '])
+    assert.equal((await h.inbound('@hal missing identity', { ...member, authorId })).status, 'unauthorized');
+  h.put({ ...key, participantAccess: 'selected', participantsAllowed: ['new-member'] });
+  await h.coordinator.resume();
+  assert.equal(h.store.listActivity()[1].reason, 'participant_access_removed');
+  assert.equal((await h.inbound('@hal excluded', { ...member, authorId: 'another' })).status, 'unauthorized');
+  h.put({ ...key, participantAccess: 'owner', participantsAllowed: ['new-member'] });
+  assert.equal((await h.inbound('@hal excluded', member)).status, 'unauthorized');
+  assert.equal((await h.inbound('@hal owner', { chatId: key.chatId })).status, 'started');
+});
+
+test('participant access validates groups and explicit selection, persists and safely migrates legacy bindings', async (t) => {
+  const h = await harness();
+  t.after(() => { h.coordinator.close(); h.db.close(); });
+  assert.throws(() => h.put({ participantAccess: 'all' }), /participant_access_invalid/);
+  assert.throws(() => h.put({ participantAccess: 'selected', participantsAllowed: [] }), /participants_required/);
+  assert.throws(() => h.put({ participantAccess: 'invalid' }), /participant_access_invalid/);
+  assert.equal(h.put({ participantsAllowed: [] }).participantAccess, 'owner');
+  assert.equal(h.put().participantAccess, 'selected');
+  h.put({ chatId: 'group@g.us', participantAccess: 'all', participantsAllowed: [] });
+  const reopened = new WhatsAppAgentChannelStore(h.db);
+  assert.equal(reopened.getBinding('account', 'group@g.us', 'agent-a').participantAccess, 'all');
+  h.db.exec('ALTER TABLE whatsapp_agent_bindings DROP COLUMN participant_access');
+  const migrated = new WhatsAppAgentChannelStore(h.db);
+  assert.equal(migrated.getBinding('account', 'chat', 'agent-a').participantAccess, 'selected');
+  assert.equal(migrated.getBinding('account', 'group@g.us', 'agent-a').participantAccess, 'owner');
+});
+
+test('trusted chat identities select one active binding and participant identities reauthorize queued work', async (t) => {
+  let identities = true;
+  const h = await harness({ resolveIdentityIds: async (_account, id) =>
+    identities && ['member@lid', 'member@s.whatsapp.net'].includes(id) ? ['member@lid', 'member@s.whatsapp.net'] : [id] });
+  t.after(() => { h.coordinator.close(); h.db.close(); });
+  h.put({ chatId: 'self@s.whatsapp.net', enabled: false });
+  h.put({ chatId: 'self@lid', enabled: true });
+  const chatIdentityIds = ['self@s.whatsapp.net', 'self@lid'];
+  const message = { chatId: 'self@s.whatsapp.net', chatIdentityIds };
+  assert.equal((await h.inbound('@hal owner', message)).status, 'started');
+  assert.equal(h.calls.start[0].binding.chatId, 'self@lid');
+  h.put({ chatId: 'self@s.whatsapp.net', enabled: true });
+  assert.equal((await h.inbound('@hal ambiguous', message)).status, 'ignored');
+  h.put({ chatId: 'group@g.us', enabled: true, participantAccess: 'selected', participantsAllowed: ['member@s.whatsapp.net'] });
+  const member = { chatId: 'group@g.us', isFromMe: false, authorId: 'member@lid' };
+  assert.equal((await h.inbound('@hal first', member)).status, 'started');
+  assert.equal((await h.inbound('@hal second', member)).status, 'queued');
+  const [first, second] = h.store.listActivity().filter(r => r.chatId === 'group@g.us');
+  assert.equal((await h.inbound(`@hal CORREGIR ${second.requestId} correction`, { ...member, authorId: 'member@s.whatsapp.net' })).status, 'queued');
+  identities = false;
+  await h.coordinator.cancelRequest(first, first.requestId);
+  assert.equal(h.store.listActivity().find(r => r.requestId === second.requestId).reason, 'participant_access_removed');
+});
+
+test('trusted equivalent message copies deduplicate on one binding while preserving original stable references', async (t) => {
+  const h = await harness();
+  t.after(() => { h.coordinator.close(); h.db.close(); });
+  h.put({ chatId: 'self@lid', enabled: true });
+  const identities = { chatIdentityIds: ['self@s.whatsapp.net', 'self@lid'], equivalentStableMessageRefs: ['phone-ref', 'lid-ref'] };
+  const [first, second] = await Promise.all([
+    h.inbound('@hal task', { ...identities, chatId: 'self@s.whatsapp.net', stableMessageRef: 'phone-ref' }),
+    h.inbound('@hal task', { ...identities, chatId: 'self@lid', stableMessageRef: 'lid-ref' }),
+  ]);
+  assert.equal(first.status, 'started');
+  assert.equal(second.status, 'duplicate');
+  assert.equal(h.calls.start.length, 1);
+  assert.equal(h.store.listActivity()[0].stableMessageRef, 'phone-ref');
+  // A pre-admission pending claim may retry; an ambiguous legacy admission must reconcile instead.
+  h.store.claimMessage('account', 'self@s.whatsapp.net', 'pending-phone');
+  assert.equal((await h.inbound('@hal pending', { ...identities, chatId: 'self@lid', stableMessageRef: 'pending-lid',
+    equivalentStableMessageRefs: ['pending-phone', 'pending-lid'] })).status, 'queued');
+  h.store.claimMessage('account', 'self@s.whatsapp.net', 'admitting-phone');
+  h.db.prepare("UPDATE whatsapp_agent_seen_messages SET state='admitting' WHERE stable_message_ref=?").run('admitting-phone');
+  assert.equal((await h.inbound('@hal ambiguous', { ...identities, chatId: 'self@lid', stableMessageRef: 'admitting-lid',
+    equivalentStableMessageRefs: ['admitting-phone', 'admitting-lid'] })).status, 'reconciliation_required');
+});
+
+test('participant access migration rolls back schema and values if preserving legacy grants fails', async (t) => {
+  const h = await harness();
+  t.after(() => { h.coordinator.close(); h.db.close(); });
+  h.put();
+  h.db.exec(`ALTER TABLE whatsapp_agent_bindings DROP COLUMN participant_access;
+    CREATE TRIGGER fail_access_migration BEFORE UPDATE ON whatsapp_agent_bindings BEGIN
+    SELECT RAISE(ABORT, 'migration blocked'); END;`);
+  assert.throws(() => new WhatsAppAgentChannelStore(h.db), /migration blocked/);
+  assert.equal(h.db.prepare('PRAGMA table_info(whatsapp_agent_bindings)').all().some(c => c.name === 'participant_access'), false);
+  h.db.exec('DROP TRIGGER fail_access_migration');
+  assert.equal(new WhatsAppAgentChannelStore(h.db).getBinding('account', 'chat', 'agent-a').participantAccess, 'selected');
+});
+
+test('identity lookup failure keeps the explicit participant restriction and owner access', async (t) => {
+  const h = await harness({ resolveIdentityIds: async () => { throw new Error('offline'); } });
+  t.after(() => { h.coordinator.close(); h.db.close(); });
+  h.put({ enabled: true });
+  assert.equal((await h.inbound('@hal task', { isFromMe: false, authorId: 'unknown' })).status, 'unauthorized');
+  assert.equal((await h.inbound('@hal task', { isFromMe: false, authorId: 'member' })).status, 'started');
+  assert.equal((await h.inbound('@hal OFF', { authorId: undefined })).status, 'disabled');
+  assert.equal((await h.inbound('@hal ON')).status, 'enabled');
+});
+
+test('concurrent owner ON commands cannot activate both trusted identities of the same chat', async (t) => {
+  const h = await harness({ resolveIdentityIds: async (_account, id) =>
+    id.startsWith('self@') ? ['self@lid', 'self@s.whatsapp.net'] : [id] });
+  t.after(() => { h.coordinator.close(); h.db.close(); });
+  h.put({ chatId: 'self@lid', enabled: false });
+  h.put({ chatId: 'self@s.whatsapp.net', enabled: false });
+  const results = await Promise.all(['self@lid', 'self@s.whatsapp.net'].map(chatId =>
+    h.inbound('@hal ON', { chatId, chatIdentityIds: ['self@lid', 'self@s.whatsapp.net'] })));
+  assert.deepEqual(results.map(r => r.status).sort(), ['enabled', 'failed']);
+  assert.equal(h.store.listBindings().filter(b => b.enabled).length, 1);
+});
+
+test('pause during queued identity authorization prevents a run from starting', async (t) => {
+  let release;
+  let lookups = 0;
+  const h = await harness({ resolveIdentityIds: async (_account, id) => {
+    if (++lookups === 2) await new Promise(resolve => { release = resolve; });
+    return [id];
+  } });
+  t.after(() => { h.coordinator.close(); h.db.close(); });
+  const binding = h.put({ enabled: true });
+  const pending = h.inbound('@hal task');
+  while (!release) await new Promise(resolve => setImmediate(resolve));
+  await h.coordinator.setEnabled(binding, false);
+  release();
+  await pending;
+  assert.equal(h.calls.start.length, 0);
+});
+
+test('owner controls propagate storage failures rather than claiming activation succeeded', async (t) => {
+  const h = await harness();
+  t.after(() => { h.coordinator.close(); h.db.close(); });
+  h.put({ enabled: false });
+  h.db.exec(`CREATE TRIGGER reject_channel_enable BEFORE UPDATE ON whatsapp_agent_bindings BEGIN
+    SELECT RAISE(ABORT, 'storage failure'); END;`);
+  await assert.rejects(() => h.inbound('@hal ON'), /storage failure/);
+  assert.equal(h.store.listBindings()[0].enabled, false);
+});
+
+test('legacy participant policy is owner-only unless an explicit allowlist exists', () => {
+  const { participantCanInvoke } = require('../../dist-electron/main/personal-agents/whatsapp-channel/participant-access.js');
+  assert.equal(participantCanInvoke({ participantsAllowed: [] }, false, 'member'), false);
+  assert.equal(participantCanInvoke({ participantsAllowed: ['member'] }, false, 'member'), true);
+  assert.equal(participantCanInvoke({ participantAccess: 'all', participantsAllowed: [], chatId: 'direct@s.whatsapp.net' }, false, 'member'), false);
 });

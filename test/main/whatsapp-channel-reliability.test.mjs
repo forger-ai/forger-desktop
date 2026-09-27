@@ -186,7 +186,7 @@ test('independent participants queue FIFO and only author or owner can explicitl
   h.runs[0].resolve({ assistantText: 'obsoleta' });
   h.runs[1].resolve({ assistantText: 'vigente' });
   await until(() => h.sends.length === 1);
-  assert.equal(h.sends[0].input.text, 'vigente');
+  assert.equal(h.sends[0].input.text, '🤖 Ana: \nvigente');
 });
 test('local pause succeeds offline and a configuration draft is unaffected by task admission', async (t) => {
   const h = await setup(t);
@@ -269,7 +269,7 @@ test('a completed durable response is recovered after a lost completion event wi
   await h.restart();
   await until(() => h.sends.length === 1);
   assert.equal(h.runs.length, 1);
-  assert.equal(h.sends[0].input.text, 'resultado durable');
+  assert.equal(h.sends[0].input.text, '🤖 Ana: \nresultado durable');
   assert.equal(h.service.listActivity(h.key)[0].status, 'completed');
 });
 
@@ -571,7 +571,7 @@ test('real WhatsApp transport classification preserves an offline reply through 
   const rateLimitedRetries = outcomes.slice(1, -1);
   assert.ok(rateLimitedRetries.length >= 1);
   assert.ok(rateLimitedRetries.every((outcome) => outcome === 'whatsapp_send_rate_limited'));
-  assert.deepEqual(network, ['another authorized sender', 'durable answer']);
+  assert.deepEqual(network, ['another authorized sender', '🤖 Ana: \ndurable answer']);
   assert.equal(h.service.listActivity(key)[0].deliveryState, 'sent');
 });
 
@@ -611,4 +611,30 @@ test('changing a channel runtime starts a fresh provider session without replayi
   assert.equal(h.runs[1].input.runtime.provider, 'claude');
   assert.equal(h.runs[1].input.conversation.providerThreadId ?? null, null);
   assert.doesNotMatch(h.runs[1].input.prompt, /previous-private-session/);
+});
+
+test('transport adds one canonical agent signature across retries and bounds long replies without changing history', async (t) => {
+  const h = await setup(t);
+  const attempts = [];
+  h.setSend(async (input) => {
+    attempts.push(input.input.text);
+    return attempts.length === 1
+      ? { success: false, technicalCode: 'whatsapp_send_rate_limited', data: { deliveryState: 'not_sent' } }
+      : { success: true, data: { sent: true } };
+  });
+  await h.inbound('@aNa responde');
+  await until(() => h.runs.length === 1);
+  h.runs[0].resolve({ assistantText: 'respuesta exacta' });
+  await until(() => attempts.length === 2);
+  assert.deepEqual(attempts, ['🤖 Ana: \nrespuesta exacta', '🤖 Ana: \nrespuesta exacta']);
+  assert.equal(h.service.listActivity(h.key)[0].responseText, 'respuesta exacta');
+  await h.inbound('@Ana larga');
+  await until(() => h.runs.length === 2);
+  const full = '🤖 Ana: \n' + 'l'.repeat(5000);
+  h.runs[1].resolve({ assistantText: full });
+  await until(() => attempts.length === 3);
+  assert.equal(attempts[2].split('🤖 Ana: \n').length, 2);
+  assert.ok(attempts[2].length <= 4000);
+  assert.match(attempts[2], /versión completa en Forger/);
+  assert.equal(h.service.listActivity(h.key)[1].responseText, full);
 });
