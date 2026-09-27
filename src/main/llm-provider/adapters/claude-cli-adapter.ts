@@ -26,6 +26,7 @@ export interface ClaudeParsedOutput {
 
 interface ClaudeBaseRunInput {
   localToolPolicy?: 'mcp-only';
+  networkAccess?: boolean;
   cliPath: string;
   pathEntries: string[];
   environment: Record<string, string>;
@@ -69,8 +70,8 @@ export class ClaudeCliAdapter {
       input.model,
       '--effort',
       input.effort,
-      ...(input.localToolPolicy ? ['--permission-mode', 'dontAsk', '--tools', '', '--strict-mcp-config', '--setting-sources', '', '--disable-slash-commands'] : claudePermissionArgs(input.permissionMode)),
-      ...claudeAllowedToolsArgs(mcpServers, input.localToolPolicy ? 'unsafe' : input.permissionMode),
+      ...(input.localToolPolicy ? ['--permission-mode', 'dontAsk', '--tools', input.networkAccess === true ? 'WebSearch' : '', '--strict-mcp-config', '--setting-sources', '', '--disable-slash-commands'] : claudePermissionArgs(input.permissionMode)),
+      ...claudeAllowedToolsArgs(mcpServers, input.localToolPolicy ? 'unsafe' : input.permissionMode, input.localToolPolicy && input.networkAccess === true ? ['WebSearch'] : []),
       ...(input.addDirs ?? []).flatMap((dir) => ['--add-dir', dir]),
       ...(mcpConfigPath ? ['--mcp-config', mcpConfigPath] : []),
       ...(input.threadId ? ['--resume', input.threadId] : []),
@@ -161,6 +162,7 @@ export const writeClaudeMcpConfig = async (
 export const claudeAllowedToolsArgs = (
   mcpServers: LlmMcpServerConfig[],
   permissionMode: AgentPermissionMode = 'safe',
+  nativeTools: Array<'WebSearch'> = [],
 ): string[] => {
   const mcpAllowedTools = mcpServers
     .map((server) => server.name)
@@ -169,6 +171,7 @@ export const claudeAllowedToolsArgs = (
   const allowedTools = [...new Set(
     [
       ...(isUnsafePermissionMode(permissionMode) ? [] : ['Bash']),
+      ...nativeTools,
       ...mcpAllowedTools,
     ],
   )];

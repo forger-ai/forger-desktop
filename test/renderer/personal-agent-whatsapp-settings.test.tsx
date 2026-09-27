@@ -4,6 +4,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { getDictionary } from '@renderer/i18n';
 import { useChannelEditor } from '@renderer/views/whatsapp-agent-channel/useChannelEditor';
 import { copy } from '@renderer/views/whatsapp-agent-channel/copy';
+import { emptyPolicy } from '@renderer/views/whatsapp-agent-channel/model';
 import { AgentWhatsAppPanel } from '@renderer/views/AgentWhatsAppPanel';
 
 const t = getDictionary('en');
@@ -70,6 +71,74 @@ const chooseChat = async (user: ReturnType<typeof userEvent.setup>, name = 'Proj
 };
 
 describe('AgentWhatsAppPanel', () => {
+  it('reviews, saves and reopens web search permission and retains it when agent internet is revoked', async () => {
+    const api = makeApi({ bindings: [binding] }); const user = userEvent.setup();
+    const view = render(<AgentWhatsAppPanel agentId="agent-one" agentName="Helper" agentNetworkAccess t={t} />);
+    await user.click(await screen.findByRole('button', { name: 'Edit' }));
+    const web = await screen.findByRole('switch', { name: 'Allow web searches' });
+    expect(web).not.toBeChecked();
+    await user.click(web);
+    await user.click(screen.getByRole('button', { name: 'Save chat' }));
+    const review = screen.getByRole('dialog', { name: 'Review chat access' });
+    expect(within(review).getByRole('switch', { name: 'Allow web searches' })).toBeChecked();
+    expect(within(review).getByRole('switch', { name: 'Allow web searches' })).toBeDisabled();
+    await user.click(within(review).getByRole('button', { name: 'Apply settings' }));
+    await screen.findByText('Settings saved.');
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+    expect(api.personalAgentWhatsAppBindingPut).toHaveBeenLastCalledWith(expect.objectContaining({ policy: expect.objectContaining({ networkAccess: true }) }));
+    expect(screen.getAllByText('Web searches: Allowed').length).toBeGreaterThan(0);
+    await user.click(screen.getByRole('button', { name: 'Add chat' }));
+    expect(screen.getByRole('switch', { name: 'Allow web searches' })).not.toBeChecked();
+    await user.click(screen.getByRole('button', { name: 'Edit' }));
+    expect(screen.getByRole('switch', { name: 'Allow web searches' })).toBeChecked();
+    view.rerender(<AgentWhatsAppPanel agentId="agent-one" agentName="Helper" agentNetworkAccess={false} t={t} />);
+    expect(screen.getByRole('switch', { name: 'Allow web searches' })).toBeChecked();
+    expect(screen.getAllByText('Web searches: Unavailable — agent internet is off').length).toBeGreaterThan(0);
+    expect(screen.getByText(/saved choice is retained/)).toBeVisible();
+    await user.click(screen.getByRole('button', { name: 'Save chat' }));
+    await user.click(screen.getByRole('button', { name: 'Apply settings' }));
+    await screen.findByText('Settings saved.');
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+    expect(api.personalAgentWhatsAppBindingPut).toHaveBeenLastCalledWith(expect.objectContaining({ policy: expect.objectContaining({ networkAccess: true }) }));
+    await user.click(screen.getByRole('switch', { name: 'Allow web searches' }));
+    expect(screen.getByRole('switch', { name: 'Allow web searches' })).not.toBeChecked();
+    expect(screen.getByRole('switch', { name: 'Allow web searches' })).toBeDisabled();
+  });
+
+  it('resets web access when selecting a different chat or account', async () => {
+    makeApi({ instances: [account, { ...account, id: 'second-phone', label: 'Second phone' }] });
+    const user = userEvent.setup();
+    render(<AgentWhatsAppPanel agentId="agent-one" agentName="Helper" agentNetworkAccess t={t} />);
+    await chooseChat(user);
+    await waitFor(() => expect(screen.getByRole('switch', { name: 'Allow web searches' })).not.toBeDisabled());
+    await user.click(screen.getByRole('switch', { name: 'Allow web searches' }));
+    await chooseChat(user, 'Direct chat');
+    expect(screen.getByRole('switch', { name: 'Allow web searches' })).not.toBeChecked();
+    await waitFor(() => expect(screen.getByRole('switch', { name: 'Allow web searches' })).not.toBeDisabled());
+    await user.click(screen.getByRole('switch', { name: 'Allow web searches' }));
+    await user.click(screen.getByRole('combobox', { name: 'WhatsApp account' }));
+    await user.click(screen.getByRole('option', { name: 'Second phone' }));
+    expect(screen.getByRole('switch', { name: 'Allow web searches' })).not.toBeChecked();
+  });
+
+  it('shows current web access separately from an unsaved draft during conflicts', async () => {
+    const api = makeApi({ bindings: [{ ...binding, policy: { ...emptyPolicy(), networkAccess: true } }] });
+    const user = userEvent.setup();
+    api.personalAgentWhatsAppBindingGet.mockResolvedValue({ ...binding, policy: emptyPolicy(), configurationVersion: 6 });
+    api.personalAgentWhatsAppBindingPut.mockRejectedValueOnce(new Error('configuration_conflict'));
+    render(<AgentWhatsAppPanel agentId="agent-one" agentName="Helper" agentNetworkAccess t={t} />);
+    await user.click(await screen.findByRole('button', { name: 'Edit' }));
+    await user.click(screen.getByRole('button', { name: 'Save chat' }));
+    await user.click(screen.getByRole('button', { name: 'Apply settings' }));
+    await screen.findByText('Current settings');
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+    const switches = screen.getAllByRole('switch', { name: 'Allow web searches' });
+    expect(switches[0]).not.toBeChecked(); expect(switches[0]).toBeDisabled();
+    expect(switches[1]).toBeChecked(); expect(switches[1]).not.toBeDisabled();
+    await user.click(screen.getByRole('button', { name: 'Keep my draft and review' }));
+    expect(screen.getByRole('switch', { name: 'Allow web searches' })).toBeChecked();
+  });
+
   it('searches in Chat and distinguishes saved contacts by phone without filtering server matches', async () => {
     const user = userEvent.setup();
     const contacts = [
@@ -478,13 +547,14 @@ describe('AgentWhatsAppPanel', () => {
     expect(await screen.findByText('Could not load conversations.')).toBeVisible();
     api.connectionsCall.mockResolvedValueOnce({ success: false });
     await user.click(screen.getByRole('button', { name: 'Retry' }));
+    await waitFor(() => expect(api.connectionsCall).toHaveBeenCalledTimes(2));
     await screen.findByText('Could not load conversations.');
     api.connectionsCall.mockResolvedValue({ success: true, data: { chats: [{ chatId: 'direct-one', title: 'Direct chat', chatType: 'direct' }] } });
     await user.type(screen.getByRole('combobox', { name: 'Chat' }), '  Direct  ');
     await waitFor(() => expect(api.connectionsCall).toHaveBeenCalledWith(expect.objectContaining({
       actionId: 'whatsapp.list_chats', input: { limit: 100, query: 'Direct' },
     })));
-    expect(screen.queryByText('Could not load conversations.')).not.toBeInTheDocument();
+    await waitFor(() => expect(screen.queryAllByText('Could not load conversations.')).toHaveLength(0));
   });
 
   it('refreshes status in place while keeping the editor open', async () => {

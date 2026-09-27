@@ -114,6 +114,7 @@ const runClaude = async (input: LlmProviderDescriptorRunInput): Promise<LlmProvi
     effort: (input.effort || 'medium') as ClaudeEffort,
     permissionMode: input.permissionMode,
     localToolPolicy: input.localToolPolicy,
+    networkAccess: input.networkAccess,
     timeoutMs: input.timeoutMs,
     inactivityTimeoutMs: input.inactivityTimeoutMs,
     threadId: input.threadId,

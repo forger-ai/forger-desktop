@@ -201,6 +201,8 @@ export class WhatsAppAgentChannelCoordinator {
         authorId: request.authorId,
         isFromMe: request.isFromMe,
       });
+      // A configuration save can retire this request while provider admission waits.
+      if (this.store.getBinding(key.connectionId, key.chatId, key.agentId)?.activeTurnId !== request.requestId) return;
       if (accepted.status === 'rejected') {
         this.store.settleRequest(changed, request.requestId, changed.revision, {
           status: 'failed',
@@ -213,6 +215,7 @@ export class WhatsAppAgentChannelCoordinator {
       if (accepted.status === 'unknown') throw new Error('whatsapp_agent_run_admission_unknown');
       if (accepted.runId !== request.runId) throw new Error('whatsapp_agent_run_id_mismatch');
     } catch {
+      if (this.store.getBinding(key.connectionId, key.chatId, key.agentId)?.activeTurnId !== request.requestId) return;
       // The adapter reconciles a run that was admitted before returning. No implicit replay.
       this.store.updateRequest(request.requestId, { status: 'interrupted', reason: 'run_admission_interrupted' });
       this.store.markTurnStatus(request.requestId, 'interrupted');

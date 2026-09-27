@@ -1,9 +1,10 @@
+import { copy, webAccessSummary } from './copy';
 import { isWhatsAppChannelToolSupported } from '@shared/whatsapp-channel-tool-support';
 import { useEffect, useRef, useState } from 'react';
-import { Alert, Autocomplete, Button, Checkbox, Chip, CircularProgress, FormControlLabel, Stack, TextField, Typography } from '@mui/material';
+import { Alert, Autocomplete, Button, Checkbox, Chip, CircularProgress, FormControlLabel, Stack, Switch, TextField, Typography } from '@mui/material';
 import type { PersonalAgentGrantOptions, PersonalAgentWhatsAppChannelPolicy, WhatsAppAgentPolicyOptions } from '@shared/types';
 
-export function PolicyEditor({ agentId, value, onChange, disabled, english }: { agentId: string; value: PersonalAgentWhatsAppChannelPolicy; onChange: (value: PersonalAgentWhatsAppChannelPolicy) => void; disabled: boolean; english: boolean }) {
+export function PolicyEditor({ agentId, value, onChange, disabled, english, agentNetworkAccess }: { agentNetworkAccess?: boolean; agentId: string; value: PersonalAgentWhatsAppChannelPolicy; onChange: (value: PersonalAgentWhatsAppChannelPolicy) => void; disabled: boolean; english: boolean }) {
   const active = useRef(true);
   useEffect(() => { active.current = true; return () => { active.current = false; }; }, []);
   const [options, setOptions] = useState<WhatsAppAgentPolicyOptions | null>(null);
@@ -20,6 +21,9 @@ export function PolicyEditor({ agentId, value, onChange, disabled, english }: { 
     return () => { current = false; };
   }, [agentId, refresh]);
   const label = (en: string, es: string) => english ? en : es;
+  const c = english ? copy.en : copy.es;
+  const webSelected = Boolean(value.networkAccess);
+  const agentAllowsWeb = agentNetworkAccess ?? options?.agent.networkAccess ?? false;
   const chooseFiles = async () => {
     setPicking(true);
     try {
@@ -34,7 +38,16 @@ export function PolicyEditor({ agentId, value, onChange, disabled, english }: { 
   return <Stack spacing={1.5}>
     <Typography variant="subtitle2">{label('Shared information and allowed actions', 'Información compartida y acciones permitidas')}</Typography>
     <Alert severity="info">{label('Only the selections below are shared. Private memories and files stay private unless selected. All chat members can see the agent’s replies.', 'Solo se comparte lo seleccionado abajo. Las memorias y archivos privados no se comparten sin seleccionarlos. Todos en el chat pueden ver las respuestas.')}</Alert>
-    <Typography variant="body2" color="text.secondary">{label('External access depends on the selected connections and actions. Sharing apps, connections, or other agents also shares the information those actions can access. WhatsApp connection actions may access other chats in the selected account.', 'El acceso externo depende de las conexiones y acciones seleccionadas. Compartir apps, conexiones u otros agentes también permite acceder a la información disponible mediante esas acciones. Las acciones de la conexión WhatsApp pueden acceder a otros chats de la cuenta seleccionada.')}</Typography>
+    <Typography variant="body2" color="text.secondary">{label('Apps, connections, and other agents provide additional access to the information available through the actions you select. WhatsApp connection actions may access other chats in the selected account.', 'Las apps, conexiones y otros agentes permiten acceder a información adicional mediante las acciones que selecciones. Las acciones de la conexión WhatsApp pueden acceder a otros chats de la cuenta seleccionada.')}</Typography>
+    <Stack spacing={0.5}>
+      <FormControlLabel label={c.webSearch} control={<Switch checked={webSelected}
+        disabled={disabled || !options || (!agentAllowsWeb && !webSelected)}
+        onChange={(_event, networkAccess) => onChange({ ...value, networkAccess })}
+        slotProps={{ input: { role: 'switch', 'aria-label': c.webSearch, 'aria-checked': webSelected } }} />} />
+      <Typography variant="body2" color="text.secondary">{c.webHelp}</Typography>
+      <Typography variant="body2">{webAccessSummary(c, webSelected, agentAllowsWeb)}</Typography>
+      {!agentAllowsWeb ? <Typography variant="body2" color="text.secondary">{webSelected ? c.webRetained : c.webEnableAgent}</Typography> : null}
+    </Stack>
     {error ? <Alert severity="error" action={<Button onClick={() => setRefresh((n) => n + 1)}>{label('Retry', 'Reintentar')}</Button>}>{label('Could not load or share information.', 'No pude cargar o compartir información.')}</Alert> : null}
     {!options && !error ? <CircularProgress size={18} /> : null}
     {options && grants ? <>

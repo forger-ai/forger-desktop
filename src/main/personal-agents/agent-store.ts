@@ -81,6 +81,7 @@ export class AgentStore {
   private loadPromise: Promise<void> | null = null;
   private readonly routineStore: AgentRoutineStore;
   private readonly groupStore: AgentGroupStore;
+  private readonly networkRevocationListeners = new Set<{ agentId: string; stop: () => Promise<void> }>();
 
   public constructor(private readonly options: AgentStoreOptions) {
     this.groupStore = new AgentGroupStore({
@@ -97,6 +98,13 @@ export class AgentStore {
       updateConversationTitle: (input) => this.updateConversationTitle(input),
       touchConversation: (agentId, conversationId, updatedAt) => this.touchConversation(agentId, conversationId, updatedAt),
     });
+  }
+
+  /** Native provider tools cannot be reauthorized by MCP; stop their active runs on revocation. */
+  public onNetworkAccessRevoked(agentId: string, stop: () => Promise<void>): () => void {
+    const listener = { agentId, stop };
+    this.networkRevocationListeners.add(listener);
+    return () => { this.networkRevocationListeners.delete(listener); };
   }
 
   public async listAgents(): Promise<PersonalAgent[]> {
@@ -244,6 +252,7 @@ export class AgentStore {
   public async deleteAgent(agentId: string): Promise<{ success: boolean }> {
     await this.load();
     const agent = await this.requireAgent(agentId);
+    await this.updateAgentPermissions({ agentId: agent.id, networkAccess: false });
     this.requireDb().prepare('DELETE FROM personal_agents WHERE id = ?').run(agent.id);
     await fs.rm(this.agentRoot(agent.id), { force: true, recursive: true });
     return { success: true };
@@ -267,6 +276,13 @@ export class AgentStore {
       SET permission_mode = ?, network_access = ?, can_spawn_agents = ?, group_id = ?, runtime_provider = ?, runtime_model = ?, runtime_effort = ?, updated_at = ?
       WHERE id = ?
     `).run(permissionMode, networkAccess ? 1 : 0, canSpawnAgents ? 1 : 0, groupId, runtime?.provider ?? null, runtime?.model ?? null, runtime?.effort ?? null, now, agent.id);
+    // The denial is durable before callbacks run or another task reads it. A
+    // repeated denial retries any cancellation that previously failed to finish.
+    if (input.networkAccess === false) {
+      await Promise.all([...this.networkRevocationListeners]
+        .filter(listener => listener.agentId === agent.id)
+        .map(listener => listener.stop()));
+    }
     await this.upsertLegacyPermission({
       agentId: agent.id,
       targetId: 'network_access',

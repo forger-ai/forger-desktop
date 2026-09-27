@@ -4,7 +4,7 @@ import { ActivityDialog } from './whatsapp-agent-channel/ActivityDialog';
 import { PolicyEditor } from './whatsapp-agent-channel/PolicyEditor';
 import { useState } from 'react';
 import { blankDraft, emptyPolicy, participantAccess, chatLabel } from './whatsapp-agent-channel/model';
-import { copy } from './whatsapp-agent-channel/copy';
+import { copy, webAccessSummary } from './whatsapp-agent-channel/copy';
 import { useChannelEditor } from './whatsapp-agent-channel/useChannelEditor';
 import DeleteOutlineRounded from '@mui/icons-material/DeleteOutlineRounded';
 import RefreshRounded from '@mui/icons-material/RefreshRounded';
@@ -33,6 +33,7 @@ import type { AppDictionary } from '@renderer/i18n';
 interface AgentWhatsAppPanelProps {
   agentId: string;
   agentName: string;
+  agentNetworkAccess?: boolean;
   t: AppDictionary;
   onOpenConnections?: () => void;
   onOpenConversation?: (id: string) => void;
@@ -42,7 +43,7 @@ function ChannelSwitch({ checked, disabled, label, onCheckedChange }: { checked:
   return <FormControlLabel label={label} control={<Switch checked={checked} disabled={disabled} onChange={(_event, value) => onCheckedChange(value)} slotProps={{ input: { role: 'switch', 'aria-label': label, 'aria-checked': checked } }} />} />;
 }
 
-export function AgentWhatsAppPanel({ agentId, agentName, t, onOpenConversation, onOpenConnections }: AgentWhatsAppPanelProps) {
+export function AgentWhatsAppPanel({ agentId, agentName, agentNetworkAccess = false, t, onOpenConversation, onOpenConnections }: AgentWhatsAppPanelProps) {
   const c = (t.locale as string) === 'en' ? copy.en : copy.es;
   const { refreshConnections, pause, conflicting, setConflicting, participantsLoading, participantsError, setParticipantsRefresh, connections, bindings, unsettled, deliveries, draft, editing, chats, chatTitle, participants, search, loading, loadingChats, busy, error, chatError, notice, updateDraft, setSearch, beginEdit, save, remove, connectedAccounts, editedAccountAvailable, availableConnections, selectedChat, chatChoices, setEditing, setDraft, setNotice } = useChannelEditor(agentId, agentName, c);
 
@@ -72,7 +73,7 @@ export function AgentWhatsAppPanel({ agentId, agentName, t, onOpenConversation, 
         <Typography>{c.purpose}: {conflicting.purpose}</Typography>
         <Typography>{c.scope}: {conflicting.scope}</Typography>
         <Typography>{c.access}: {c[participantAccess(conflicting)]} {participantAccess(conflicting) === 'selected' ? conflicting.participantsAllowed.join(', ') : ''}</Typography>
-        <PolicyEditor agentId={agentId} value={conflicting.policy ?? emptyPolicy()} onChange={updatePolicy} disabled english={(t.locale as string) === 'en'} />
+        <PolicyEditor agentNetworkAccess={agentNetworkAccess} agentId={agentId} value={conflicting.policy ?? emptyPolicy()} onChange={updatePolicy} disabled english={(t.locale as string) === 'en'} />
       </Alert> : null}
       {notice ? <Alert severity="success">{notice}</Alert> : null}
       {!loading && connectedAccounts.length === 0 ? <Alert severity="info" action={onOpenConnections ? <Button onClick={onOpenConnections}>{c.connections}</Button> : undefined}>{c.noConnection}</Alert> : null}
@@ -90,6 +91,7 @@ export function AgentWhatsAppPanel({ agentId, agentName, t, onOpenConversation, 
                     <Typography variant="subtitle2" sx={{ overflowWrap: 'anywhere' }}>{binding.alias} · {chatTitle(binding.connectionId, binding.chatId)}</Typography>
                     <Typography variant="caption" color="text.secondary">{account?.label ?? c.connectionMissing}</Typography>
                     <Typography variant="caption" display="block" color="text.secondary">{c[participantAccess(binding)]}</Typography>
+                    <Typography variant="caption" display="block" color="text.secondary">{webAccessSummary(c, Boolean(binding.policy?.networkAccess), agentNetworkAccess)}</Typography>
                   </Box>
                   <Chip size="small" color={binding.enabled && account?.status === 'connected' ? 'success' : 'default'} label={!binding.enabled ? c.inactive : account?.status === 'connected' ? c.active : c.disconnected} />
                   {binding.activeTurnId ? <Chip size="small" color="info" label={c.working} /> : null}
@@ -191,7 +193,7 @@ export function AgentWhatsAppPanel({ agentId, agentName, t, onOpenConversation, 
       ) : null}
       {participantsLoading ? <Typography role="status">{c.participantsLoading}</Typography> : null}
       {participantsError ? <Alert severity="error" action={<Button onClick={() => setParticipantsRefresh((n) => n + 1)}>{c.retry}</Button>}>{participantsError}</Alert> : null}
-      <PolicyEditor key={`${draft.connectionId}:${draft.chatId}`} agentId={agentId} value={draft.policy} onChange={updatePolicy} disabled={busy} english={(t.locale as string) === 'en'} />
+      <PolicyEditor agentNetworkAccess={agentNetworkAccess} key={`${draft.connectionId}:${draft.chatId}`} agentId={agentId} value={draft.policy} onChange={updatePolicy} disabled={busy} english={(t.locale as string) === 'en'} />
 
       <ChannelSwitch
         checked={draft.enabled}
@@ -218,7 +220,7 @@ export function AgentWhatsAppPanel({ agentId, agentName, t, onOpenConversation, 
           <Typography>{connections.find((item) => item.id === draft.connectionId)?.label} · {selectedChat?.title ?? draft.chatId}</Typography>
           <Typography>{draft.purpose}</Typography><Typography>{c.enableSummary}</Typography>
           <Typography>{c.access}: {c[draft.participantAccess]}{draft.participantAccess === 'selected' ? `: ${draft.participantsAllowed.map((id) => participants.find((person) => person.id === id)?.name ?? id).join(', ')}` : ''}</Typography>
-          <PolicyEditor key={`${draft.connectionId}:${draft.chatId}`} agentId={agentId} value={draft.policy} onChange={updatePolicy} disabled english={(t.locale as string) === 'en'} />
+          <PolicyEditor agentNetworkAccess={agentNetworkAccess} key={`${draft.connectionId}:${draft.chatId}`} agentId={agentId} value={draft.policy} onChange={updatePolicy} disabled english={(t.locale as string) === 'en'} />
           {draft.participantAccess === 'all' ? <Typography>{c.allHelp}</Typography> : null}
           <Typography>{c.accessHelp}</Typography>
           <Alert severity="info">{c.audience}</Alert>

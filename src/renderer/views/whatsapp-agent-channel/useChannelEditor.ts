@@ -190,7 +190,7 @@ export function useChannelEditor(agentId: string, agentName: string, c: ChannelC
       participantAccess: participantAccess(binding),
       participantsAllowed: binding.participantsAllowed,
       enabled: binding.enabled,
-      policy: { ...(binding.policy ?? emptyPolicy()), networkAccess: false },
+      policy: { ...(binding.policy ?? emptyPolicy()) },
     });
     setError('');
     setNotice('');
@@ -224,7 +224,7 @@ export function useChannelEditor(agentId: string, agentName: string, c: ChannelC
         participantAccess: draft.participantAccess,
         participantsAllowed: draft.participantAccess === 'selected' ? draft.participantsAllowed : [],
         allowAgentCapabilities: true,
-        policy: { ...draft.policy, networkAccess: false },
+        policy: { ...draft.policy },
         enabled: draft.enabled,
         ...(editing ? { expectedConfigurationVersion } : {}),
       });

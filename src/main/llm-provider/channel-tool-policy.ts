@@ -4,11 +4,11 @@
  * disabling shell alone does not remove apply_patch. The profile therefore
  * remains required even with native read/exec tools disabled.
  */
-export const codexChannelToolArgs = (workingDir: string): string[] => {
+export const codexChannelToolArgs = (workingDir: string, networkAccess = false): string[] => {
   const disabled = ['shell_tool', 'view_image', 'js_repl', 'multi_agent', 'multi_agent_v2', 'plugins', 'apps', 'memories', 'request_permissions_tool'];
   return [
     ...disabled.flatMap(feature => ['--config', `features.${feature}=false`]),
-    '--config', 'web_search="disabled"',
+    '--config', `web_search="${networkAccess ? 'live' : 'disabled'}"`,
     '--config', 'approval_policy="never"',
     '--config', 'default_permissions="forger_channel"',
     '--config', `permissions.forger_channel.filesystem={":minimal"="read",${JSON.stringify(workingDir)}="write"}`,

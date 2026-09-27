@@ -1341,7 +1341,7 @@ export function AgentsView({ t, intelligenceProviderConfigured, providerOptions 
                     {t.agents.saveAccess}
                   </Button>
                 </Box>
-                <AgentWhatsAppPanel key={activeAgent.id} agentId={activeAgent.id} agentName={activeAgent.name} t={t} onOpenConnections={onOpenConnections} onOpenConversation={(id) => {
+                <AgentWhatsAppPanel key={activeAgent.id} agentId={activeAgent.id} agentName={activeAgent.name} agentNetworkAccess={activeAgent.networkAccess} t={t} onOpenConnections={onOpenConnections} onOpenConversation={(id) => {
                   void window.forger.personalAgentGetConversation({ conversationId: id }).then((loaded) => {
                     if (loaded) { setConversation(loaded); setConversations((items) => upsertConversation(items, loaded)); setDetailTab('chat'); }
                   }).catch(() => setError(t.agents.routines.openThreadError));

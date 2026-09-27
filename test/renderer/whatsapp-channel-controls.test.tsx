@@ -33,6 +33,21 @@ function PolicyHarness({ english = true, initial = emptyPolicy() }: { english?: 
 }
 
 describe('WhatsApp chat access and request recovery', () => {
+  it('keeps web searches off by default and lets the owner opt in only with agent internet permission', async () => {
+    const bridge = api(); const user = userEvent.setup();
+    const view = render(<PolicyHarness />);
+    const web = await screen.findByRole('switch', { name: 'Allow web searches' });
+    expect(web).not.toBeChecked();
+    expect(screen.getByText(/Queries may be sent to the search provider/)).toBeVisible();
+    await user.click(web);
+    expect(JSON.parse(screen.getByTestId('policy').textContent!).networkAccess).toBe(true);
+    view.unmount();
+    bridge.personalAgentWhatsAppPolicyOptionsGet.mockResolvedValue({ agent: { appIds: [], toolIds: [], connectionGrants: [], peerAgentGrants: [], networkAccess: false }, memories: [] });
+    render(<PolicyHarness english={false} />);
+    expect(await screen.findByRole('switch', { name: 'Permitir búsquedas en internet' })).toBeDisabled();
+    expect(screen.getByText(/Agentes → este agente → Ajustes → Permitir internet/)).toBeVisible();
+  });
+
   it('limits available choices to agent grants and explicitly selects information and actions', async () => {
     const bridge = api();
     const user = userEvent.setup();

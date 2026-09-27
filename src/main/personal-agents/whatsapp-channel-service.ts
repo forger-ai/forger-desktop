@@ -463,6 +463,12 @@ export class WhatsAppAgentChannelService {
         runId: input.runId,
         content: this.runPrompt(input),
         channel: this.runChannel(input.binding, input.revision),
+        isChannelCurrent: () => this.isChannelCurrent({
+          channel: this.runChannel(input.binding, input.revision),
+          runId: input.runId,
+          agentId: input.binding.agentId,
+          conversationId,
+        }),
       });
       if (!conversation.activeRun) throw new Error('whatsapp_agent_run_missing');
       return { runId: conversation.activeRun.id };

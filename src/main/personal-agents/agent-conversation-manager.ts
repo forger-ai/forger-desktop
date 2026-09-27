@@ -72,6 +72,7 @@ const MAX_PEER_AGENT_DEPTH = 5;
 
 export interface PersonalAgentMcpRunContext {
   channelWorkspaceRoot?: string;
+  isChannelCurrent?: () => boolean;
   conversationId: string;
   peerThreadId?: string;
   callStackAgentIds: string[];
@@ -135,6 +136,7 @@ type PersonalAgentSendOptions = {
   runId?: string;
   source: PersonalAgentMessageSource;
   channel?: PersonalAgentWhatsAppChannel;
+  isChannelCurrent?: () => boolean;
   routineId?: string | null;
   wakeupId?: string | null;
   bypassWakeupBlock?: boolean;
@@ -255,13 +257,14 @@ export class AgentConversationManager {
     conversationId: string;
     content: string;
     channel: PersonalAgentWhatsAppChannel;
+    isChannelCurrent?: () => boolean;
   }): Promise<PersonalAgentConversation> {
     this.assertWhatsAppChannel(input.channel);
     const conversation = await this.options.store.requireConversation(input.conversationId);
     if (conversation.origin !== 'whatsapp') throw new Error('personal_agent_whatsapp_conversation_required');
     return await this.sendMessageInternal(
       { conversationId: input.conversationId, content: input.content },
-      { source: 'whatsapp', channel: input.channel, bypassReadOnly: true, runId: input.runId },
+      { source: 'whatsapp', channel: input.channel, isChannelCurrent: input.isChannelCurrent, bypassReadOnly: true, runId: input.runId },
     );
   }
 
@@ -313,7 +316,13 @@ export class AgentConversationManager {
 
   private async cancelRunUnlocked(runId: string): Promise<boolean> {
     const run = await this.options.store.getRun(runId);
-    if (!run || isTerminalRunStatus(run.status)) return false;
+    if (!run) return false;
+    if (isTerminalRunStatus(run.status)) {
+      // A previous cancellation may have timed out after persisting canceled.
+      // Repeating it still has to stop an extant provider process.
+      await this.stopRunChild(runId);
+      return false;
+    }
     this.canceledRunIds.add(runId);
     const canceled = await this.options.store.updateRunStatus({ runId, status: 'canceled' });
     this.updateActivityForRun(canceled, 'canceled');
@@ -322,13 +331,17 @@ export class AgentConversationManager {
       conversation: await this.requireUpdatedConversation(run.conversationId),
       run: canceled,
     });
+    await this.stopRunChild(runId);
+    return true;
+  }
+
+  private async stopRunChild(runId: string): Promise<void> {
     await this.runPreparations.get(runId)?.promise;
     const child = this.activeChildren.get(runId);
     if (child) {
       killProcessTree(child);
       await this.waitForChildExit(child);
     }
-    return true;
   }
 
   public async sendSidekickMessage(input: PersonalAgentSidekickMessageInput): Promise<PersonalAgentConversation> {
@@ -405,6 +418,7 @@ export class AgentConversationManager {
         title: deriveConversationTitle(content),
       });
     }
+    if (options.isChannelCurrent?.() === false) throw new Error('whatsapp_agent_channel_reconfigured');
     const run = await this.options.store.createRun({ agentId: conversation.agentId, conversationId: conversation.id, runId: options.runId });
     this.activities.set(run.id, this.createActivityForRun(run, agent, conversation));
     const message = await this.options.store.addMessage({
@@ -429,7 +443,7 @@ export class AgentConversationManager {
       conversationId: updated.id,
       callStackAgentIds: [agent.id],
       ...(options.sidekick ? { sidekick: options.sidekick } : {}),
-      ...(options.channel ? { channel: options.channel } : {}),
+      ...(options.channel ? { channel: options.channel, isChannelCurrent: options.isChannelCurrent } : {}),
     });
     if (options.onRunSettled) {
       void execution.then((result) => options.onRunSettled?.(result));
@@ -572,7 +586,16 @@ export class AgentConversationManager {
     runId: string,
     context: PersonalAgentMcpRunContext,
   ): Promise<{ success: true } | { success: false; error: unknown }> {
-    const execution = this.executeRun(conversationId, runId, context).then(
+    const networkLease = { enabled: context.channel?.policy?.networkAccess === true };
+    const unsubscribeNetwork = networkLease.enabled
+      ? this.options.store.onNetworkAccessRevoked(context.callStackAgentIds[context.callStackAgentIds.length - 1], async () => {
+          if (!networkLease.enabled) return;
+          // Mark synchronously: a task still preparing must not reach provider launch.
+          this.canceledRunIds.add(runId);
+          await this.cancelRun(runId);
+        })
+      : undefined;
+    const execution = this.executeRun(conversationId, runId, context, networkLease).then(
       (): { success: true } => ({ success: true }),
       async (error): Promise<{ success: false; error: unknown }> => {
         await this.failRun(runId, error);
@@ -580,11 +603,12 @@ export class AgentConversationManager {
       },
     );
     return await execution.finally(() => {
+      unsubscribeNetwork?.();
       this.canceledRunIds.delete(runId);
     });
   }
 
-  private async executeRun(conversationId: string, runId: string, context: PersonalAgentMcpRunContext): Promise<void> {
+  private async executeRun(conversationId: string, runId: string, context: PersonalAgentMcpRunContext, networkLease: { enabled: boolean } = { enabled: false }): Promise<void> {
     const started = await this.withConversationMutation(conversationId, async () => {
       const currentRun = await this.options.store.getRun(runId);
       if (!currentRun || currentRun.status !== 'queued' || this.canceledRunIds.has(runId)) return null;
@@ -606,6 +630,7 @@ export class AgentConversationManager {
     if (!started) return;
     const { conversation, run } = started;
     const agent = context.channel ? effectiveAgentForWhatsAppChannel(started.agent, context.channel.policy) : started.agent;
+    networkLease.enabled = agent.networkAccess;
     let runtime: AgentRuntime | undefined;
     let conversationForRun: PersonalAgentConversation;
     let workspaceRoot: string;
@@ -817,6 +842,10 @@ export class AgentConversationManager {
   }
 
   private async runPersonalAgent(input: PersonalAgentRunnerInput): Promise<{ assistantText: string; providerThreadId?: string }> {
+    if (input.mcpContext.isChannelCurrent?.() === false) {
+      this.releaseRunPreparation(input.run.id);
+      throw new Error('whatsapp_agent_channel_reconfigured');
+    }
     if (this.options.runner) {
       return await this.options.runner(input);
     }

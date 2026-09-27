@@ -210,7 +210,7 @@ export class CodexCliAdapter {
       '--config',
       codexReasoningConfigArg(input.reasoningEffort),
       ...(input.localToolPolicy ? [] : codexWorkspaceNetworkConfigArgs(input.networkAccess === true)),
-      ...(input.localToolPolicy ? codexChannelToolArgs(input.workingDir) : codexUnsafeArgs(input.permissionMode)),
+      ...(input.localToolPolicy ? codexChannelToolArgs(input.workingDir, input.networkAccess === true) : codexUnsafeArgs(input.permissionMode)),
       ...(input.localToolPolicy ? [] : codexWorkspaceArgs(input.permissionMode)),
       '--skip-git-repo-check',
       ...buildCodexMcpArgs(mcpServers),
@@ -236,7 +236,7 @@ export class CodexCliAdapter {
       '--config',
       codexReasoningConfigArg(input.reasoningEffort),
       ...(input.localToolPolicy ? [] : codexWorkspaceNetworkConfigArgs(input.networkAccess === true)),
-      ...(input.localToolPolicy ? codexChannelToolArgs(input.workingDir) : codexUnsafeArgs(input.permissionMode)),
+      ...(input.localToolPolicy ? codexChannelToolArgs(input.workingDir, input.networkAccess === true) : codexUnsafeArgs(input.permissionMode)),
       ...(input.threadId || input.localToolPolicy ? [] : codexWorkspaceArgs(input.permissionMode)),
       '--skip-git-repo-check',
       ...buildCodexMcpArgs(mcpServers),
@@ -278,7 +278,7 @@ export class CodexCliAdapter {
       '--config',
       codexReasoningConfigArg(input.reasoningEffort || 'low'),
       ...(input.localToolPolicy ? [] : codexWorkspaceNetworkConfigArgs(input.networkAccess === true)),
-      ...(input.localToolPolicy ? codexChannelToolArgs(input.workingDir) : codexUnsafeArgs(input.permissionMode)),
+      ...(input.localToolPolicy ? codexChannelToolArgs(input.workingDir, input.networkAccess === true) : codexUnsafeArgs(input.permissionMode)),
       ...(input.localToolPolicy ? [] : codexWorkspaceArgs(input.permissionMode)),
       '--skip-git-repo-check',
       ...buildCodexMcpArgs(mcpServers),
@@ -468,7 +468,7 @@ const buildChatAttempts = (input: CodexChatRunInput, mcpServers: LlmMcpServerCon
   const mcpArgs = buildCodexMcpArgs(mcpServers);
   const commonArgs = ['--skip-git-repo-check', '-C', input.workingDir];
   if (input.localToolPolicy) {
-    return [['exec', '--json', ...modelArgs, ...reasoningArgs, ...mcpArgs, ...codexChannelToolArgs(input.workingDir), ...commonArgs, '--', '-']];
+    return [['exec', '--json', ...modelArgs, ...reasoningArgs, ...mcpArgs, ...codexChannelToolArgs(input.workingDir, input.networkAccess === true), ...commonArgs, '--', '-']];
   }
   return input.threadId
     ? [

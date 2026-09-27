@@ -1,6 +1,11 @@
 export const copy = {
   es: {
     title: 'WhatsApp',
+    webSearch: 'Permitir búsquedas en internet',
+    webHelp: 'Busca información en la web pública. Las consultas pueden enviarse al proveedor de búsqueda. Este permiso no comparte tus archivos ni memorias privados.',
+    webEnableAgent: 'Primero activa Agentes → este agente → Ajustes → Permitir internet.',
+    webRetained: 'La elección guardada se conserva, pero las búsquedas no están disponibles mientras el permiso general esté desactivado. Se reactivan si vuelves a permitir internet al agente.',
+    webAllowed: 'Búsquedas en internet: Permitidas', webOff: 'Búsquedas en internet: Desactivadas', webUnavailable: 'Búsquedas en internet: No disponibles — internet del agente desactivado',
     access: 'Quién puede pedir tareas', owner: 'Solo yo (cuenta vinculada)', selected: 'Personas seleccionadas', all: 'Todos los miembros del grupo',
     accessHelp: 'La cuenta vinculada siempre puede pedir tareas y es la única que puede activar o pausar al agente.',
     allHelp: 'Incluye a quienes se incorporen al grupo.',
@@ -68,6 +73,11 @@ export const copy = {
   },
   en: {
     title: 'WhatsApp',
+    webSearch: 'Allow web searches',
+    webHelp: 'Searches the public web. Queries may be sent to the search provider. This permission does not share your private files or memories.',
+    webEnableAgent: 'First enable Agents → this agent → Settings → Allow internet.',
+    webRetained: 'Your saved choice is retained, but searches are unavailable while the agent permission is off. They become available again if you allow agent internet access.',
+    webAllowed: 'Web searches: Allowed', webOff: 'Web searches: Off', webUnavailable: 'Web searches: Unavailable — agent internet is off',
     access: 'Who can assign tasks', owner: 'Only me (linked account)', selected: 'Selected people', all: 'Everyone in the group',
     accessHelp: 'The linked account can always assign tasks and is the only one that can activate or pause the agent.',
     allHelp: 'Includes people who join the group later.',
@@ -136,3 +146,6 @@ export const copy = {
 } as const;
 
 export type ChannelCopy = typeof copy.en | typeof copy.es;
+
+export const webAccessSummary = (c: ChannelCopy, selected: boolean, agentAllowed: boolean) =>
+  selected ? agentAllowed ? c.webAllowed : c.webUnavailable : c.webOff;

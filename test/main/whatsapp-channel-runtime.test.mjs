@@ -102,3 +102,68 @@ for (const mode of ['chat', 'task', 'automation']) {
     } finally { await rm(root, { recursive: true, force: true }); }
   });
 }
+
+for (const provider of ['codex', 'claude']) {
+  for (const networkAccess of [false, true]) {
+    for (const mode of ['conversation', 'chat', 'task', 'automation']) {
+      test(`${provider} channel ${mode} exposes public search only when internet is effective: ${networkAccess}`, async () => {
+        const root = await mkdtemp(path.join(tmpdir(), 'forger-channel-web-'));
+        try {
+          const calls = [];
+          await createLlmProviderRunService().run({
+            surface: 'personal_agent', mode, runtime: { provider, model: 'test', effort: 'medium', permissionMode: 'unsafe' },
+            localToolPolicy: 'mcp-only', networkAccess, threadId: 'private-thread', checkReady: false,
+            cliPath: '/test/provider', pathEntries: [], environment: {}, workingDir: root, prompt: 'Find a public fact.', timeoutMs: 1000,
+            codexHomePlan: { type: 'provided', path: root },
+            mcpServers: [{ name: 'forger', url: 'http://127.0.0.1:1234/mcp', token: 'synthetic', tokenEnvVar: 'FORGER_MCP_TOKEN' }],
+            runCommandCapture: async (_command, args) => { calls.push(args); return { code: 0, stdout: '', stderr: '' }; },
+          });
+          assert.equal(calls.length, 1);
+          const [args] = calls;
+          assert.ok(!args.includes('private-thread'));
+          assert.ok(!args.includes('--dangerously-bypass-approvals-and-sandbox'));
+          if (provider === 'codex') {
+            assert.ok(args.includes(`web_search="${networkAccess ? 'live' : 'disabled'}"`));
+            assert.ok(args.includes('permissions.forger_channel.network.enabled=false'));
+            for (const feature of ['shell_tool', 'plugins', 'apps', 'memories', 'js_repl', 'multi_agent']) {
+              assert.ok(args.includes(`features.${feature}=false`));
+            }
+          } else {
+            assert.equal(args[args.indexOf('--tools') + 1], networkAccess ? 'WebSearch' : '');
+            assert.equal(args[args.indexOf('--allowedTools') + 1], networkAccess ? 'WebSearch,mcp__forger__*' : 'mcp__forger__*');
+            assert.ok(args.includes('dontAsk'));
+            assert.ok(!args.some(arg => /WebFetch|Bash|Read|Edit|Write/.test(arg)));
+          }
+        } finally { await rm(root, { recursive: true, force: true }); }
+      });
+    }
+  }
+}
+
+for (const networkAccess of [false, true]) {
+  test(`Codex resumed adapter and model fallback retain the channel web boundary: ${networkAccess}`, async () => {
+    const { CodexCliAdapter } = require('../../dist-electron/main/llm-provider/adapters/codex-cli-adapter.js');
+    const root = await mkdtemp(path.join(tmpdir(), 'forger-channel-web-fallback-'));
+    try {
+      const calls = [];
+      const input = { cliPath: '/test/provider', pathEntries: [], environment: {}, workingDir: root, codexHome: root, rootCodexHome: root,
+        model: 'gpt-unsupported', reasoningEffort: 'low', timeoutMs: 1000, prompt: 'Search public data', localToolPolicy: 'mcp-only', networkAccess,
+        runCommandCapture: async (_command, args) => { calls.push(args); return { code: 0, stdout: '', stderr: '' }; } };
+      const adapter = new CodexCliAdapter();
+      await adapter.runConversation({ ...input, threadId: 'isolated-thread' });
+      assert.ok(calls[0].includes('resume'));
+      await adapter.runChat({ ...input, runCommandCapture: async (_command, args) => {
+        calls.push(args);
+        return args.includes('gpt-unsupported')
+          ? { code: 1, stdout: '', stderr: "The 'gpt-unsupported' model is not supported" }
+          : { code: 0, stdout: '', stderr: '' };
+      } });
+      assert.equal(calls.length, 3);
+      for (const args of calls) {
+        assert.ok(args.includes(`web_search="${networkAccess ? 'live' : 'disabled'}"`));
+        assert.ok(args.includes('permissions.forger_channel.network.enabled=false'));
+        assert.ok(args.includes('features.shell_tool=false'));
+      }
+    } finally { await rm(root, { recursive: true, force: true }); }
+  });
+}

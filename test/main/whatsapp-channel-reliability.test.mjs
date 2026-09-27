@@ -638,3 +638,75 @@ test('transport adds one canonical agent signature across retries and bounds lon
   assert.match(attempts[2], /versión completa en Forger/);
   assert.equal(h.service.listActivity(h.key)[1].responseText, full);
 });
+
+for (const revokeAt of ['chat', 'agent']) {
+  test(`revoking internet at ${revokeAt} cancels active search and queued work uses current permission`, async (t) => {
+    const h = await setup(t);
+    await h.manager.options.store.updateAgentPermissions({ agentId: h.key.agentId, networkAccess: true });
+    let binding = h.service.getBinding(h.key);
+    const policy = { appIds: [], toolIds: [], connectionGrants: [], peerAgentIds: [], sharedMemoryIds: [], networkAccess: true };
+    await h.service.putBinding({ ...binding, policy, expectedConfigurationVersion: binding.configurationVersion });
+    await h.inbound('Ana public search one');
+    await until(() => h.runs.length === 1);
+    assert.equal(h.runs[0].input.agent.networkAccess, true);
+    assert.match(h.runs[0].input.prompt, /Public web search is enabled/);
+    await h.inbound('Ana public search two');
+    if (revokeAt === 'chat') {
+      binding = h.service.getBinding(h.key);
+      await h.service.putBinding({ ...binding, policy: { ...policy, networkAccess: false }, expectedConfigurationVersion: binding.configurationVersion });
+    } else {
+      await h.manager.options.store.updateAgentPermissions({ agentId: h.key.agentId, networkAccess: false });
+    }
+    await until(() => h.runs.length === 2);
+    assert.equal(h.service.listActivity(h.key)[0].status, 'canceled');
+    assert.equal(h.runs[1].input.agent.networkAccess, false);
+    assert.match(h.runs[1].input.prompt, /Public web search is disabled/);
+    h.runs[0].resolve({ assistantText: 'stale search result' });
+    h.runs[1].resolve({ assistantText: 'No internet permitted' });
+    await until(() => h.sends.length === 1);
+    assert.doesNotMatch(h.sends[0].input.text, /stale/);
+  });
+}
+
+test('chat internet revocation during asynchronous admission prevents an obsolete native search run', async (t) => {
+  const h = await setup(t);
+  await h.manager.options.store.updateAgentPermissions({ agentId: h.key.agentId, networkAccess: true });
+  let binding = h.service.getBinding(h.key);
+  const policy = { appIds: [], toolIds: [], connectionGrants: [], peerAgentIds: [], sharedMemoryIds: [], networkAccess: true };
+  await h.service.putBinding({ ...binding, policy, expectedConfigurationVersion: binding.configurationVersion });
+  let release;
+  let admitting = false;
+  const gate = new Promise(resolve => { release = resolve; });
+  h.manager.options.getAgentRuntime = async () => { admitting = true; await gate; return { provider: 'codex', model: 'test' }; };
+  const inbound = h.inbound('Ana start public search');
+  await until(() => admitting);
+  binding = h.service.getBinding(h.key);
+  const change = h.service.putBinding({ ...binding, policy: { ...policy, networkAccess: false }, expectedConfigurationVersion: binding.configurationVersion });
+  await until(() => h.service.getBinding(h.key).policy.networkAccess === false);
+  release();
+  await Promise.all([inbound, change]);
+  assert.equal(h.runs.length, 0);
+  assert.equal(h.service.listActivity(h.key)[0].status, 'canceled');
+  await h.inbound('Ana new offline request');
+  await until(() => h.runs.length === 1);
+  assert.equal(h.runs[0].input.agent.networkAccess, false);
+  h.runs[0].resolve({ assistantText: 'Offline response' });
+  await until(() => h.sends.length === 1);
+});
+
+test('a late provider admission exception preserves deliberate channel cancellation', async (t) => {
+  const h = await setup(t);
+  let release;
+  let admitting = false;
+  const gate = new Promise(resolve => { release = resolve; });
+  h.service.coordinator.ports.startRun = async () => { admitting = true; await gate; throw new Error('late admission exception'); };
+  const inbound = h.inbound('Ana first');
+  await until(() => admitting);
+  const binding = h.service.getBinding(h.key);
+  const change = h.service.putBinding({ ...binding, purpose: 'New scope', expectedConfigurationVersion: binding.configurationVersion });
+  await until(() => h.service.listActivity(h.key)[0].status === 'canceled');
+  release();
+  await Promise.all([inbound, change]);
+  assert.equal(h.service.listActivity(h.key)[0].status, 'canceled');
+  assert.equal(h.service.listActivity(h.key)[0].reason, 'channel_reconfigured');
+});
