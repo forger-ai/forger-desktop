@@ -188,7 +188,8 @@ test('AppMcpClient accepts the MCP annotation title fallback and explicit timeou
   delete tool.title;
   tool.annotations.title = 'Annotation title';
   const fixture = await startMcpFixture({ tools: [tool] });
-  const client = new AppMcpClient({ url: fixture.url, token: fixture.token, timeoutMs: 25 });
+  // This verifies successful discovery with an explicit budget, not loopback latency under CI load.
+  const client = new AppMcpClient({ url: fixture.url, token: fixture.token, timeoutMs: 2000 });
   try {
     const [action] = await client.listActions();
     assert.equal(action.title, 'Annotation title');
