@@ -34,11 +34,13 @@ test('local runner replaces environment and forwards stdin and streamed output',
   assert.equal(chunks.join(''), result.stdout);
 });
 
-test('local runner imposes absolute deadline despite continuous output', async (t) => {
+test('local runner imposes absolute deadline despite continuous output', { timeout: 10000 }, async (t) => {
   const cwd = await temporaryDirectory(t);
+  const chunks = [];
   await assert.rejects(runLocalCommandCapture(process.execPath, ['-e', `
     setInterval(() => process.stdout.write('still running'), 10);
-  `], { cwd, timeoutMs: 150, inactivityTimeoutMs: 100 }), /local_timeout/);
+  `], { cwd, timeoutMs: 1000, inactivityTimeoutMs: 3000, onStdout: text => chunks.push(text) }), /local_timeout/);
+  assert.ok(chunks.length > 0, 'the provider streams before its absolute deadline');
 });
 
 test('local runner distinguishes inactivity and bounds captured bytes', async (t) => {
