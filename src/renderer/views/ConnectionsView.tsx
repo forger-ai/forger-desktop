@@ -54,6 +54,7 @@ import { GmailIcon, SlackIcon, TrelloIcon } from './tools/ToolIcons';
 import { BrandIcon } from './tools/BrandIcons';
 import { SetupGuideDialog } from './connections/SetupGuideDialog';
 import { getSetupGuideUiCopy } from './connections/setupGuideUiCopy';
+import { WhatsAppProjectsPanel } from './connections/WhatsAppProjectsPanel';
 
 const SERVICE_ORDER: readonly string[] = [...BUILT_IN_CONNECTION_TYPES];
 const GMAIL_SELF_OAUTH_CLIENT_ID_SECRET = 'self_oauth_client_id';
@@ -554,6 +555,7 @@ export function ConnectionsView({
               <Divider />
 
               <Box data-onboarding-target="connection-approvals">
+                {selectedDefinition.type === 'whatsapp' ? <Box sx={{ mb: 2 }}><WhatsAppProjectsPanel key={selectedInstance.id} connectionId={selectedInstance.id} t={t} /></Box> : null}
                 <Typography variant="subtitle2" sx={{ mb: 1 }}>{copy.actionsTitle}</Typography>
                 <Stack spacing={1}>
                   {selectedDefinition.actions.map((action) => {

@@ -1,3 +1,4 @@
+import type { WhatsAppLiveGroupMessage } from './modules/whatsapp/types';
 import type {
   CallConnectionActionInput,
   CallConnectionActionResult,
@@ -50,6 +51,7 @@ export interface ConnectionContext {
   selfOAuthCallbackService?: SelfOAuthCallbackServiceLike;
   appendLog?: (event: string, payload?: Record<string, unknown>) => Promise<void>;
   emitEvent?: (event: OfficialToolRuntimeEvent) => void;
+  onWhatsAppMessage?: (message: WhatsAppLiveGroupMessage & { connectionId: string }) => Promise<void>;
   createInstance(input: CreateConnectionInstanceInput): Promise<ConnectionInstance>;
   updateInstance(connectionId: string, input: Partial<Pick<ConnectionInstance, 'label' | 'accountIdentity' | 'status' | 'lastCheckedAt'>>): Promise<ConnectionInstance | null>;
   deleteInstance(connectionId: string, options?: { keepSecrets?: boolean }): Promise<void>;

@@ -1,3 +1,4 @@
+import { startRepositoryConnections } from '../repository-collaboration/composition';
 import type { App, BrowserWindow, IpcMain, Shell } from 'electron';
 import type fs from 'node:fs/promises';
 import type { Server } from 'node:http';
@@ -164,6 +165,8 @@ export interface MainLifecycleDeps {
     delete: AsyncFn;
   };
 		  getOfficialToolsService: () => NonNullable<MainLifecycleState['officialToolsService']>;
+  startRepositoryCollaboration?: () => Promise<void>;
+  stopRepositoryCollaboration?: () => Promise<void>;
   getConnectionsService: () => NonNullable<MainLifecycleState['connectionsService']>;
   getSelfOAuthCallbackService: () => NonNullable<MainLifecycleState['selfOAuthCallbackService']>;
   getSpeechToTextService: () => NonNullable<MainLifecycleState['speechToTextService']>;
@@ -333,6 +336,8 @@ export const registerMainLifecycle = (deps: MainLifecycleDeps) => {
     getPersonalAgentRoutineManager,
     getOfficialToolsService,
     getConnectionsService,
+    startRepositoryCollaboration,
+    stopRepositoryCollaboration,
     getSelfOAuthCallbackService,
     getSidekickService,
     getSpeechToTextService,
@@ -478,12 +483,8 @@ export const registerMainLifecycle = (deps: MainLifecycleDeps) => {
   }).catch((error: unknown) => {
     void appendInstallLog('self_oauth_callback:start_failed', serializeErrorForInstallLog(error));
   });
-  await startupLogger.step('startup:connections:create', () => {
-    state.connectionsService = getConnectionsService();
-  });
-  await startupLogger.step('startup:connections:load', async () => {
-    await state.connectionsService?.load();
-  });
+  await startRepositoryConnections({ state, getConnectionsService, startRepositoryCollaboration, startupLogger, appendInstallLog });
+
   await startupLogger.step('startup:sidekick:start_if_paired', async () => {
     await startSidekickIfPaired?.();
   }).catch((error: unknown) => {
@@ -1590,5 +1591,5 @@ export const registerMainLifecycle = (deps: MainLifecycleDeps) => {
     console.error('Forger Desktop startup failed', error);
   }
 });
-registerGracefulShutdownHandlers({ app, state, runningApps, stopInstalledApp, terminateProcess, closeServer });
+registerGracefulShutdownHandlers({ app, state, runningApps, stopInstalledApp, terminateProcess, closeServer, stopRepositoryCollaboration });
 };

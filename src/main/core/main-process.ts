@@ -1,3 +1,4 @@
+import { createRepositoryCollaborationHooks } from '../repository-collaboration/composition';
 import { app, BrowserWindow, desktopCapturer, dialog, ipcMain, Notification, session, shell, type IpcMainInvokeEvent } from 'electron';
 import { createHash, createHmac, randomBytes } from 'node:crypto';
 import type { ChildProcessWithoutNullStreams } from 'node:child_process';
@@ -371,12 +372,7 @@ const failureDiagnostic = (error: unknown, fallbackCode: string): FailureDiagnos
   getMainUtilitiesController().failureDiagnostic(error, fallbackCode) as FailureDiagnosticFields;
 const emitInstallProgress = (appId: string, payload: InstallAppResult): void => getMainUtilitiesController().emitInstallProgress(appId, payload);
 const emitRuntimeStatus = (payload: RuntimeStatus): void => getMainUtilitiesController().emitRuntimeStatus(payload);
-const emitOfficialToolEvent = (payload: OfficialToolRuntimeEvent): void => {
-  if (!mainWindow || mainWindow.isDestroyed()) {
-    return;
-  }
-  mainWindow.webContents.send(IPC_CHANNELS.officialToolEvent, payload);
-};
+const emitOfficialToolEvent = (payload: OfficialToolRuntimeEvent): void => getMainUtilitiesController().emitOfficialToolEvent(payload);
 const buildChatRunIpcTracePayload = (run: ChatRun): Record<string, unknown> => getMainUtilitiesController().buildChatRunIpcTracePayload(run);
 const sanitizeRendererChatTrace = (input: RendererChatTraceEvent): Record<string, unknown> => getMainUtilitiesController().sanitizeRendererChatTrace(input);
 const emitChatRunUpdated = (payload: ChatRunEvent): void => getMainUtilitiesController().emitChatRunUpdated(payload);
@@ -1559,6 +1555,7 @@ const mainLifecycleState = {
 };
 
 registerMainLifecycle({
+  ...createRepositoryCollaborationHooks({ getForgerMetadataRoot, getConnectionsService, getCodexHome, getCodexRoot, getCodexAuthStatus, resolveCodexCliPath, chooseAgentRuntime, ensureRuntimeInstalled, getRuntimePathEntries }),
   AGENT_TOOL_DEFINITIONS, AppAgentConversationManager, AppAgentTaskManager, AppMcpManager, AutomationManager, WorkflowFeatureController, WorkflowManager, WorkflowAppActionRuntime,
   BrowserWindow, ChatOrchestrator, CloudDeviceManager, CloudIdentityStore, DesktopRuntimeBridge,
   DevCatalogService, FORGER_AGENT_CONTRACT_VERSION, FileLibrary, ForgerAccountStore, ForgerBackendClient,

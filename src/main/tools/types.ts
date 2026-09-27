@@ -1,3 +1,4 @@
+import type { WhatsAppLiveGroupMessage } from '../connections/modules/whatsapp/types';
 import type {
   CallOfficialToolInput,
   CallOfficialToolResult,
@@ -38,6 +39,7 @@ export interface InternalToolContext {
   selfOAuthCallbackService?: SelfOAuthCallbackServiceLike;
   appendLog?: (event: string, payload?: Record<string, unknown>) => Promise<void>;
   emitEvent?: (event: OfficialToolRuntimeEvent) => void;
+  onWhatsAppMessage?: (message: WhatsAppLiveGroupMessage) => Promise<void>;
 }
 
 export interface InternalToolModule {

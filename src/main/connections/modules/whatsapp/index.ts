@@ -307,6 +307,7 @@ const parseSendMessageInput = (input: unknown): WhatsAppSendMessageInput | null 
     chatId,
     text,
     ...(typeof input.replyToMessageRef === 'string' ? { replyToMessageRef: input.replyToMessageRef.trim() } : {}),
+    ...(typeof input.replyToMessageId === 'string' ? { replyToMessageId: input.replyToMessageId.trim() } : {}),
   };
 };
 
