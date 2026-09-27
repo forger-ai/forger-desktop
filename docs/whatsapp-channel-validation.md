@@ -64,6 +64,17 @@ The chat policy's existing internet field is exposed as **Allow web searches** a
 - Complete Electron suite: 2,262 tests pass, no skips, with 100% statements, branches, functions and lines. The final 173 focused runtime/admission/revocation tests also pass. TypeScript, repository ESLint and production renderer/Electron builds pass; coverage settings are unchanged.
 - Installed arm64 `0.5.19-pr163.4` passes native SQLite, effective web-permission and sandbox checks, WhatsApp import, all 460 production package dependencies and deep ad-hoc signature verification. The installed settings show the per-chat switch off and the existing general internet setting on. Bindings, aliases, participants, policy grants and shared-file selections match the pre-update backup; no existing conversation gains web access automatically.
 
+## Inline mention follow-up (2026-09-27)
+
+An explicit `@alias` invokes the agent at the beginning, middle or end of a supported message. Inline requests preserve the original text on both sides of the mention and retain the existing bounded context of the same chat. The first valid invocation selects one agent; a longer overlapping alias wins only at that same position. Prefix commands retain their previous ownership and correction rules.
+
+Specifications cover the owner's weather/clothing example, punctuation, case and Unicode, trailing and repeated mentions, overlapping aliases, emails/URLs, participant denial, inactive chats, forwarding, and deduplication. A transport-to-coordinator test proves that an outbound reply containing `@alias` cannot trigger a reply loop, including an early echo and a replay after restart; matching text from an actual participant remains a valid request. Service integration proves that the complete request reaches the agent with the originating chat's context.
+
+- Complete Electron suite: **2,312 tests pass**, zero skipped, with **100% statements, branches, functions and lines**. The first concurrent run hit an unrelated existing 25 ms MCP-test timeout; the final full run uses four test-file workers and passes unchanged thresholds.
+- The 50 focused renderer settings flows pass. TypeScript, repository ESLint and production renderer/Electron builds pass.
+
+- Installed arm64 `0.5.19-pr163.5` passes native SQLite, inline/prefix parser and command-boundary checks, reply formatting, web permission gates, WhatsApp import, all 460 production dependency checks and deep ad-hoc signature verification. The installed UI displays the updated invocation instructions. All five chat configuration tables match the pre-update backup and database integrity passes. No real WhatsApp message is sent by this follow-up.
+
 ## Release boundary
 
 Automated tests use synthetic transport/provider doubles and do not contact real recipients. Controlled self-chat tests confirm delivery, `@` invocation, reply formatting and connection recovery after the local update. Live group authorization and pause/resume still need their own controlled account checks. The local package is ad-hoc signed, not notarized or published; this change does not merge the PR or deploy to production. Codex and Claude support the isolated channel contract; Antigravity is rejected for this channel.

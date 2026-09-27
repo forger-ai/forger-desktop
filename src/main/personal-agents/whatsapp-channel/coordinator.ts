@@ -1,7 +1,7 @@
 import { participantCanInvoke } from './participant-access';
 import { WhatsAppAgentOutbox } from './outbox';
 import { randomUUID } from 'node:crypto';
-import { parseAgentWakeMessage } from './parser';
+import { findAgentWakeMessage, parseAgentWakeMessage } from './parser';
 import { WhatsAppAgentChannelStore } from './store';
 import type {
   WhatsAppAgentBindingKey,
@@ -75,7 +75,12 @@ export class WhatsAppAgentChannelCoordinator {
       return { status: 'ignored' };
     const chatIds = new Set([input.chatId, ...(input.chatIdentityIds ?? [])]);
     const matches = [...chatIds].flatMap((id) => this.store.listBindingsForChat(input.connectionId, id))
-      .filter((b) => parseAgentWakeMessage(messageText, b.alias)).sort((a, b) => b.alias.length - a.alias.length);
+      .flatMap(binding => {
+        const wake = findAgentWakeMessage(messageText, binding.alias);
+        return wake ? [{ binding, position: wake.position }] : [];
+      })
+      .sort((a, b) => a.position - b.position || b.binding.alias.length - a.binding.alias.length)
+      .map(({ binding }) => binding);
     const selected = matches.filter((b) => b.agentId === matches[0]?.agentId);
     const enabled = selected.filter((b) => b.enabled);
     // A phone identity and its linked identity are one conversation, never two executions.

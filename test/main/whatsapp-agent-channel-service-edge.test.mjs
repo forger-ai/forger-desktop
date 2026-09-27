@@ -499,3 +499,18 @@ test('concurrent counterpart configuration saves allow only one active chat', as
   assert.equal(results.filter(r => r.status === 'rejected').length, 1);
   assert.equal(f.service.listBindings().filter(b => b.enabled).length, 1);
 });
+
+test('an inline request reaches the agent intact together with only the selected chat context', async (t) => {
+  const f = await fixture(t);
+  await f.service.putBinding({ ...f.baseBinding, alias: 'Kupita' });
+  f.setHistory(async input => {
+    assert.equal(input.connectionId, f.key.connectionId);
+    assert.equal(input.input.chatId, f.key.chatId);
+    return { success: true, data: { messages: [{ stableMessageRef: 'previous', senderId: 'participant', text: 'Estoy en Santiago' }] } };
+  });
+  const text = 'revisa como está el clima, y luego @kupita dime que poleron ponerme';
+  await f.service.handleLiveMessage(f.inbound('inline', text));
+  assert.equal(f.starts.length, 1);
+  assert.ok(f.starts[0].content.includes(`Solicitud directa: ${text}`));
+  assert.match(f.starts[0].content, /Estoy en Santiago/);
+});

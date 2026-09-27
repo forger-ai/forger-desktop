@@ -783,7 +783,7 @@ test('mentions use the same exact alias and control boundaries as plain invocati
     assert.deepEqual(parseAgentWakeMessage(`${prefix} CORREGIR MI ÚLTIMA cambio`, 'Kupita'), { kind: 'correct-own', text: 'cambio' });
     assert.deepEqual(parseAgentWakeMessage(`${prefix} CORREGIR abc cambio`, 'Kupita'), { kind: 'correct', requestId: 'abc', text: 'cambio' });
   }
-  for (const text of ['@kupitabot hola', '@@kupita hola', 'hola @kupita', '@kupita', '@kupita.com hola'])
+  for (const text of ['@kupitabot hola', '@@kupita hola', '@kupita', '@kupita.com hola'])
     assert.equal(parseAgentWakeMessage(text, 'Kupita'), null);
 });
 
@@ -940,4 +940,38 @@ test('legacy participant policy is owner-only unless an explicit allowlist exist
   assert.equal(participantCanInvoke({ participantsAllowed: [] }, false, 'member'), false);
   assert.equal(participantCanInvoke({ participantsAllowed: ['member'] }, false, 'member'), true);
   assert.equal(participantCanInvoke({ participantAccess: 'all', participantsAllowed: [], chatId: 'direct@s.whatsapp.net' }, false, 'member'), false);
+});
+
+test('inline mentions preserve context and use the first addressed agent, one task per message', async () => {
+  const h = await harness({ readContext: async () => [{ stableMessageRef: 'prior', authorId: 'member', text: 'Estoy en Santiago' }] });
+  h.put({ alias: 'Kupita', enabled: true });
+  h.put({ agentId: 'agent-b', alias: 'Kupita Casa', enabled: true, conversationId: 'conversation-b' });
+  const text = 'revisa como está el clima, y luego @kupita dime que poleron ponerme; @Kupita Casa espera';
+  const result = await h.inbound(text, { stableMessageRef: 'inline-once' });
+  assert.equal(result.status, 'started');
+  assert.equal(result.agentId, 'agent-a');
+  assert.equal(h.calls.start[0].text, text);
+  assert.deepEqual(h.calls.start[0].context, [{ stableMessageRef: 'prior', authorId: 'member', text: 'Estoy en Santiago' }]);
+  assert.equal((await h.inbound(text, { stableMessageRef: 'inline-once' })).status, 'duplicate');
+  assert.equal(h.calls.start.length, 1);
+  assert.equal((await h.inbound('Revisa @Kupita Casa y luego @kupita')).agentId, 'agent-b');
+});
+
+test('inline mentions retain participant, pause, provenance and command safety checks', async () => {
+  const h = await harness();
+  h.put({ alias: 'Kupita', enabled: true });
+  assert.equal((await h.inbound('Revisa @kupita esto', { authorId: 'stranger', isFromMe: false })).status, 'unauthorized');
+  for (const override of [{ isForwarded: true }, { isLive: false }, { isAgentEcho: true }]) {
+    assert.equal((await h.inbound('Revisa @kupita esto', override)).status, 'ignored');
+  }
+  const own = await h.inbound('Revisa @kupita esto', { authorId: 'member', isFromMe: false });
+  assert.equal(own.status, 'started');
+  for (const suffix of ['OFF', 'ON', `CORREGIR ${own.turnId} cambio`, 'CORREGIR MI ÚLTIMA cambio']) {
+    assert.equal((await h.inbound(`Analiza @kupita ${suffix}`, { authorId: 'member', isFromMe: false })).status, 'queued');
+  }
+  assert.equal((await h.inbound('@kupita! OFF')).status, 'queued');
+  assert.equal(h.calls.cancel.length, 0);
+  assert.equal(h.store.getBinding('account', 'chat', 'agent-a').enabled, true);
+  assert.equal((await h.inbound('@kupita OFF')).status, 'disabled');
+  assert.equal((await h.inbound('Revisa @kupita esto')).status, 'inactive');
 });

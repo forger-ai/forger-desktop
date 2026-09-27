@@ -313,3 +313,51 @@ test('a stopped socket cannot activate an agent from an in-flight message', asyn
   );
   assert.deepEqual(received, []);
 });
+
+test('agent replies containing inline mentions never loop, while a human using the robot header remains a valid invocation', async (t) => {
+  const { WhatsAppAgentChannelStore, WhatsAppAgentChannelCoordinator } = require('../../dist-electron/main/personal-agents/whatsapp-channel/index.js');
+  const { openPersonalAgentSqliteDatabase } = require('../../dist-electron/main/personal-agents/sqlite.js');
+  const { encodeStableMessageRef } = require('../../dist-electron/main/connections/modules/whatsapp/normalizer.js');
+  const root = await mkdtemp(join(tmpdir(), 'forger-whatsapp-inline-echo-'));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const db = openPersonalAgentSqliteDatabase(join(root, 'channel.sqlite'));
+  t.after(() => db.close());
+  const channels = new WhatsAppAgentChannelStore(db);
+  const chatId = '56912345678@s.whatsapp.net';
+  channels.putBinding({ connectionId: 'account', chatId, agentId: 'agent', alias: 'Kupita', ownerId: 'owner', enabled: true,
+    purpose: 'Help', scope: '', participantsAllowed: [chatId], conversationId: 'conversation' });
+  const starts = [];
+  const coordinator = new WhatsAppAgentChannelCoordinator(channels, {
+    startRun: async input => { starts.push(input); return { runId: input.runId }; },
+    cancelRun: async () => {}, sendReply: async () => ({ sent: true }),
+  });
+  t.after(() => coordinator.close());
+  const received = [];
+  const localStore = new WhatsAppLocalStore(root);
+  const onLiveMessage = async message => {
+    received.push(message.stableMessageRef.id);
+    await coordinator.handleInbound({ connectionId: 'account', chatId: message.chatId, stableMessageRef: encodeStableMessageRef(message.stableMessageRef),
+      authorId: message.senderId, text: message.text, isLive: true, isFromMe: message.fromMe, isForwarded: false, isQuoted: false, isAgentEcho: false });
+  };
+  const manager = new WhatsAppConnectionManager(localStore, { onLiveMessage });
+  const text = '🤖 Kupita: \nPuedes pedirlo así: @kupita revisa el clima';
+  const echo = { ...incoming('BOT-ECHO', text), key: { remoteJid: chatId, id: 'BOT-ECHO', fromMe: true } };
+  await manager.ingestMessages([incoming('HISTORY', 'previous')]);
+  let pendingEcho;
+  manager.socket = { sendMessage: async () => {
+    pendingEcho = manager.ingestUpsert({ type: 'notify', messages: [echo] });
+    return echo;
+  } };
+  await manager.sendMessage({ metadataRoot: root }, { chatId, text });
+  await pendingEcho;
+  assert.equal(starts.length, 0);
+  const restarted = new WhatsAppConnectionManager(new WhatsAppLocalStore(root), { onLiveMessage });
+  await restarted.ingestUpsert({ type: 'notify', messages: [echo] });
+  assert.equal(starts.length, 0);
+  await restarted.ingestUpsert({ type: 'notify', messages: [incoming('HUMAN', text)] });
+  assert.equal(starts.length, 1);
+  assert.equal(starts[0].text, text);
+  await restarted.ingestUpsert({ type: 'notify', messages: [{ ...incoming('OWNER', text), key: { remoteJid: chatId, id: 'OWNER', fromMe: true } }] });
+  assert.deepEqual(received, ['HUMAN', 'OWNER']);
+  assert.equal(channels.listActivity().length, 2);
+});
