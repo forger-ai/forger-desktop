@@ -50,7 +50,25 @@ export function AgentWhatsAppPanel({ agentId, agentName, agentNetworkAccess = fa
   const updatePolicy = (policy: PersonalAgentWhatsAppChannelPolicy) => updateDraft((current) => ({ ...current, policy }));
   const [activity, setActivity] = useState<WhatsAppAgentBinding | null>(null);
   const [reviewOpen, setReviewOpen] = useState(false);
-  const [removeOpen, setRemoveOpen] = useState(false);
+  const [removeTarget, setRemoveTarget] = useState<{ binding: WhatsAppAgentBinding; title: string; account: string } | null>(null);
+  const [removeError, setRemoveError] = useState('');
+  const requestRemove = (binding: WhatsAppAgentBinding) => {
+    const account = connections.find((item) => item.id === binding.connectionId);
+    setRemoveError('');
+    setRemoveTarget({
+      binding,
+      title: `${binding.alias} · ${chatTitle(binding.connectionId, binding.chatId)}`,
+      account: account ? account.label || account.accountIdentity?.phoneNumber || c.account : c.connectionMissing,
+    });
+  };
+  const confirmRemove = async (binding: WhatsAppAgentBinding) => {
+    setRemoveError('');
+    try {
+      if (await remove(binding)) setRemoveTarget(null);
+    } catch {
+      setRemoveError(c.deleteFailed);
+    }
+  };
   const aliasAffected = bindings.filter((item) => item.connectionId === draft.connectionId && item.alias !== draft.alias.trim());
   const requestSave = () => {
     if (draft.participantAccess === 'selected' && !draft.participantsAllowed.length) { void save(); return; }
@@ -86,21 +104,24 @@ export function AgentWhatsAppPanel({ agentId, agentName, agentNetworkAccess = fa
             const delivery = deliveries[`${binding.connectionId}:${binding.chatId}:${binding.agentId}`];
             return (
               <Paper key={`${binding.connectionId}:${binding.chatId}`} variant="outlined" sx={{ p: 1.5, borderRadius: 1 }}>
-                <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1} alignItems={{ sm: 'center' }}>
-                  <Box sx={{ flex: 1, minWidth: 0 }}>
+                <Stack direction="row" useFlexGap flexWrap="wrap" spacing={1} alignItems="center">
+                  <Box sx={{ flex: '1 1 220px', minWidth: 0 }}>
                     <Typography variant="subtitle2" sx={{ overflowWrap: 'anywhere' }}>{binding.alias} · {chatTitle(binding.connectionId, binding.chatId)}</Typography>
                     <Typography variant="caption" color="text.secondary">{account?.label ?? c.connectionMissing}</Typography>
                     <Typography variant="caption" display="block" color="text.secondary">{c[participantAccess(binding)]}</Typography>
                     <Typography variant="caption" display="block" color="text.secondary">{webAccessSummary(c, Boolean(binding.policy?.networkAccess), agentNetworkAccess)}</Typography>
                   </Box>
-                  <Chip size="small" color={binding.enabled && account?.status === 'connected' ? 'success' : 'default'} label={!binding.enabled ? c.inactive : account?.status === 'connected' ? c.active : c.disconnected} />
-                  {binding.activeTurnId ? <Chip size="small" color="info" label={c.working} /> : null}
-                  {needsReview ? <Chip size="small" color="warning" label={c.review} /> : null}
-                  {delivery ? <Chip size="small" color={delivery.state === 'sent' ? 'success' : delivery.state === 'failed' ? 'error' : 'warning'} label={delivery.state === 'sent' ? c.sent : delivery.state === 'failed' ? c.deliveryFailed : c.deliveryUnknown} /> : null}
-                  {account?.status !== 'connected' && onOpenConnections ? <Button size="small" onClick={onOpenConnections}>{c.reconnect}</Button> : null}
-                  <Button size="small" onClick={() => setActivity(binding)}>{c.activity}</Button>
-                  {binding.enabled ? <Button size="small" disabled={busy} onClick={() => void pause(binding)}>{c.pause}</Button> : null}
-                  <Button size="small" onClick={() => beginEdit(binding)}>{c.edit}</Button>
+                  <Stack direction="row" useFlexGap flexWrap="wrap" spacing={1} alignItems="center" sx={{ justifyContent: { sm: 'flex-end' }, maxWidth: '100%' }}>
+                    <Chip size="small" color={binding.enabled && account?.status === 'connected' ? 'success' : 'default'} label={!binding.enabled ? c.inactive : account?.status === 'connected' ? c.active : c.disconnected} />
+                    {binding.activeTurnId ? <Chip size="small" color="info" label={c.working} /> : null}
+                    {needsReview ? <Chip size="small" color="warning" label={c.review} /> : null}
+                    {delivery ? <Chip size="small" color={delivery.state === 'sent' ? 'success' : delivery.state === 'failed' ? 'error' : 'warning'} label={delivery.state === 'sent' ? c.sent : delivery.state === 'failed' ? c.deliveryFailed : c.deliveryUnknown} /> : null}
+                    {account?.status !== 'connected' && onOpenConnections ? <Button size="small" onClick={onOpenConnections}>{c.reconnect}</Button> : null}
+                    <Button size="small" onClick={() => setActivity(binding)}>{c.activity}</Button>
+                    {binding.enabled ? <Button size="small" disabled={busy} onClick={() => void pause(binding)}>{c.pause}</Button> : null}
+                    <Button size="small" disabled={busy} onClick={() => beginEdit(binding)}>{c.edit}</Button>
+                    <Button size="small" color="error" startIcon={<DeleteOutlineRounded />} disabled={busy} onClick={() => requestRemove(binding)}>{c.delete}</Button>
+                  </Stack>
                 </Stack>
               </Paper>
             );
@@ -208,13 +229,22 @@ export function AgentWhatsAppPanel({ agentId, agentName, agentNetworkAccess = fa
       <Alert severity="info">{c.commands(draft.alias.trim() || c.alias)}</Alert>
       <Stack direction="row" spacing={1}>
         <Button variant="contained" disabled={busy || (Boolean(editing) && !editedAccountAvailable)} onClick={requestSave}>{c.save}</Button>
-        {editing ? <Button color="error" startIcon={<DeleteOutlineRounded />} disabled={busy} onClick={() => setRemoveOpen(true)}>{c.delete}</Button> : null}
+        {editing ? <Button color="error" startIcon={<DeleteOutlineRounded />} disabled={busy} onClick={() => requestRemove(editing)}>{c.delete}</Button> : null}
       </Stack>
       {activity ? <ActivityDialog binding={activity} c={c} onClose={() => setActivity(null)} onOpenConversation={onOpenConversation} /> : null}
-      <Dialog open={removeOpen} onClose={() => setRemoveOpen(false)}>
-        <DialogTitle>{c.delete}</DialogTitle><DialogContent>{c.removeConfirm}</DialogContent>
-        <DialogActions><Button onClick={() => setRemoveOpen(false)}>{c.cancel}</Button><Button color="error" onClick={() => { setRemoveOpen(false); void remove(); }}>{c.delete}</Button></DialogActions>
-      </Dialog>
+      {removeTarget ? <Dialog open={removeTarget.binding.agentId === agentId} onClose={() => { if (!busy) setRemoveTarget(null); }} aria-labelledby="remove-chat-title" aria-describedby="remove-chat-description" fullWidth maxWidth="sm">
+        <DialogTitle id="remove-chat-title">{c.delete}</DialogTitle>
+        <DialogContent><Stack spacing={1}>
+          <Typography variant="subtitle2" sx={{ overflowWrap: 'anywhere' }}>{removeTarget.title}</Typography>
+          <Typography variant="body2" color="text.secondary" sx={{ overflowWrap: 'anywhere' }}>{removeTarget.account}</Typography>
+          <Typography id="remove-chat-description">{c.removeConfirm}</Typography>
+          {removeError ? <Alert severity="error">{removeError}</Alert> : null}
+        </Stack></DialogContent>
+        <DialogActions>
+          <Button disabled={busy} onClick={() => setRemoveTarget(null)}>{c.cancel}</Button>
+          <Button color="error" disabled={busy} onClick={() => void confirmRemove(removeTarget.binding)}>{busy ? c.removing : c.delete}</Button>
+        </DialogActions>
+      </Dialog> : null}
       <Dialog open={reviewOpen} onClose={() => setReviewOpen(false)} fullWidth>
         <DialogTitle>{c.reviewSave}</DialogTitle><DialogContent><Stack spacing={1}>
           <Typography>{connections.find((item) => item.id === draft.connectionId)?.label} · {selectedChat?.title ?? draft.chatId}</Typography>
