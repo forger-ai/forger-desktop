@@ -622,6 +622,36 @@ describe('RendererAppView orchestration', () => {
     expect(controller.setBannerMessage).toHaveBeenCalledWith(t.localNetwork.copied);
   });
 
+  it.each(['onContinue', 'onSkip'] as const)('waits for welcome choice persistence before routing %s', async (action) => {
+    const originalBridge = Object.getOwnPropertyDescriptor(window, 'forger');
+    const initial = { available: true, consent: 'undecided', campaignCode: null, attributionLocked: false, newProfile: true };
+    let finishSave!: (value: unknown) => void;
+    const save = vi.fn(() => new Promise((resolve) => { finishSave = resolve; }));
+    Object.defineProperty(window, 'forger', { configurable: true, value: {
+      initializeCampaignMeasurement: vi.fn(async () => initial),
+      getCampaignMeasurementStatus: vi.fn(async () => initial),
+      setCampaignMeasurementConsent: save,
+    } });
+    state.tour.continueTour.mockClear(); state.tour.skipTour.mockClear();
+    state.tour.activeStep = 'welcome'; state.tour.isWelcomeStep = true;
+    const { controller } = createController();
+    const view = render(<RendererAppView controller={controller} />);
+    try {
+      await waitFor(() => expect(state.captures.TourOverlay.actionsDisabled).toBe(false));
+      act(() => { state.captures.TourOverlay[action](); state.captures.TourOverlay[action](); });
+      expect(save).toHaveBeenCalledExactlyOnceWith({ enabled: true });
+      expect(state.tour.continueTour).not.toHaveBeenCalled();
+      expect(state.tour.skipTour).not.toHaveBeenCalled();
+      expect(state.captures.TourOverlay.actionsDisabled).toBe(true);
+      await act(async () => finishSave({ ...initial, consent: 'enabled' }));
+      expect(action === 'onContinue' ? state.tour.continueTour : state.tour.skipTour).toHaveBeenCalledOnce();
+    } finally {
+      view.unmount();
+      if (originalBridge) Object.defineProperty(window, 'forger', originalBridge);
+      else Reflect.deleteProperty(window, 'forger');
+    }
+  });
+
   it('renders onboarding variants, legal links, provider setup, and settings handoffs', async () => {
     state.tour.activeStep = 'welcome';
     state.tour.isWelcomeStep = true;
@@ -632,7 +662,8 @@ describe('RendererAppView orchestration', () => {
     await userEvent.click(screen.getByRole('link', { name: t.onboarding.steps.welcome.privacyLink }));
     expect(api.openExternalUrl).toHaveBeenCalledWith('https://forger.cloud/es/terms');
     expect(screen.queryByRole('switch')).not.toBeInTheDocument();
-    expect(screen.getByRole('heading', { name: 'Medición opcional' })).toBeVisible();
+    expect(screen.getByRole('checkbox', { name: 'Compartir datos de uso sin información privada' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Ver más…' })).toBeVisible();
     expect(state.tour.setWelcomeUsageAnalyticsEnabled).not.toHaveBeenCalled();
 
     controller.activeLocale = 'en';

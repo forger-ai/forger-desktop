@@ -1,6 +1,6 @@
 # Optional campaign measurement
 
-Forger asks for separate, explicit permission before sending campaign measurements to the dedicated Forger project in PostHog US Cloud. The default is off. Downloading, onboarding, creating apps, and using Forger do not require permission. An older usage-analytics preference and consent on the website do not authorize this recipient.
+Forger sends campaign measurements to the dedicated Forger project in PostHog US Cloud only after the person confirms a sharing choice. The welcome screen shows a preselected “Share usage data without private information” checkbox for an undecided profile in a supported production build. The checkbox is a draft: opening the welcome screen, changing the checkbox, or expanding “Learn more…” does not grant permission or send measurements. Starting or skipping the tour saves the displayed choice before leaving the welcome screen. Downloading, onboarding, creating apps, and using Forger do not require sharing. An older usage-analytics preference and consent on the website do not authorize this recipient.
 
 ## Ownership and boundaries
 
@@ -10,7 +10,9 @@ Forger asks for separate, explicit permission before sending campaign measuremen
 - `src/main/ipc/campaign-measurement-handlers.ts` permits only the main frame of the primary Desktop window. Installed-app frames, friend-chat windows, other frames, absent frames, and arbitrary payload fields cannot grant consent or emit milestones.
 - Preload exposes narrow typed operations. The renderer cannot supply an identifier, event payload, endpoint, or arbitrary event name.
 - `src/renderer/campaign-measurement.ts` captures preexisting-profile evidence before startup can create legal or onboarding markers. The main process independently checks the installed-app registry. Missing or unreadable evidence is handled conservatively.
-- The MUI panel is available in Welcome and Settings → Privacy & security → Optional measurement. A valid campaign link opens a separate optional dialog; it does not change consent.
+- Welcome uses a compact MUI checkbox and an accessible “Learn more…” disclosure. The disclosure explains the recipient, measured milestones, excluded content, eligibility, and withdrawal. It does not ask the person for a campaign code. The full panel remains available in Settings → Privacy & security → Optional measurement. A valid campaign link opens a separate optional dialog; it does not change consent.
+
+The welcome checkbox reflects saved enabled or disabled preferences when the tour is reopened. Confirming an unchanged saved preference does not write it again. Actions wait for a pending save and ignore duplicate clicks. If saving fails, the welcome screen preserves the draft and displays an error so the person can retry or choose “Continue without saving.” That fallback does not claim that the displayed preference was saved or that sharing is disabled. A retry writes the choice again even if it matches the status from before the failed save. When capture is unavailable, the checkbox is unchecked and disabled, the build explanation appears in the disclosure, and the welcome actions continue without granting permission.
 
 Capture is enabled only in a packaged production build, never in development, unpackaged builds, `NODE_ENV=test`, or an isolated E2E profile. Tests use explicit service options and mocked transports; a deliberately authorized receiver test uses `environment: test` and disposable synthetic state.
 
@@ -30,7 +32,7 @@ The old usage collector is inert in both renderer and main IPC. Compatibility ex
 
 `forger://campaign?code=<known-code>` accepts only the strict campaign shape and the ten codes declared in `src/shared/campaign-measurement.ts`. Pages owns the matching public UTM-to-code registry in its separate repository. The shared code list must stay synchronized across both repositories.
 
-The link carries no browser identifier or permission. It does not provide deferred attribution from a downloaded installer. Users can enter the public code manually before allowing measurement. Unknown, malformed, duplicated, or extra parameters do not grant permission or become free-form telemetry.
+The link carries no browser identifier or permission. It does not provide deferred attribution from a downloaded installer. Users can enter the public code manually in the full measurement panel before allowing measurement. The welcome screen does not require or display a code. Unknown, malformed, duplicated, or extra parameters do not grant permission or become free-form telemetry.
 
 Attribution and the entire payload freeze when an event is queued, before its first send attempt. A timeout can occur after server receipt, so retries keep the same UUID, timestamp, version, platform, environment and campaign. Later links cannot rewrite earlier events.
 
@@ -46,7 +48,7 @@ PostHog necessarily processes a network request. The dedicated project discards 
 
 ## Verification and reporting
 
-Behavioral tests cover fresh/existing/unknown cohorts, refusal, withdrawal and disk failure, pre-consent creation, restarts, stable retry payloads, bounds and expiry, malicious IPC senders, strict links, owner lifecycle and renderer composition. Real Electron smoke uses an isolated profile and verifies visible choices, handoff, Settings access and disabled test-build capture without using an installed user profile.
+Behavioral tests cover fresh/existing/unknown cohorts, refusal, withdrawal and disk failure, pre-consent creation, restarts, stable retry payloads, bounds and expiry, malicious IPC senders, strict links, owner lifecycle and renderer composition. Welcome tests cover the draft checkbox, disclosure, saved preferences, confirmation through both actions, persistence errors, and unavailable builds. Real Electron smoke uses an isolated profile and verifies the compact welcome, visible actions, disclosure, handoff, Settings access and disabled test-build capture without using an installed user profile.
 
 Receiver verification sends only expressly authorized synthetic events. Campaign dashboards require `environment: production`; QA dashboards require `environment: test`. Web and Desktop identifiers are separate, so no cross-device person-level funnel is claimed. Download-button clicks and requests to open the protocol are not completed downloads or installations.
 
