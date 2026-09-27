@@ -1555,7 +1555,7 @@ const mainLifecycleState = {
 };
 
 registerMainLifecycle({
-  ...createRepositoryCollaborationHooks({ getForgerMetadataRoot, getConnectionsService, getCodexHome, getCodexRoot, getCodexAuthStatus, resolveCodexCliPath, chooseAgentRuntime, ensureRuntimeInstalled, getRuntimePathEntries }),
+  ...createRepositoryCollaborationHooks({ getForgerMetadataRoot, getConnectionsService, getCodexHome, getCodexRoot, getCodexAuthStatus, resolveCodexCliPath, chooseAgentRuntime, ensureRuntimeInstalled, getRuntimePathEntries, getRuntimesRoot, resolvePlatformAlias }),
   AGENT_TOOL_DEFINITIONS, AppAgentConversationManager, AppAgentTaskManager, AppMcpManager, AutomationManager, WorkflowFeatureController, WorkflowManager, WorkflowAppActionRuntime,
   BrowserWindow, ChatOrchestrator, CloudDeviceManager, CloudIdentityStore, DesktopRuntimeBridge,
   DevCatalogService, FORGER_AGENT_CONTRACT_VERSION, FileLibrary, ForgerAccountStore, ForgerBackendClient,

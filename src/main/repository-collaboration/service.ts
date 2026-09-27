@@ -81,16 +81,20 @@ export class RepositoryCollaborationService {
     this.started = false;
     clearInterval(this.timer);
     for (const [taskId, running] of this.active) {
-      this.store.updateTask(
-        taskId,
-        {
-          status: 'needs_attention',
-          errorCode: 'interrupted',
-          result:
-            'La ejecución se interrumpió. Revisa los cambios antes de reintentar.',
-        },
-        this.now(),
-      );
+      // Reservations can still be waiting for membership or repository preflight.
+      // Only a run that actually started has ambiguous execution state.
+      if (this.store.task(taskId)?.status === 'running') {
+        this.store.updateTask(
+          taskId,
+          {
+            status: 'needs_attention',
+            errorCode: 'interrupted',
+            result:
+              'La ejecución se interrumpió. Revisa los cambios antes de reintentar.',
+          },
+          this.now(),
+        );
+      }
       running.controller.abort();
     }
     await this.intake;
@@ -275,8 +279,11 @@ export class RepositoryCollaborationService {
         this.store.updateOutput(output.id, 'suppressed');
     }
   }
-  private cancel(task: RepositoryCollaborationTask): void {
-    if (task.status !== 'queued' && task.status !== 'running') return;
+  private cancel(snapshot: RepositoryCollaborationTask): void {
+    const task = this.store.task(snapshot.id);
+    // Membership lookups can finish after a task completes or shutdown interrupts it.
+    if (!task || (task.status !== 'queued' && task.status !== 'running'))
+      return;
     this.store.updateTask(
       task.id,
       {
@@ -475,7 +482,11 @@ export class RepositoryCollaborationService {
       return;
     }
     if (selection.repositoryIds.length > 10) {
-      this.output(group, message.senderId, 'Selecciona hasta diez proyectos por tarea. / Select at most ten projects per task.');
+      this.output(
+        group,
+        message.senderId,
+        'Selecciona hasta diez proyectos por tarea. / Select at most ten projects per task.',
+      );
       return;
     }
     if (
@@ -725,11 +736,16 @@ export class RepositoryCollaborationService {
     return this.outputFlush;
   }
   private async deliverOutbox(): Promise<void> {
+    const failedDestinations = new Set<string>();
     for (const output of this.store
       .outbox()
       .filter((output) => output.status === 'pending')) {
       if (!this.started) break;
       const group = this.store.group(output.groupId);
+      const destination = group
+        ? JSON.stringify([group.connectionId, group.chatId])
+        : output.groupId;
+      if (failedDestinations.has(destination)) continue;
       const task = output.taskId ? this.store.task(output.taskId) : undefined;
       if (
         !group?.enabled ||
@@ -841,7 +857,8 @@ export class RepositoryCollaborationService {
         this.store.updateOutput(output.id, 'sent', response.messageId);
       } catch {
         this.store.updateOutput(output.id, 'pending');
-        break;
+        // Preserve order within this chat while allowing other destinations to progress.
+        failedDestinations.add(destination);
       }
     }
   }

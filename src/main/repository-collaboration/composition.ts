@@ -2,7 +2,11 @@ import type { ConnectionsService } from '../connections-service';
 import type { MainLifecycleDeps } from '../core/main-lifecycle';
 import type { MainLifecycleState } from '../core/main-lifecycle-types';
 import type { StartupLogger } from '../core/startup-loading';
-import { DEFAULT_NODE_VERSION } from '../core/agent-runtime-defaults';
+import path from 'node:path';
+import {
+  BUNDLED_GIT_VERSION,
+  DEFAULT_NODE_VERSION,
+} from '../core/agent-runtime-defaults';
 import type { CodexReasoningEffort } from '../../shared/types';
 import {
   startRepositoryCollaborationRuntime,
@@ -16,10 +20,12 @@ type RuntimeDependencies = Pick<
   | 'chooseAgentRuntime'
   | 'ensureRuntimeInstalled'
   | 'getRuntimePathEntries'
+  | 'getRuntimesRoot'
 > & {
   getConnectionsService: () => ConnectionsService;
   getCodexHome: () => string;
   getCodexRoot: () => string;
+  resolvePlatformAlias: () => string;
   resolveCodexCliPath: (root: string) => Promise<string | null>;
 };
 
@@ -57,6 +63,12 @@ export function createRepositoryCollaborationHooks(deps: RuntimeDependencies) {
           return {
             cliPath,
             pathEntries: deps.getRuntimePathEntries(node),
+            gitRoot: path.join(
+              deps.getRuntimesRoot(),
+              'git',
+              BUNDLED_GIT_VERSION,
+              deps.resolvePlatformAlias(),
+            ),
             model: runtime.model,
             effort: runtime.effort as CodexReasoningEffort,
             authenticated: true,

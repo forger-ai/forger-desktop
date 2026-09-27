@@ -14,6 +14,8 @@ export const esRepositoryCollaboration = {
   loadError: 'No pudimos cargar los proyectos compartidos. Intenta nuevamente.',
   actionError:
     'No pudimos completar el cambio. Actualiza y revisa la conexión y los permisos.',
+  invalidRepository:
+    'Elige la carpeta raíz de un clon Git normal, con su propia carpeta .git. Los worktrees con metadatos externos no son compatibles.',
   participantError:
     'No pudimos consultar los participantes actuales. Actualiza antes de conceder acceso.',
   unavailable: 'Conecta esta cuenta de WhatsApp para consultar sus grupos.',
@@ -94,6 +96,8 @@ export const enRepositoryCollaboration: typeof esRepositoryCollaboration = {
   loadError: 'Could not load shared projects. Try again.',
   actionError:
     'Could not complete the change. Refresh and check the connection and permissions.',
+  invalidRepository:
+    'Choose the root folder of a regular Git clone with its own .git directory. Worktrees with external metadata are not supported.',
   participantError:
     'Could not check current participants. Refresh before granting access.',
   unavailable: 'Connect this WhatsApp account to check its groups.',

@@ -99,10 +99,8 @@ test('Given observed chats, manager commands validate, send, read, describe, pai
   store.canSend = true;
   manager.ensureStarted = async () => undefined;
   manager.socket = { sendMessage: async () => undefined };
-  const sentWithoutPayload = await manager.sendMessage(context, { chatId, text: ' hello ' });
-  assert.equal(sentWithoutPayload.sent, true);
-  assert.ok(Number.isInteger(sentWithoutPayload.timestamp));
-  assert.ok(Math.abs(sentWithoutPayload.timestamp - Math.floor(Date.now() / 1000)) <= 1);
+  await assert.rejects(() => manager.sendMessage(context, { chatId, text: ' hello ' }), /whatsapp_send_unavailable/);
+  assert.equal(store.rememberSendCount, 0);
   let quotedOptions;
   manager.socket = { sendMessage: async (_chatId, _content, options) => { quotedOptions = options; return sentRawMessage('M2'); } };
   const sent = await manager.sendMessage(context, {
@@ -112,12 +110,15 @@ test('Given observed chats, manager commands validate, send, read, describe, pai
   });
   assert.deepEqual(quotedOptions, { quoted: { key: { remoteJid: chatId, id: 'quoted', fromMe: false } } });
   assert.equal(sent.stableMessageRef, 'encoded:M2');
+  assert.ok(Number.isInteger(sent.timestamp));
+  assert.ok(Math.abs(sent.timestamp - Math.floor(Date.now() / 1000)) <= 1);
   assert.equal(store.upsertedMessages.at(-1).stableMessageRef.id, 'M2');
-  assert.equal(store.rememberSendCount, 2);
+  assert.equal(store.rememberSendCount, 1);
   manager.socket = {};
-  assert.equal((await manager.sendMessage(context, { chatId, text: 'without method' })).sent, true);
+  await assert.rejects(() => manager.sendMessage(context, { chatId, text: 'without method' }), /whatsapp_send_unavailable/);
   manager.socket = null;
-  assert.equal((await manager.sendMessage(context, { chatId, text: 'without socket' })).sent, true);
+  await assert.rejects(() => manager.sendMessage(context, { chatId, text: 'without socket' }), /whatsapp_send_unavailable/);
+  assert.equal(store.rememberSendCount, 1);
 
   assert.equal((await manager.getChatDetails(context, { chatId: '' })).technicalCode, 'whatsapp_chat_not_observed');
   assert.equal((await manager.getChatDetails(context, { chatId: '56999999999' })).technicalCode, 'whatsapp_chat_not_observed');
@@ -539,7 +540,7 @@ test('Given filesystem edge cases, auth discovery, serialization, permission fai
   manager.lastDisconnectReason = 'closed';
   manager.needsReconnect = true;
   const status = await manager.status();
-  assert.equal(status.phoneNumber, '569123456781');
+  assert.equal(status.phoneNumber, '56912345678');
   assert.equal(status.lastDisconnectReason, 'closed');
   assert.equal(status.needsReconnect, true);
 

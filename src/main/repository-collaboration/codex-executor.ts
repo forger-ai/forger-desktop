@@ -55,7 +55,6 @@ function permissionEntries(
   const entries: Record<string, string> = {
     ':root': 'deny',
     ':minimal': 'read',
-    ':tmpdir': 'deny',
     ':slash_tmp': 'deny',
   };
   for (const root of runtimeRoots) entries[root] = 'read';
@@ -65,6 +64,8 @@ function permissionEntries(
     entries[path.join(root, '.codex')] = 'deny';
   }
   entries[tempRoot] = 'write';
+  // :minimal supplies a HOME read rule; override it only for this task's synthetic home.
+  entries[path.join(tempRoot, 'home')] = 'write';
   entries[codexHome] = 'deny';
   return entries;
 }
@@ -129,12 +130,85 @@ interface ExecutorOptions {
   resolveRuntime: () => Promise<{
     cliPath: string;
     pathEntries: string[];
+    gitRoot?: string;
     model: string;
     effort: CodexReasoningEffort;
     authenticated: boolean;
   }>;
   runProcess?: typeof runRepositoryProcess;
+  resolveDeveloperTools?: typeof resolveRepositoryDeveloperTools;
   platform?: NodeJS.Platform;
+}
+
+export async function resolveRepositoryDeveloperTools(input: {
+  cwd: string;
+  env: NodeJS.ProcessEnv;
+  signal?: AbortSignal;
+  gitRoot?: string;
+}): Promise<{
+  pathEntries: string[];
+  readRoots: string[];
+  environment: Record<string, string>;
+}> {
+  if (
+    input.gitRoot &&
+    (await fs
+      .stat(path.join(input.gitRoot, 'bin', 'git'))
+      .then((entry) => entry.isFile())
+      .catch(() => false))
+  ) {
+    return repositoryGitRuntime(input.gitRoot, false);
+  }
+  const result = await runRepositoryProcess(
+    '/usr/bin/xcode-select',
+    ['--print-path'],
+    {
+      ...input,
+      timeoutMs: 5000,
+      maxOutputBytes: 4096,
+    },
+  );
+  if (result.code !== 0)
+    throw new Error('repository_execution_runtime_missing');
+  const selected = result.stdout.trim();
+  if (!path.isAbsolute(selected))
+    throw new Error('repository_execution_runtime_missing');
+  return repositoryGitRuntime(selected, true);
+}
+
+async function repositoryGitRuntime(
+  selected: string,
+  developerTools: boolean,
+): Promise<{
+  pathEntries: string[];
+  readRoots: string[];
+  environment: Record<string, string>;
+}> {
+  const root = await fs.realpath(selected);
+  if (
+    root === path.parse(root).root ||
+    inside(await fs.realpath(os.homedir()), root)
+  ) {
+    throw new Error('repository_execution_runtime_unsupported');
+  }
+  const prefix = developerTools ? path.join(root, 'usr') : root;
+  const bin = await fs.realpath(path.join(prefix, 'bin'));
+  const git = await fs.realpath(path.join(bin, 'git'));
+  if (
+    !inside(bin, root) ||
+    !inside(git, root) ||
+    !(await fs.stat(git)).isFile()
+  ) {
+    throw new Error('repository_execution_runtime_unsupported');
+  }
+  return {
+    pathEntries: [bin],
+    readRoots: [root],
+    environment: {
+      GIT_EXEC_PATH: path.join(prefix, 'libexec', 'git-core'),
+      GIT_TEMPLATE_DIR: path.join(prefix, 'share', 'git-core', 'templates'),
+    },
+  };
 }
 
 interface Session {
@@ -224,15 +298,26 @@ export class RepositoryCodexExecutor implements RepositoryExecutor {
       runtime.cliPath,
       runtime.pathEntries,
     );
-    const runtimeRoots = await Promise.all(
+    const executablePaths = await Promise.all(
       command.pathEntries.map((entry) => fs.realpath(entry)),
     );
-    const env = buildRepositoryEnvironment({
+    let env = buildRepositoryEnvironment({
       home,
       codexHome,
       tempRoot,
-      pathEntries: runtimeRoots,
+      pathEntries: executablePaths,
     });
+    const developerTools = await (
+      this.options.resolveDeveloperTools ?? resolveRepositoryDeveloperTools
+    )({ cwd: tempRoot, env, signal: input.signal, gitRoot: runtime.gitRoot });
+    const runtimeRoots = [...executablePaths, ...developerTools.readRoots];
+    env = buildRepositoryEnvironment({
+      home,
+      codexHome,
+      tempRoot,
+      pathEntries: [...developerTools.pathEntries, ...executablePaths],
+    });
+    Object.assign(env, developerTools.environment);
     const run = this.options.runProcess ?? runRepositoryProcess;
     const version = await run(
       command.command,

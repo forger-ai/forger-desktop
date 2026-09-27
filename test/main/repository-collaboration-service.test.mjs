@@ -1,7 +1,13 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createRequire } from 'node:module';
-import { mkdtempSync, mkdirSync, renameSync, symlinkSync, writeFileSync } from 'node:fs';
+import {
+  mkdtempSync,
+  mkdirSync,
+  renameSync,
+  symlinkSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir, homedir } from 'node:os';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
@@ -649,5 +655,137 @@ test('project registration rejects symlinks, external Git metadata, and broad ro
     }),
   );
   assert.equal(f.store.repositories(f.group.id).length, 1);
+  await f.close();
+});
+
+test('a delayed membership refresh cannot cancel work that already completed', async (context) => {
+  context.mock.timers.enable({ apis: ['setInterval'] });
+  let finish;
+  const f = await setup(
+    () =>
+      new Promise((resolve) => {
+        finish = resolve;
+      }),
+  );
+  await f.service.handleMessage(f.message());
+  await f.settle();
+  await f.service.flushOutbox();
+  const task = f.store.tasks()[0];
+  const roster = f.transport.listParticipants;
+  let blockNext = true;
+  let releaseMembership;
+  f.transport.listParticipants = async (...args) => {
+    if (blockNext) {
+      blockNext = false;
+      return new Promise((resolve) => {
+        releaseMembership = resolve;
+      });
+    }
+    return roster(...args);
+  };
+  context.mock.timers.tick(10000);
+  assert.equal(typeof releaseMembership, 'function');
+  finish({ text: 'Completed before roster refresh', conversationId: 'thread' });
+  await f.settle();
+  assert.equal(f.store.task(task.id).status, 'completed');
+  releaseMembership([]);
+  await f.settle();
+  assert.equal(f.store.task(task.id).status, 'completed');
+  await f.close();
+});
+
+test('shutdown preserves queued reservations that have not begun executing', async () => {
+  const f = await setup();
+  const roster = f.transport.listParticipants;
+  let rosterCalls = 0;
+  let releaseMembership;
+  f.transport.listParticipants = async (...args) => {
+    rosterCalls += 1;
+    // Acceptance and the receipt delivery perform the first two lookups; execution reserves its roots before the third.
+    if (rosterCalls === 3)
+      return new Promise((resolve) => {
+        releaseMembership = resolve;
+      });
+    return roster(...args);
+  };
+  await f.service.handleMessage(f.message());
+  const task = f.store.tasks()[0];
+  const stopping = f.service.stop();
+  assert.equal(f.store.task(task.id).status, 'queued');
+  releaseMembership(await roster());
+  await stopping;
+  assert.equal(f.store.task(task.id).status, 'queued');
+  assert.equal(f.calls.length, 0);
+  f.transport.listParticipants = roster;
+  f.service.start();
+  await f.settle();
+  assert.equal(f.store.task(task.id).status, 'completed');
+  assert.equal(f.calls.length, 1);
+  await f.close();
+});
+
+test('one failed destination preserves its order without blocking replies to another group', async () => {
+  const f = await setup();
+  f.transport.listGroups = async () => [
+    { chatId: 'chat@g.us', title: 'Team' },
+    { chatId: 'other@g.us', title: 'Other' },
+  ];
+  const second = await f.service.configureGroup({
+    connectionId: 'c',
+    chatId: 'other@g.us',
+    title: 'Other',
+    enabled: false,
+  });
+  const repository = await f.service.addRepository({
+    groupId: second.id,
+    name: 'Shared',
+    root: f.root,
+  });
+  await f.service.setAccess({
+    groupId: second.id,
+    participantId: 'alice@s.whatsapp.net',
+    displayName: 'Alice',
+    repositoryIds: [repository.id],
+  });
+  await f.service.configureGroup({
+    connectionId: 'c',
+    chatId: 'other@g.us',
+    title: 'Other',
+    enabled: true,
+  });
+  f.store.enqueueOutput({
+    groupId: f.group.id,
+    participantId: 'alice@s.whatsapp.net',
+    text: '🤖 Forger first pending',
+  });
+  f.store.enqueueOutput({
+    groupId: f.group.id,
+    participantId: 'alice@s.whatsapp.net',
+    text: '🤖 Forger second pending',
+  });
+  f.store.enqueueOutput({
+    groupId: second.id,
+    participantId: 'alice@s.whatsapp.net',
+    text: '🤖 Forger other group ready',
+  });
+  const attempts = [];
+  f.transport.sendMessage = async (message) => {
+    attempts.push(message.text);
+    if (message.chatId === 'chat@g.us')
+      throw new Error('destination unavailable');
+    if (!(await message.canSend())) throw new Error('revoked');
+    f.sent.push(message);
+    return { messageId: 'delivered-to-other-group' };
+  };
+  await f.service.flushOutbox();
+  assert.deepEqual(attempts, [
+    '🤖 Forger first pending',
+    '🤖 Forger other group ready',
+  ]);
+  assert.equal(f.sent.length, 1);
+  assert.deepEqual(
+    f.store.outbox().map((output) => output.status),
+    ['pending', 'pending', 'sent'],
+  );
   await f.close();
 });

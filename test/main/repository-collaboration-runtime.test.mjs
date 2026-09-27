@@ -24,6 +24,7 @@ const {
 const {
   buildRepositoryPermissionsConfig,
   validateRepositoryRoots,
+  resolveRepositoryDeveloperTools,
 } = require('../../dist-electron/main/repository-collaboration/codex-executor.js');
 const {
   phoneNumberFromJid,
@@ -492,28 +493,63 @@ test(
     for (const dir of [repo, repo2, auth, scratch, home]) await mkdir(dir);
     await mkdir(path.join(repo, '.git'));
     await mkdir(path.join(repo, '.codex'));
-    await writeFile(path.join(repo, '.git', 'config'), 'git secret');
     await writeFile(path.join(repo, 'allowed'), 'allowed');
     await writeFile(path.join(repo2, 'second'), 'second');
     await writeFile(path.join(root, 'private'), 'private');
     await writeFile(path.join(auth, 'auth.json'), 'synthetic-credential');
     await symlink(path.join(root, 'private'), path.join(repo, 'escape'));
-    const config = buildRepositoryPermissionsConfig(
-      [repo, repo2],
-      scratch,
-      auth,
-    );
-    await writeFile(path.join(auth, 'config.toml'), config);
-    const env = buildRepositoryEnvironment({
+    let env = buildRepositoryEnvironment({
       home,
       codexHome: auth,
       tempRoot: scratch,
       pathEntries: [],
     });
+    const developerTools = await resolveRepositoryDeveloperTools({
+      cwd: scratch,
+      env,
+      gitRoot: process.env.FORGER_TEST_GIT_ROOT,
+    });
+    env = buildRepositoryEnvironment({
+      home,
+      codexHome: auth,
+      tempRoot: scratch,
+      pathEntries: developerTools.pathEntries,
+    });
+    Object.assign(env, developerTools.environment);
+    const config = buildRepositoryPermissionsConfig(
+      [repo, repo2],
+      scratch,
+      auth,
+      developerTools.readRoots,
+    );
+    await writeFile(path.join(auth, 'config.toml'), config);
+    const initialized = await runRepositoryProcess(
+      '/usr/bin/git',
+      ['init', '--quiet', repo],
+      {
+        cwd: scratch,
+        env,
+        timeoutMs: 5000,
+      },
+    );
+    assert.equal(initialized.code, 0, initialized.stderr);
     const {
       repositoryPolicyArgs,
     } = require('../../dist-electron/main/repository-collaboration/codex-executor.js');
-    const flags = repositoryPolicyArgs([repo, repo2], scratch, auth);
+    const flags = repositoryPolicyArgs(
+      [repo, repo2],
+      scratch,
+      auth,
+      developerTools.readRoots,
+    );
+    flags.push(
+      '--config',
+      `shell_environment_policy.set={${Object.entries(env)
+        .map(
+          ([key, value]) => `${JSON.stringify(key)}=${JSON.stringify(value)}`,
+        )
+        .join(',')}}`,
+    );
     const run = (cmd) =>
       runRepositoryProcess(
         process.env.FORGER_TEST_CODEX_BINARY,
@@ -531,6 +567,20 @@ test(
       );
     const allowed = await run(['/bin/cat', path.join(repo, 'allowed')]);
     assert.equal(allowed.stdout, 'allowed', allowed.stderr);
+    const pwd = await run(['/bin/pwd']);
+    assert.equal(pwd.code, 0, pwd.stderr);
+    assert.equal(pwd.stdout.trim(), scratch);
+    const status = await run([
+      '/bin/sh',
+      '-c',
+      'command -v git && git --version && git -C "$1" status --short',
+      'sh',
+      repo,
+    ]);
+    assert.equal(status.code, 0, status.stderr);
+    assert.ok(
+      status.stdout.startsWith(path.join(developerTools.pathEntries[0], 'git')),
+    );
     assert.equal(
       (await run(['/bin/cat', path.join(repo2, 'second')])).stdout,
       'second',
@@ -545,7 +595,10 @@ test(
       run(['/bin/sh', '-c', 'printf changed > "$1"', 'sh', target]);
     assert.equal((await write(path.join(repo, 'new'))).code, 0);
     assert.equal((await write(path.join(repo2, 'new'))).code, 0);
-    assert.equal((await write(path.join(home, '.cache-fixture'))).code, 0);
+    const cache = await write(path.join(home, '.cache-fixture'));
+    assert.equal(cache.code, 0, cache.stderr);
+    const scratchWrite = await write(path.join(scratch, 'scratch-fixture'));
+    assert.equal(scratchWrite.code, 0, scratchWrite.stderr);
     assert.notEqual((await write(path.join(root, 'private'))).code, 0);
     assert.notEqual((await write(path.join(repo, '.git', 'config'))).code, 0);
     let connections = 0;
@@ -603,6 +656,11 @@ test('executor starts and resumes only its own scoped conversation with identica
     root: path.join(root, 'runtime'),
     sourceCodexHome: () => source,
     platform: 'darwin',
+    resolveDeveloperTools: async () => ({
+      pathEntries: [],
+      readRoots: [],
+      environment: {},
+    }),
     resolveRuntime: async () => ({
       cliPath: '/usr/bin/true',
       pathEntries: [],
