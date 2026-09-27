@@ -25,6 +25,8 @@ export interface ClaudeParsedOutput {
 }
 
 interface ClaudeBaseRunInput {
+  localToolPolicy?: 'mcp-only';
+  networkAccess?: boolean;
   cliPath: string;
   pathEntries: string[];
   environment: Record<string, string>;
@@ -56,7 +58,7 @@ export interface ClaudeRunResult extends LlmRunResult {
 export class ClaudeCliAdapter {
   public async run(input: ClaudeBaseRunInput): Promise<ClaudeRunResult> {
     const mcpServers = input.mcpServers ?? [];
-    const mcpConfigPath = input.alwaysIncludeMcpConfig || mcpServers.length > 0
+    const mcpConfigPath = input.localToolPolicy || input.alwaysIncludeMcpConfig || mcpServers.length > 0
       ? await writeClaudeMcpConfig(input.configWorkspaceRoot ?? input.workingDir, mcpServers)
       : null;
     const args = [
@@ -68,8 +70,8 @@ export class ClaudeCliAdapter {
       input.model,
       '--effort',
       input.effort,
-      ...claudePermissionArgs(input.permissionMode),
-      ...claudeAllowedToolsArgs(mcpServers, input.permissionMode),
+      ...(input.localToolPolicy ? ['--permission-mode', 'dontAsk', '--tools', input.networkAccess === true ? 'WebSearch' : '', '--strict-mcp-config', '--setting-sources', '', '--disable-slash-commands'] : claudePermissionArgs(input.permissionMode)),
+      ...claudeAllowedToolsArgs(mcpServers, input.localToolPolicy ? 'unsafe' : input.permissionMode, input.localToolPolicy && input.networkAccess === true ? ['WebSearch'] : []),
       ...(input.addDirs ?? []).flatMap((dir) => ['--add-dir', dir]),
       ...(mcpConfigPath ? ['--mcp-config', mcpConfigPath] : []),
       ...(input.threadId ? ['--resume', input.threadId] : []),
@@ -93,6 +95,12 @@ export class ClaudeCliAdapter {
           FORGER_ALLOWED_ROOTS: [input.workingDir, ...(input.sharedRoots ?? [])].join(path.delimiter),
           ...Object.fromEntries(mcpServers.map((server) => [server.tokenEnvVar, server.token])),
           ...input.environment,
+          ...(input.localToolPolicy ? {
+            CLAUDE_CODE_DISABLE_CLAUDE_MDS: '1',
+            CLAUDE_CODE_DISABLE_AUTO_MEMORY: '1',
+            CLAUDE_CODE_DISABLE_BUNDLED_SKILLS: '1',
+            CLAUDE_CODE_DISABLE_BACKGROUND_TASKS: '1',
+          } : {}),
           PATH: [path.dirname(input.cliPath), ...input.pathEntries, process.env.PATH ?? ''].filter(Boolean).join(path.delimiter),
         },
         timeoutMs: input.timeoutMs,
@@ -154,6 +162,7 @@ export const writeClaudeMcpConfig = async (
 export const claudeAllowedToolsArgs = (
   mcpServers: LlmMcpServerConfig[],
   permissionMode: AgentPermissionMode = 'safe',
+  nativeTools: Array<'WebSearch'> = [],
 ): string[] => {
   const mcpAllowedTools = mcpServers
     .map((server) => server.name)
@@ -162,6 +171,7 @@ export const claudeAllowedToolsArgs = (
   const allowedTools = [...new Set(
     [
       ...(isUnsafePermissionMode(permissionMode) ? [] : ['Bash']),
+      ...nativeTools,
       ...mcpAllowedTools,
     ],
   )];

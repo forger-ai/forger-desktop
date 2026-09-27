@@ -226,6 +226,7 @@ type Bridge = Pick<Window['forger'],
   | 'listInstalledApps'
   | 'connectionsConfigure'
   | 'connectionsCall'
+  | 'connectionsPairingStatus'
   | 'connectionsSetDefault'
   | 'connectionsDisconnect'
   | 'openExternalUrl'
@@ -241,6 +242,7 @@ const makeBridge = (initialState: ConnectionsState = state()) => ({
     userMessage: 'Connection configured',
     instance: gmailInstance,
   }),
+  connectionsPairingStatus: vi.fn().mockResolvedValue({ success: true, data: { status: 'connecting' } }),
   connectionsCall: vi.fn().mockResolvedValue({ success: true, userMessage: 'Status checked', data: {} }),
   connectionsSetDefault: vi.fn().mockResolvedValue({ success: true, userMessage: 'Default updated' }),
   connectionsDisconnect: vi.fn().mockResolvedValue({ success: true, userMessage: 'Disconnected' }),
@@ -765,7 +767,7 @@ describe('ConnectionsView WhatsApp pairing', () => {
       userMessage: 'WhatsApp saved',
       instance: instance('wa-new', 'whatsapp'),
     });
-    bridge.connectionsCall.mockResolvedValue({ success: true, data: { qrDataUrl: 'data:image/png;base64,qr' } });
+    bridge.connectionsCall.mockResolvedValue({ success: true, data: { qrDataUrl: 'data:image/png;base64,qr', expiresAt: new Date(Date.now() + 60000).toISOString() } });
     renderConnections({ bridge, initialState: whatsappState });
     const dialog = await openWhatsApp(user);
     await user.click(within(dialog).getByRole('button', { name: copy.connect }));
@@ -783,7 +785,7 @@ describe('ConnectionsView WhatsApp pairing', () => {
   it('renders pairing codes, waiting state, provider errors, and thrown pairing failures', async () => {
     const user = userEvent.setup();
     const cases: Array<{ result?: CallConnectionActionResult; reject?: boolean; expected: string }> = [
-      { result: { success: true, data: { pairingCode: 'ABCD-1234' } }, expected: 'ABCD-1234' },
+      { result: { success: true, data: { pairingCode: 'ABCD-1234', expiresAt: new Date(Date.now() + 60000).toISOString() } }, expected: 'ABCD-1234' },
       { result: { success: true, data: { status: 'starting' } }, expected: copy.pairingWaiting },
       { result: { success: false, userMessage: '' }, expected: 'whatsapp_pairing_failed' },
       { reject: true, expected: copy.statusCheckFailed },
@@ -803,79 +805,62 @@ describe('ConnectionsView WhatsApp pairing', () => {
       await user.click(within(dialog).getByRole('button', { name: copy.connect }));
       expect(await within(dialog).findByText(pairingCase.expected, { exact: false })).toBeInTheDocument();
       expect(within(dialog).getByRole('button', {
-        name: pairingCase.result?.success ? t.actions.close : t.actions.cancel,
+        name: t.actions.close,
       })).toBeInTheDocument();
       mounted.unmount();
     }
   });
 
-  it('polls a real connected status, refreshes the matching account, navigates, and clears the interval', async () => {
+  it('reads pairing through setup IPC, refreshes the connected account and closes the dialog', async () => {
     const user = userEvent.setup();
     const whatsappState = state({ types: [whatsapp], instances: [] });
-    const connectedState = state({ types: [whatsapp], instances: [instance('wa-new', 'whatsapp')] });
     const bridge = makeBridge(whatsappState);
-    bridge.connectionsList
-      .mockResolvedValueOnce(whatsappState)
-      .mockResolvedValueOnce(whatsappState)
-      .mockResolvedValueOnce(connectedState);
-    bridge.connectionsConfigure.mockResolvedValue({
-      success: true,
-      userMessage: 'WhatsApp saved',
-      instance: instance('wa-new', 'whatsapp'),
-    });
-    bridge.connectionsCall
-      .mockResolvedValueOnce({ success: true, data: { qrDataUrl: 'data:image/png;base64,qr' } })
-      .mockResolvedValueOnce({ success: true, userMessage: 'WhatsApp connected', data: { status: 'connected' } });
-    let poll: (() => void) | undefined;
-    const interval = vi.spyOn(window, 'setInterval').mockImplementation(((callback: TimerHandler, delay?: number) => {
-      if (delay === 3000) poll = callback as () => void;
-      return 47;
-    }) as typeof window.setInterval);
-    const clear = vi.spyOn(window, 'clearInterval');
+    bridge.connectionsConfigure.mockResolvedValue({ success: true, userMessage: 'Saved', instance: instance('wa-new', 'whatsapp') });
+    bridge.connectionsCall.mockResolvedValue({ success: true, data: { qrDataUrl: 'data:image/png;base64,qr', expiresAt: new Date(Date.now() + 60000).toISOString() } });
+    bridge.connectionsPairingStatus.mockResolvedValue({ success: true, data: { status: 'connected' } });
     const handlers = renderConnections({ bridge, initialState: whatsappState });
     const dialog = await openWhatsApp(user);
     await user.click(within(dialog).getByRole('button', { name: copy.connect }));
-    await waitFor(() => expect(interval).toHaveBeenCalledWith(expect.any(Function), 3000));
-    await act(async () => poll?.());
-    await waitFor(() => expect(handlers.onOpenConnection).toHaveBeenCalledWith('wa-new'));
-    expect(await screen.findByText('WhatsApp connected')).toBeInTheDocument();
+    await waitFor(() => expect(handlers.onOpenConnection).toHaveBeenCalledWith('wa-new'), { timeout: 4000 });
+    expect(bridge.connectionsPairingStatus).toHaveBeenCalledWith('wa-new');
+    expect(bridge.connectionsCall).toHaveBeenCalledOnce();
+    expect(await screen.findByText(copy.statusChecked)).toBeInTheDocument();
     await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
-    expect(clear).toHaveBeenCalledWith(47);
   });
 
-  it('keeps polling through pending, malformed, and rejected checks, then uses fallback navigation and copy', async () => {
+  it('hides expired QR and offers recovery without recreating the connection', async () => {
     const user = userEvent.setup();
     const whatsappState = state({ types: [whatsapp], instances: [] });
     const bridge = makeBridge(whatsappState);
-    bridge.connectionsConfigure.mockResolvedValue({
-      success: true,
-      userMessage: 'WhatsApp saved',
-      instance: instance('wa-fallback', 'whatsapp'),
-    });
-    bridge.connectionsCall
-      .mockResolvedValueOnce({ success: true, data: {} })
-      .mockResolvedValueOnce({ success: false, data: { status: 'connected' } })
-      .mockResolvedValueOnce({ success: true, data: 'connected' })
-      .mockRejectedValueOnce(new Error('temporary poll error'))
-      .mockResolvedValueOnce({ success: true, data: { status: 'connected' } });
-    let poll: (() => void) | undefined;
-    vi.spyOn(window, 'setInterval').mockImplementation(((callback: TimerHandler, delay?: number) => {
-      if (delay === 3000) poll = callback as () => void;
-      return 89;
-    }) as typeof window.setInterval);
+    bridge.connectionsConfigure.mockResolvedValue({ success: true, userMessage: 'Saved', instance: instance('wa-new', 'whatsapp') });
+    bridge.connectionsCall.mockResolvedValueOnce({ success: true, data: { status: 'expired' } })
+      .mockResolvedValueOnce({ success: true, data: { qrDataUrl: 'data:image/png;base64,new', expiresAt: new Date(Date.now() + 60000).toISOString() } });
+    renderConnections({ bridge, initialState: whatsappState });
+    const dialog = await openWhatsApp(user);
+    await user.click(within(dialog).getByRole('button', { name: copy.connect }));
+    expect(within(dialog).queryByRole('img', { name: copy.pairingResult })).not.toBeInTheDocument();
+    await user.click(await within(dialog).findByRole('button', { name: 'Generate a new QR' }));
+    expect(await within(dialog).findByRole('img', { name: copy.pairingResult })).toHaveAttribute('src', 'data:image/png;base64,new');
+    expect(bridge.connectionsConfigure).toHaveBeenCalledOnce();
+  });
+  it('does not navigate from a completed pairing after its dialog was closed during refresh', async () => {
+    const user = userEvent.setup();
+    const whatsappState = state({ types: [whatsapp], instances: [] });
+    const bridge = makeBridge(whatsappState);
+    let finishRefresh!: (state: ConnectionsState) => void;
+    bridge.connectionsList.mockResolvedValueOnce(whatsappState).mockResolvedValueOnce(whatsappState)
+      .mockImplementationOnce(() => new Promise(resolve => { finishRefresh = resolve; }));
+    bridge.connectionsConfigure.mockResolvedValue({ success: true, userMessage: 'Saved', instance: instance('wa-new', 'whatsapp') });
+    bridge.connectionsCall.mockResolvedValue({ success: true, data: { status: 'connected' } });
     const handlers = renderConnections({ bridge, initialState: whatsappState });
     const dialog = await openWhatsApp(user);
     await user.click(within(dialog).getByRole('button', { name: copy.connect }));
-    await waitFor(() => expect(poll).toBeTypeOf('function'));
-    await act(async () => poll?.());
-    await act(async () => poll?.());
-    await act(async () => poll?.());
-    await act(async () => poll?.());
-    expect(screen.getByRole('dialog')).toBeInTheDocument();
-    await act(async () => poll?.());
-    await waitFor(() => expect(handlers.onOpenConnection).toHaveBeenCalledWith('wa-fallback'));
-    expect(await screen.findByText(copy.statusChecked)).toBeInTheDocument();
+    await waitFor(() => expect(bridge.connectionsList).toHaveBeenCalledTimes(3));
+    await user.click(within(dialog).getByRole('button', { name: t.actions.close }));
+    await act(async () => { finishRefresh(whatsappState); });
+    expect(handlers.onOpenConnection).not.toHaveBeenCalled();
   });
+
 });
 
 describe('ConnectionsView transient busy and accessibility behavior', () => {

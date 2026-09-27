@@ -11,7 +11,7 @@ const {
   WhatsAppConnectionManager,
   createWhatsAppConnectionManager,
 } = require('../../dist-electron/main/connections/modules/whatsapp/manager.js');
-const { encodeStableMessageRef } = require('../../dist-electron/main/connections/modules/whatsapp/normalizer.js');
+const { decodeStableMessageRef, encodeStableMessageRef } = require('../../dist-electron/main/connections/modules/whatsapp/normalizer.js');
 
 class FakeStore {
   constructor(root) {
@@ -75,7 +75,7 @@ test('Given observed chats, manager commands validate, send, read, describe, pai
   const context = createContext(root, logs, events);
   const manager = new WhatsAppConnectionManager(store, async () => ({}));
 
-  assert.deepEqual(await manager.listChats({ query: 'friend' }), { chats: [], input: { query: 'friend' } });
+  assert.deepEqual(await manager.listChats({ query: 'friend' }), { chats: [], input: { query: 'friend', identityAccountId: '' } });
   assert.equal((await manager.readMessages(context, { chatId: ' ' })).technicalCode, 'whatsapp_chat_id_required');
   store.messages = [{
     chatId: '56912345678@s.whatsapp.net',
@@ -100,7 +100,7 @@ test('Given observed chats, manager commands validate, send, read, describe, pai
   manager.ensureStarted = async () => undefined;
   manager.socket = { sendMessage: async () => undefined };
   const sentWithoutPayload = await manager.sendMessage(context, { chatId, text: ' hello ' });
-  assert.equal(sentWithoutPayload.sent, true);
+  assert.equal(sentWithoutPayload.sent, false);
   assert.ok(Number.isInteger(sentWithoutPayload.timestamp));
   assert.ok(Math.abs(sentWithoutPayload.timestamp - Math.floor(Date.now() / 1000)) <= 1);
   let quotedOptions;
@@ -111,19 +111,19 @@ test('Given observed chats, manager commands validate, send, read, describe, pai
     replyToMessageRef: encodeStableMessageRef({ remoteJid: chatId, id: 'quoted', fromMe: false }),
   });
   assert.deepEqual(quotedOptions, { quoted: { key: { remoteJid: chatId, id: 'quoted', fromMe: false } } });
-  assert.equal(sent.stableMessageRef, 'encoded:M2');
+  assert.equal(decodeStableMessageRef(sent.stableMessageRef).id, 'M2');
   assert.equal(store.upsertedMessages.at(-1).stableMessageRef.id, 'M2');
   assert.equal(store.rememberSendCount, 2);
   manager.socket = {};
-  assert.equal((await manager.sendMessage(context, { chatId, text: 'without method' })).sent, true);
+  assert.equal((await manager.sendMessage(context, { chatId, text: 'without method' })).technicalCode, 'whatsapp_send_unavailable');
   manager.socket = null;
-  assert.equal((await manager.sendMessage(context, { chatId, text: 'without socket' })).sent, true);
+  assert.equal((await manager.sendMessage(context, { chatId, text: 'without socket' })).technicalCode, 'whatsapp_send_unavailable');
 
   assert.equal((await manager.getChatDetails(context, { chatId: '' })).technicalCode, 'whatsapp_chat_not_observed');
   assert.equal((await manager.getChatDetails(context, { chatId: '56999999999' })).technicalCode, 'whatsapp_chat_not_observed');
   assert.equal((await manager.getChatDetails(context, { chatId })).phoneNumber, '56912345678');
   store.chats.set(chatId, directChat(chatId, 'stored-number'));
-  assert.equal((await manager.getChatDetails(context, { chatId })).phoneNumber, 'stored-number');
+  assert.equal((await manager.getChatDetails(context, { chatId })).phoneNumber, '56912345678');
   const groupId = '120363123456789@g.us';
   store.chats.set(groupId, { chatId: groupId, chatType: 'group' });
   manager.socket = { groupMetadata: async () => null };
@@ -159,6 +159,7 @@ test('Given observed chats, manager commands validate, send, read, describe, pai
   assert.equal((await manager.startPairing(context, { method: 'qr' })).technicalCode, 'pairing_closed');
   manager.lastDisconnectReason = undefined;
   assert.equal((await manager.startPairing(context, { method: 'qr' })).technicalCode, 'whatsapp_qr_unavailable');
+  manager.handleConnectionUpdate({ qr: 'qr-value' }, context);
   manager.waitForQr = async () => 'qr-value';
   assert.equal((await manager.startPairing(context, { method: 'qr' })).status, 'qr_ready');
 
@@ -477,7 +478,7 @@ test('Given incoming events and timers, stale generations are ignored while hist
       queueMicrotask(callback);
       return { unref() {} };
     };
-    manager.latestQr = 'ready';
+    manager.handleConnectionUpdate({ qr: 'ready' }, context);
     assert.equal(await manager.waitForQr(), 'ready');
     manager.latestQr = null;
     manager.connected = true;
@@ -523,13 +524,11 @@ test('Given filesystem edge cases, auth discovery, serialization, permission fai
   const store = new FakeStore(root);
   const manager = new WhatsAppConnectionManager(store, async () => ({}));
   assert.equal(await manager.hasPairedAuthState(), false);
-  assert.equal(await manager.hasAuthArtifacts(), false);
   await mkdir(store.authDirectory(), { recursive: true });
   await writeFile(join(store.authDirectory(), 'creds.json'), '{bad', 'utf8');
   assert.equal(await manager.hasPairedAuthState(), false);
   await writeFile(join(store.authDirectory(), 'creds.json'), JSON.stringify({ creds: { registered: true } }), 'utf8');
   assert.equal(await manager.hasPairedAuthState(), true);
-  assert.equal(await manager.hasAuthArtifacts(), true);
   manager.ensureStarted = async () => undefined;
   store.messages = [];
   await manager.readMessages(createContext(root), { chatId: '56912345678' });
@@ -539,7 +538,7 @@ test('Given filesystem edge cases, auth discovery, serialization, permission fai
   manager.lastDisconnectReason = 'closed';
   manager.needsReconnect = true;
   const status = await manager.status();
-  assert.equal(status.phoneNumber, '569123456781');
+  assert.equal(status.phoneNumber, '56912345678');
   assert.equal(status.lastDisconnectReason, 'closed');
   assert.equal(status.needsReconnect, true);
 
@@ -568,4 +567,35 @@ test('Given filesystem edge cases, auth discovery, serialization, permission fai
   } finally {
     fsPromises.chmod = originalChmod;
   }
+});
+
+test('Given known contacts, group details preserve usable participant names without changing authorization identities', async (t) => {
+  const root = await mkdtemp(join(tmpdir(), 'forger-whatsapp-participant-names-'));
+  t.after(async () => rm(root, { recursive: true, force: true }));
+  const store = new FakeStore(root);
+  const groupId = '120363999999999@g.us';
+  store.chats.set(groupId, { chatId: groupId, chatType: 'group' });
+  store.chats.set('known@s.whatsapp.net', { chatId: 'known@s.whatsapp.net', chatType: 'direct', title: 'Known contact' });
+  store.chats.set('untitled@s.whatsapp.net', { chatId: 'untitled@s.whatsapp.net', chatType: 'direct' });
+  const manager = new WhatsAppConnectionManager(store, async () => ({}));
+  manager.ensureStarted = async () => undefined;
+  manager.socket = { groupMetadata: async () => ({ participants: [
+    { id: 'named@s.whatsapp.net', name: '  Ana  ', notify: 'Other name', admin: 'admin' },
+    { id: 'notified@s.whatsapp.net', name: '', notify: '  Alex  ' },
+    { id: 'known@s.whatsapp.net', name: 3 },
+    { id: 'untitled@s.whatsapp.net' },
+    { id: 'unknown@s.whatsapp.net' },
+    { id: 9 },
+    'invalid',
+  ] }) };
+  const details = await manager.getChatDetails(createContext(root, [], []), { chatId: groupId });
+  assert.deepEqual(details.metadata.participants, [
+    { id: 'named@s.whatsapp.net', admin: 'admin', name: 'Ana' },
+    { id: 'notified@s.whatsapp.net', admin: undefined, name: 'Alex' },
+    { id: 'known@s.whatsapp.net', admin: undefined, name: 'Known contact' },
+    { id: 'untitled@s.whatsapp.net', admin: undefined },
+    { id: 'unknown@s.whatsapp.net', admin: undefined },
+    { id: 9, admin: undefined },
+    'invalid',
+  ]);
 });

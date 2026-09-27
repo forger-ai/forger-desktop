@@ -19,6 +19,8 @@ export interface InternalOAuthTokenResponse {
 
 export interface InternalToolContext {
   metadataRoot: string;
+  /** Present for a configured Connection instance, never for a general tool. */
+  connectionId?: string;
   secretsStore: SecretsStore;
   locale?: string;
   getFreePort: () => Promise<number>;
