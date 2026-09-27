@@ -225,6 +225,7 @@ const IPC_CHANNELS = {
   connectionsConfigure: 'forger:connections:configure',
   connectionsDisconnect: 'forger:connections:disconnect',
   connectionsCall: 'forger:connections:call',
+  connectionsPairingStatus: 'forger:connections:pairing-status',
   connectionsSetDefault: 'forger:connections:set-default',
   getAppToolsInstallGate: 'forger:app-tools:install-gate',
   setAppToolGrant: 'forger:app-tools:set-grant',
@@ -677,6 +678,7 @@ const api: ForgerDesktopApi = {
   connectionsList: (locale?: string) => ipcRenderer.invoke(IPC_CHANNELS.connectionsList, locale),
   connectionsConfigure: (input) => ipcRenderer.invoke(IPC_CHANNELS.connectionsConfigure, input),
   connectionsDisconnect: (input) => ipcRenderer.invoke(IPC_CHANNELS.connectionsDisconnect, input),
+  connectionsPairingStatus: (connectionId) => ipcRenderer.invoke(IPC_CHANNELS.connectionsPairingStatus, connectionId),
   connectionsCall: (input) => ipcRenderer.invoke(IPC_CHANNELS.connectionsCall, input),
   connectionsSetDefault: (input) => ipcRenderer.invoke(IPC_CHANNELS.connectionsSetDefault, input),
   onOfficialToolEvent: (listener) => {

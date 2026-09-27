@@ -2,6 +2,7 @@ import type { CallConnectionActionResult } from './types/connections';
 
 export type WhatsAppPairingPresentation =
   | { kind: 'idle' }
+  | { kind: 'expired' }
   | { kind: 'qr'; qrDataUrl: string; expiresAt?: string }
   | { kind: 'pairing_code'; pairingCode: string; expiresAt?: string }
   | { kind: 'waiting'; status?: string }
@@ -27,6 +28,7 @@ export const getWhatsAppPairingPresentation = (
   }
 
   const data = isRecord(result.data) ? result.data : {};
+  if (data.status === 'expired') return { kind: 'expired' };
   const qrDataUrl = cleanString(data.qrDataUrl);
   if (qrDataUrl) {
     return {

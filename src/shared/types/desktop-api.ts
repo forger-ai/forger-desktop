@@ -285,6 +285,7 @@ export interface ForgerDesktopApi {
   connectionsList: (locale?: string) => Promise<ConnectionsState>;
   connectionsConfigure: (input: ConfigureConnectionInput) => Promise<ConnectionMutationResult>;
   connectionsDisconnect: (input: DisconnectConnectionInput) => Promise<ConnectionMutationResult>;
+  connectionsPairingStatus: (connectionId: string) => Promise<CallConnectionActionResult>;
   connectionsCall: (input: CallConnectionActionInput) => Promise<CallConnectionActionResult>;
   connectionsSetDefault: (input: { type: string; connectionId: string }) => Promise<ConnectionMutationResult>;
   onOfficialToolEvent: (listener: (event: OfficialToolRuntimeEvent) => void) => () => void;

@@ -63,6 +63,9 @@ export interface WhatsAppIngestionOptions {
 export class WhatsAppConnectionManager {
   private socket: BaileysSocket | null = null;
   private latestQr: string | null = null;
+  private qrExpiresAt = 0;
+  private loggedOut = false;
+  private readonly pendingCredentialSaves = new Set<Promise<void>>();
   private connected = false;
   private needsReconnect = false;
   private lastDisconnectReason: string | undefined;
@@ -94,7 +97,7 @@ export class WhatsAppConnectionManager {
     return {
       connected: this.connected,
       configured,
-      qrAvailable: Boolean(this.latestQr),
+      qrAvailable: Boolean(this.latestQr) && this.qrExpiresAt > Date.now(),
       ...(this.socket?.user?.id ? { phoneNumber: phoneNumberFromJid(this.socket.user.id) } : {}),
       ...(this.lastDisconnectReason ? { lastDisconnectReason: this.lastDisconnectReason } : {}),
       ...(this.needsReconnect ? { needsReconnect: true } : {}),
@@ -103,9 +106,15 @@ export class WhatsAppConnectionManager {
   }
 
   async startPairing(context: InternalToolContext, input: WhatsAppPairingInput): Promise<Record<string, unknown>> {
-    if (!this.connected && (this.socket || this.needsReconnect || await this.hasAuthArtifacts())) {
-      await this.resetLocalSession(context);
+    if (this.loggedOut) {
+      // A confirmed logout invalidates credentials, never the observed chat index.
+      await this.stopListening();
+      await Promise.allSettled([...this.pendingCredentialSaves]);
+      await fs.rm(this.store.authDirectory(), { recursive: true, force: true });
+      this.authenticated = false;
+      this.loggedOut = false;
     }
+    if (this.latestQr && this.qrExpiresAt <= Date.now()) await this.stopListening();
     await this.ensureStarted(context);
     if (input.method === 'pairing_code') {
       const phoneNumber = normalizePhoneForPairing(input.phoneNumber);
@@ -135,11 +144,21 @@ export class WhatsAppConnectionManager {
         technicalCode: this.lastDisconnectReason || 'whatsapp_qr_unavailable',
       };
     }
-    return {
-      status: 'qr_ready',
-      qrDataUrl: await QRCode.toDataURL(qr),
-      expiresAt: new Date(Date.now() + 60_000).toISOString(),
-    };
+    return this.pairingStatus();
+  }
+
+  /** Setup-only snapshot. Never starts a socket or resets authentication/data. */
+  async pairingStatus(): Promise<Record<string, unknown>> {
+    if (this.connected) return { status: 'connected' };
+    const qr = this.latestQr;
+    const expiresAt = this.qrExpiresAt;
+    if (!qr || expiresAt <= Date.now()) {
+      return { status: this.socket && !qr ? 'connecting' : 'expired' };
+    }
+    const qrDataUrl = await QRCode.toDataURL(qr, { width: 360, margin: 4 });
+    // Encoding yields: do not publish a QR invalidated by a socket event meanwhile.
+    if (qr !== this.latestQr || expiresAt <= Date.now()) return this.pairingStatus();
+    return { status: 'qr_ready', qrDataUrl, expiresAt: new Date(expiresAt).toISOString() };
   }
 
   async listChats(input: WhatsAppListChatsInput): Promise<Record<string, unknown>> {
@@ -306,6 +325,8 @@ export class WhatsAppConnectionManager {
     this.clearReconnectTimer();
     this.socket = null;
     this.connected = false;
+    this.latestQr = null;
+    this.qrExpiresAt = 0;
     this.starting = null;
   }
 
@@ -464,6 +485,7 @@ export class WhatsAppConnectionManager {
       ...(browser ? { browser } : {}),
       logger: createBaileysLogger(context),
       printQRInTerminal: false,
+      qrTimeout: 60_000,
       syncFullHistory: false,
       markOnlineOnConnect: false,
     });
@@ -471,12 +493,15 @@ export class WhatsAppConnectionManager {
     this.needsReconnect = false;
     this.emitRuntimeEvent(context, 'connecting');
     socket.ev?.on('creds.update', (payload) => {
+      if (generation !== this.sessionGeneration) return;
       if (isPairedAuthState(payload) || isPairedAuthState(state)) {
         this.authenticated = true;
       }
-      void saveCreds().then(() => chmodAuthFiles(authDirectory)).catch((error) => {
+      const saving = saveCreds().then(() => chmodAuthFiles(authDirectory)).catch((error) => {
         void context.appendLog?.('official_tool:whatsapp_creds_save_failed', sanitizeErrorPayload(error));
       });
+      this.pendingCredentialSaves.add(saving);
+      void saving.finally(() => this.pendingCredentialSaves.delete(saving));
     });
     socket.ev?.on('connection.update', (payload) => {
       this.handleConnectionUpdate(payload, context, generation);
@@ -527,6 +552,7 @@ export class WhatsAppConnectionManager {
     }
     if (typeof payload.qr === 'string') {
       this.latestQr = payload.qr;
+      this.qrExpiresAt = Date.now() + 60_000;
       this.emitRuntimeEvent(context, 'qr_available');
     }
     if (payload.connection === 'open') {
@@ -539,6 +565,9 @@ export class WhatsAppConnectionManager {
       this.emitRuntimeEvent(context, 'connected');
     }
     if (payload.connection === 'close') {
+      this.loggedOut = disconnectStatusCode(payload) === 401;
+      this.latestQr = null;
+      this.qrExpiresAt = 0;
       const reconnecting = this.authenticated && shouldAutoReconnect(payload);
       this.connected = false;
       this.needsReconnect = this.authenticated;
@@ -578,7 +607,7 @@ export class WhatsAppConnectionManager {
       ...(details.counts ? { counts: details.counts } : {}),
       status: {
         connected: this.connected,
-        qrAvailable: Boolean(this.latestQr),
+        qrAvailable: Boolean(this.latestQr) && this.qrExpiresAt > Date.now(),
         needsReconnect: this.needsReconnect,
         ...(this.lastDisconnectReason ? { lastDisconnectReason: this.lastDisconnectReason } : {}),
       },
@@ -606,14 +635,14 @@ export class WhatsAppConnectionManager {
   }
 
   private async waitForQr(): Promise<string | null> {
-    if (this.latestQr) {
+    if (this.latestQr && this.qrExpiresAt > Date.now()) {
       return this.latestQr;
     }
     for (let attempt = 0; attempt < 20; attempt += 1) {
       await new Promise((resolve) => {
         setTimeout(resolve, 250);
       });
-      if (this.latestQr || this.connected) {
+      if ((this.latestQr && this.qrExpiresAt > Date.now()) || this.connected) {
         return this.latestQr;
       }
     }
@@ -635,14 +664,6 @@ export class WhatsAppConnectionManager {
     try {
       const contents = await fs.readFile(path.join(this.store.authDirectory(), 'creds.json'), 'utf8');
       return isPairedAuthState(JSON.parse(contents));
-    } catch {
-      return false;
-    }
-  }
-
-  private async hasAuthArtifacts(): Promise<boolean> {
-    try {
-      return (await fs.readdir(this.store.authDirectory())).length > 0;
     } catch {
       return false;
     }

@@ -589,7 +589,7 @@ test('WhatsApp pairing failure before QR is recoverable instead of pending', asy
   assert.equal(typeof result.technicalCode, 'string');
 });
 
-test('WhatsApp QR pairing clears stale auth before starting a fresh QR session', async (t) => {
+test('WhatsApp QR pairing preserves stored auth unless logout was confirmed', async (t) => {
   const root = await mkdtemp(join(tmpdir(), 'forger-whatsapp-stale-auth-'));
   t.after(async () => {
     await rm(root, { recursive: true, force: true });
@@ -600,7 +600,7 @@ test('WhatsApp QR pairing clears stale auth before starting a fresh QR session',
   await writeFile(join(store.authDirectory(), 'creds.json'), JSON.stringify({ registered: true }), 'utf8');
   const manager = new WhatsAppConnectionManager(store);
   let ended = false;
-  let startedAfterClear = false;
+  let startedWithPreservedAuth = false;
   manager.socket = {
     end: () => {
       ended = true;
@@ -608,17 +608,17 @@ test('WhatsApp QR pairing clears stale auth before starting a fresh QR session',
   };
   manager.ensureStarted = async () => {
     const status = await manager.status();
-    startedAfterClear = status.configured === false;
-    manager.latestQr = 'fresh-qr';
+    startedWithPreservedAuth = status.configured === true;
+    manager.handleConnectionUpdate({ qr: 'fresh-qr' }, context);
   };
 
   const result = await manager.startPairing(context, { method: 'qr' });
 
-  assert.equal(ended, true);
-  assert.equal(startedAfterClear, true);
+  assert.equal(ended, false);
+  assert.equal(startedWithPreservedAuth, true);
   assert.equal(result.status, 'qr_ready');
   assert.equal(typeof result.qrDataUrl, 'string');
-  assert.equal((await manager.status()).configured, false);
+  assert.equal((await manager.status()).configured, true);
 });
 
 test('transport distinguishes proven pre-send failures from an uncertain socket attempt', async (t) => {

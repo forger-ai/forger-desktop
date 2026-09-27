@@ -180,6 +180,11 @@ const getManager = (context: InternalToolContext): WhatsAppConnectionManager => 
   return manager;
 };
 
+/** Only the trusted Desktop setup IPC calls this; it is not a connection action. */
+export const getWhatsAppPairingStatus = async (context: InternalToolContext): Promise<CallOfficialToolResult> => ({
+  success: true, data: await getManager(context).pairingStatus(),
+});
+
 const configure = async (context: InternalToolContext): Promise<ToolMutationResult> => ({
   success: true,
   userMessage: getSharedCopy(context.locale).tools.whatsappActivated,

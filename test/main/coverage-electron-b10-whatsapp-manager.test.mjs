@@ -159,6 +159,7 @@ test('Given observed chats, manager commands validate, send, read, describe, pai
   assert.equal((await manager.startPairing(context, { method: 'qr' })).technicalCode, 'pairing_closed');
   manager.lastDisconnectReason = undefined;
   assert.equal((await manager.startPairing(context, { method: 'qr' })).technicalCode, 'whatsapp_qr_unavailable');
+  manager.handleConnectionUpdate({ qr: 'qr-value' }, context);
   manager.waitForQr = async () => 'qr-value';
   assert.equal((await manager.startPairing(context, { method: 'qr' })).status, 'qr_ready');
 
@@ -477,7 +478,7 @@ test('Given incoming events and timers, stale generations are ignored while hist
       queueMicrotask(callback);
       return { unref() {} };
     };
-    manager.latestQr = 'ready';
+    manager.handleConnectionUpdate({ qr: 'ready' }, context);
     assert.equal(await manager.waitForQr(), 'ready');
     manager.latestQr = null;
     manager.connected = true;
@@ -523,13 +524,11 @@ test('Given filesystem edge cases, auth discovery, serialization, permission fai
   const store = new FakeStore(root);
   const manager = new WhatsAppConnectionManager(store, async () => ({}));
   assert.equal(await manager.hasPairedAuthState(), false);
-  assert.equal(await manager.hasAuthArtifacts(), false);
   await mkdir(store.authDirectory(), { recursive: true });
   await writeFile(join(store.authDirectory(), 'creds.json'), '{bad', 'utf8');
   assert.equal(await manager.hasPairedAuthState(), false);
   await writeFile(join(store.authDirectory(), 'creds.json'), JSON.stringify({ creds: { registered: true } }), 'utf8');
   assert.equal(await manager.hasPairedAuthState(), true);
-  assert.equal(await manager.hasAuthArtifacts(), true);
   manager.ensureStarted = async () => undefined;
   store.messages = [];
   await manager.readMessages(createContext(root), { chatId: '56912345678' });

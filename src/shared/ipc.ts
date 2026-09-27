@@ -221,6 +221,7 @@ export const IPC_CHANNELS = {
   connectionsConfigure: 'forger:connections:configure',
   connectionsDisconnect: 'forger:connections:disconnect',
   connectionsCall: 'forger:connections:call',
+  connectionsPairingStatus: 'forger:connections:pairing-status',
   connectionsSetDefault: 'forger:connections:set-default',
   getAppToolsInstallGate: 'forger:app-tools:install-gate',
   setAppToolGrant: 'forger:app-tools:set-grant',

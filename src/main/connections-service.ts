@@ -263,6 +263,16 @@ export class ConnectionsService {
     };
   }
 
+  async pairingStatus(connectionId: string): Promise<CallConnectionActionResult> {
+    await this.load();
+    const instance = this.registry.instances[cleanString(connectionId)];
+    const module = instance && this.modulesByType.get(instance.type);
+    if (!instance || !module?.pairingStatus) {
+      return { success: false, userMessage: 'WhatsApp connection was not found.', technicalCode: 'connection_instance_not_found' };
+    }
+    return module.pairingStatus(this.getContext(), instance.id);
+  }
+
   async call(input: ServiceCallConnectionActionInput): Promise<CallConnectionActionResult> {
     await this.load();
     const type = cleanString(input.type);
