@@ -32,6 +32,15 @@ const copy = {
   },
 };
 
+export function CampaignMeasurementDetails({ locale }: { locale: string }) {
+  const t = copy[locale === 'es' ? 'es' : 'en'];
+  return <>
+    <Typography variant="body2" color="text.secondary">{t.body}</Typography>
+    <Typography variant="body2" color="text.secondary">{t.eligibility}</Typography>
+    <Typography variant="caption" color="text.secondary">{t.withdrawal}</Typography>
+  </>;
+}
+
 export function CampaignMeasurementPanel({ locale, initialCode }: { locale: string; initialCode?: CampaignCode }) {
   const t = copy[locale === 'es' ? 'es' : 'en'];
   const [status, setStatus] = useState<CampaignMeasurementStatus | null>(null);
@@ -64,9 +73,7 @@ export function CampaignMeasurementPanel({ locale, initialCode }: { locale: stri
   };
   return <Stack spacing={1.25}>
     <Typography variant="h6">{t.title}</Typography>
-    <Typography variant="body2" color="text.secondary">{t.body}</Typography>
-    <Typography variant="body2" color="text.secondary">{t.eligibility}</Typography>
-    <Typography variant="caption" color="text.secondary">{t.withdrawal}</Typography>
+    <CampaignMeasurementDetails locale={locale} />
     {status && !status.available ? <Alert severity="info">{t.unavailable}</Alert> : null}
     {status?.consent === 'enabled' ? <Alert severity="info">{t.enabled}</Alert> : null}
     {status?.consent === 'disabled' ? <Alert severity="info">{t.disabled}</Alert> : null}

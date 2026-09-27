@@ -12,6 +12,7 @@ interface TourOverlayProps {
   primaryColor: 'primary' | 'inherit';
   t: AppDictionary;
   extraContent?: ReactNode;
+  actionsDisabled?: boolean;
   onSkip: () => void;
   onContinue: () => void;
 }
@@ -25,6 +26,7 @@ export function TourOverlay({
   primaryColor,
   t,
   extraContent,
+  actionsDisabled = false,
   onSkip,
   onContinue,
 }: TourOverlayProps) {
@@ -93,8 +95,8 @@ export function TourOverlay({
           </Stack>
           {extraContent}
           <Stack direction="row" justifyContent="space-between" spacing={1}>
-            <Button onClick={onSkip}>{t.onboarding.skip}</Button>
-            <Button variant={primaryVariant} color={primaryColor} onClick={onContinue}>
+            <Button disabled={actionsDisabled} onClick={onSkip}>{t.onboarding.skip}</Button>
+            <Button variant={primaryVariant} color={primaryColor} disabled={actionsDisabled} onClick={onContinue}>
               {primaryLabel}
             </Button>
           </Stack>

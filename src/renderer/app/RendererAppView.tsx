@@ -1,5 +1,5 @@
 import { Box, Button, Chip, CssBaseline, Dialog, DialogActions, DialogContent, DialogTitle, LinearProgress, Link, Stack, ThemeProvider, Typography } from '@mui/material';
-import { CampaignMeasurementDialog, CampaignMeasurementPanel } from '@renderer/components/CampaignMeasurementPanel';
+import { CampaignMeasurementDialog } from '@renderer/components/CampaignMeasurementPanel';
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import type { AgentEffort, AntigravityEffort, AudioRuntimeBrokerRequest, BackgroundTask, CatalogApp, ClaudeEffort, CodexReasoningEffort, DesktopUpdateReleaseSummary, WakeWordState } from '@shared/types';
 import { AppShell } from '@renderer/components/AppShell';
@@ -32,6 +32,8 @@ import { AGENT_PROVIDER_OPTIONS, ANTIGRAVITY_EFFORT_OPTIONS, ANTIGRAVITY_MODEL_O
 import { buildChatProviderOptions, getRuntimeSupportedEfforts, normalizeRuntimeEffortForModel } from '@shared/agent-runtime-registry';
 import { TourOverlay } from '@renderer/tour/TourOverlay';
 import { useForgerTour } from '@renderer/tour/useForgerTour';
+import { useWelcomeSharing } from '@renderer/tour/useWelcomeSharing';
+import { WelcomeSharingOption } from '@renderer/components/WelcomeSharingOption';
 import { appExecutionTooltip } from '@renderer/app-execution-labels';
 import { RendererAppDialogs } from './RendererAppDialogs';
 import { DesktopUpdateSummaryMarkdown } from './DesktopUpdateSummaryMarkdown';
@@ -530,6 +532,7 @@ export function RendererAppView({ controller }: RendererAppViewProps) {
     antigravityAuthStatus,
     blocked: Boolean(codexConfigOpen || claudeConfigOpen || agentProviderConfigOpen || cloudModalOpen || pendingInstallGate),
   });
+  const welcomeSharing = useWelcomeSharing({ active: tour.isWelcomeStep });
   const intelligenceProviderConfigured = codexAuthStatus.authenticated || claudeAuthStatus.authenticated || antigravityAuthStatus.authenticated;
 
   useEffect(() => {
@@ -679,9 +682,7 @@ export function RendererAppView({ controller }: RendererAppViewProps) {
         </Link>
         .
       </Typography>
-      <Box sx={{ border: '1px solid', borderColor: 'divider', borderRadius: 1, p: 1.5 }}>
-        <CampaignMeasurementPanel locale={activeLocale} />
-      </Box>
+      <WelcomeSharingOption locale={activeLocale} sharing={welcomeSharing} />
     </Stack>
   );
 
@@ -1430,8 +1431,9 @@ export function RendererAppView({ controller }: RendererAppViewProps) {
         primaryColor={tour.primaryColor}
         t={t}
         extraContent={tour.isWelcomeStep ? renderWelcomeContent() : tour.isAgentStep ? renderAgentProviderCards() : undefined}
-        onSkip={tour.skipTour}
-        onContinue={tour.continueTour}
+        actionsDisabled={tour.isWelcomeStep && welcomeSharing.actionsDisabled}
+        onSkip={tour.isWelcomeStep ? () => void welcomeSharing.complete(tour.skipTour) : tour.skipTour}
+        onContinue={tour.isWelcomeStep ? () => void welcomeSharing.complete(tour.continueTour) : tour.continueTour}
       />
 
       <RendererAppDialogs controller={controller} />

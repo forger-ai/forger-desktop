@@ -3,7 +3,7 @@ import { mkdtemp, mkdir, rm } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 
-test('real Desktop keeps campaign permission optional and handles campaign links without enabling measurement', async () => {
+test('real Desktop shows a compact sharing choice and handles campaign links without enabling measurement', async () => {
   const profileRoot = await mkdtemp(path.join(os.tmpdir(), 'forger-campaign-smoke-'));
   const isolatedHome = path.join(profileRoot, 'home');
   const isolatedAppData = path.join(profileRoot, 'os-app-data');
@@ -35,11 +35,30 @@ test('real Desktop keeps campaign permission optional and handles campaign links
     }, { timeout: 30_000 }).toBe(true);
     if (!desktopPage) throw new Error('desktop_window_not_found');
     const page = desktopPage;
+    await page.setViewportSize({ width: 1280, height: 800 });
     const status = () => page.evaluate(() => window.forger.getCampaignMeasurementStatus());
-    await expect(page.getByText(/^(Optional measurement|Medición opcional)$/).first()).toBeVisible();
-    await expect(page.getByRole('button', { name: /^(Allow measurement|Permitir medición)$/ }).first()).toBeDisabled();
-    await expect(page.getByRole('button', { name: /^(No thanks|No, gracias)$/ }).first()).toBeEnabled();
+    const sharingChoice = page.getByRole('checkbox', { name: /Share usage data without private information|Compartir datos de uso sin información privada/ });
+    const more = page.getByRole('button', { name: /^(Learn more…|Ver más…)$/ });
+    const skip = page.getByRole('button', { name: /^(Skip tutorial|Omitir tutorial|Saltar tutorial)$/ });
+    await expect(sharingChoice).toBeVisible();
+    await expect(sharingChoice).toBeDisabled();
+    await expect(sharingChoice).not.toBeChecked();
+    await expect(more).toHaveAttribute('aria-expanded', 'false');
+    await expect(page.getByRole('textbox', { name: /Campaign code|Código de campaña/ })).toHaveCount(0);
+    await expect(page.getByText(/PostHog/)).not.toBeVisible();
+    await expect(skip).toBeEnabled();
+    await expect(skip).toBeInViewport();
+    await expect(page.getByRole('button', { name: /^(Start tour|Comenzar tour)$/ })).toBeEnabled();
+    await expect(page.getByRole('button', { name: /^(Start tour|Comenzar tour)$/ })).toBeInViewport();
     expect(await status()).toMatchObject({ available: false, consent: 'undecided', campaignCode: null });
+    await page.screenshot({ path: test.info().outputPath('welcome-sharing.png') });
+
+    await more.click();
+    await expect(page.getByText(/PostHog/)).toBeVisible();
+    await expect(page.getByText(/Sharing is unavailable in this version|Esta versión no permite compartir estos datos/)).toBeVisible();
+    await page.getByRole('button', { name: /^(Show less|Ver menos)$/ }).click();
+    await expect(more).toHaveAttribute('aria-expanded', 'false');
+    expect(await status()).toMatchObject({ consent: 'undecided', campaignCode: null });
 
     const sendLink = (url: string) => application!.evaluate(({ app }, value) => {
       app.emit('open-url', { preventDefault() {} }, value);
@@ -53,11 +72,12 @@ test('real Desktop keeps campaign permission optional and handles campaign links
     await expect(campaignDialog).not.toBeVisible();
 
     await sendLink('forger://campaign?code=ig_202609_paid_01&unexpected=value');
-    await expect(page.getByRole('textbox', { name: /Campaign code|Código de campaña/ }).first()).toHaveValue('');
+    await expect(page.getByRole('textbox', { name: /Campaign code|Código de campaña/ })).toHaveCount(0);
     expect(await status()).toMatchObject({ consent: 'undecided', campaignCode: null });
     await expect(campaignDialog).not.toBeVisible();
 
-    await page.getByRole('button', { name: /^(Skip tutorial|Omitir tutorial|Saltar tutorial)$/ }).click();
+    await skip.click();
+    expect(await status()).toMatchObject({ available: false, consent: 'undecided', campaignCode: null });
     await page.getByRole('button', { name: /^(Settings|Configuración)$/ }).click();
     await page.getByText(/^(Privacy and security|Privacidad y seguridad)$/).click();
     await expect(page.getByText(/^(Optional measurement|Medición opcional)$/)).toBeVisible();
